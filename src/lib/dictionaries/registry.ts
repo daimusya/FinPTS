@@ -38,6 +38,22 @@ async function departmentOptions(excludeId?: string): Promise<FieldOption[]> {
   return rows.map((r) => ({ value: r.id, label: r.name }));
 }
 
+export async function bankAccountOptions(): Promise<FieldOption[]> {
+  const rows = await prisma.bankAccount.findMany({
+    where: { isArchived: false },
+    orderBy: { bankName: "asc" },
+  });
+  return rows.map((r) => ({ value: r.id, label: `${r.bankName} · ${r.accountNumber}` }));
+}
+
+export async function cashAccountOptions(): Promise<FieldOption[]> {
+  const rows = await prisma.cashAccount.findMany({
+    where: { isArchived: false },
+    orderBy: { name: "asc" },
+  });
+  return rows.map((r) => ({ value: r.id, label: r.name }));
+}
+
 const ORGANIZATION_TYPE_OPTIONS: FieldOption[] = [
   { value: "LEGAL_ENTITY", label: "Юридическое лицо" },
   { value: "SOLE_PROPRIETOR", label: "ИП" },
@@ -96,6 +112,40 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "kpp", label: "КПП", type: "text" },
       { name: "ogrn", label: "ОГРН / ОГРНИП", type: "text" },
       { name: "legalAddress", label: "Юридический адрес", type: "text" },
+    ],
+  },
+  "bank-accounts": {
+    slug: "bank-accounts",
+    title: "Банковские счета",
+    singularTitle: "Банковский счёт",
+    entityAuditType: "bank_account",
+    delegate: delegate(prisma.bankAccount),
+    permissionView: PERMISSIONS.MASTERDATA_VIEW,
+    permissionManage: PERMISSIONS.MASTERDATA_MANAGE,
+    orderBy: { bankName: "asc" },
+    listColumns: ["bankName", "accountNumber", "currency"],
+    fields: [
+      { name: "organizationId", label: "Организация", type: "select", required: true, loadOptions: organizationOptions },
+      { name: "bankName", label: "Банк", type: "text", required: true },
+      { name: "accountNumber", label: "Номер счёта", type: "text", required: true },
+      { name: "bik", label: "БИК", type: "text" },
+      { name: "currency", label: "Валюта", type: "text", defaultValue: "RUB" },
+    ],
+  },
+  "cash-accounts": {
+    slug: "cash-accounts",
+    title: "Кассы",
+    singularTitle: "Касса",
+    entityAuditType: "cash_account",
+    delegate: delegate(prisma.cashAccount),
+    permissionView: PERMISSIONS.MASTERDATA_VIEW,
+    permissionManage: PERMISSIONS.MASTERDATA_MANAGE,
+    orderBy: { name: "asc" },
+    listColumns: ["name", "currency"],
+    fields: [
+      { name: "organizationId", label: "Организация", type: "select", required: true, loadOptions: organizationOptions },
+      { name: "name", label: "Название кассы", type: "text", required: true },
+      { name: "currency", label: "Валюта", type: "text", defaultValue: "RUB" },
     ],
   },
   departments: {

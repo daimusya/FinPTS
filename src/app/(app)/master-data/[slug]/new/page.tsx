@@ -33,7 +33,7 @@ export default async function NewDictionaryItemPage({
       type: field.type,
       required: field.required,
       options: field.options ?? (field.loadOptions ? await field.loadOptions() : undefined),
-      defaultValue: resolveFieldDefault(field.type, undefined),
+      defaultValue: resolveFieldDefault(field.type, field.defaultValue),
     })),
   );
 

@@ -139,6 +139,7 @@ model Organization {
   employees         Employee[]
   userAccess        UserOrganizationAccess[]
   payrollRuns       PayrollRun[]
+  paymentRequests   PaymentRequest[]
 
   @@map("organizations")
 }
@@ -265,6 +266,7 @@ model Counterparty {
   contracts        Contract[]
   accrualDocuments AccrualDocument[]
   bankTx           BankTransaction[]
+  paymentRequests  PaymentRequest[]
 
   @@map("counterparties")
 }
@@ -617,6 +619,8 @@ model PaymentRequest {
 
   createdBy       User                       @relation("PaymentRequestCreatedBy", fields: [createdById], references: [id])
   cashFlowArticle CashFlowArticle?           @relation(fields: [cashFlowArticleId], references: [id])
+  organization    Organization               @relation(fields: [organizationId], references: [id])
+  counterparty    Counterparty?              @relation(fields: [counterpartyId], references: [id])
   approvals       PaymentRequestApproval[]
 
   @@map("payment_requests")

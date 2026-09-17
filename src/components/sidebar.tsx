@@ -22,6 +22,8 @@ const NAV_GROUPS: NavGroup[] = [
     title: "Справочники",
     items: [
       { href: "/master-data/organizations", label: "Организации и ИП" },
+      { href: "/master-data/bank-accounts", label: "Банковские счета" },
+      { href: "/master-data/cash-accounts", label: "Кассы" },
       { href: "/master-data/departments", label: "Подразделения" },
       { href: "/master-data/cost-centers", label: "ЦФО" },
       { href: "/master-data/projects", label: "Проекты" },
@@ -33,6 +35,20 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/master-data/pnl-articles", label: "Статьи ОПиУ" },
       { href: "/master-data/balance-articles", label: "Статьи баланса" },
     ],
+  },
+  {
+    title: "Начисления и деньги",
+    items: [
+      { href: "/accruals", label: "Документы начисления" },
+      { href: "/cash/transactions", label: "Банк и касса" },
+      { href: "/cash/import", label: "Загрузка выписки" },
+      { href: "/payment-requests", label: "Заявки на оплату" },
+      { href: "/payment-calendar", label: "Платёжный календарь" },
+    ],
+  },
+  {
+    title: "Отчёты",
+    items: [{ href: "/reports/debts", label: "Дебиторка и кредиторка" }],
   },
   {
     title: "Администрирование",
@@ -75,7 +91,7 @@ export function Sidebar() {
           })}
         </div>
       ))}
-      <div className="sidebar-footer">Версия 0.1 · Этап 1: Фундамент</div>
+      <div className="sidebar-footer">Версия 0.2 · Этап 2: Начисления и деньги</div>
     </aside>
   );
 }

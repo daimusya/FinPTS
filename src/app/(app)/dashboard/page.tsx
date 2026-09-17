@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { PeriodStatus } from "@prisma/client";
+import { formatMoney, sumMoney } from "@/lib/money";
 
 export default async function DashboardPage() {
   const [
@@ -9,7 +11,10 @@ export default async function DashboardPage() {
     projects,
     employees,
     openPeriods,
-    accrualDocuments,
+    bankTransactions,
+    unpaidDocuments,
+    unmatchedTransactions,
+    upcomingRequests,
   ] = await Promise.all([
     prisma.organization.count({ where: { isArchived: false } }),
     prisma.department.count({ where: { isArchived: false } }),
@@ -17,47 +22,92 @@ export default async function DashboardPage() {
     prisma.project.count({ where: { isArchived: false } }),
     prisma.employee.count(),
     prisma.accountingPeriod.count({ where: { status: PeriodStatus.OPEN } }),
-    prisma.accrualDocument.count(),
+    prisma.bankTransaction.findMany({ select: { amount: true, direction: true } }),
+    prisma.accrualDocument.findMany({
+      where: { status: "POSTED", paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID"] } },
+      include: { lines: true, allocations: { where: { cancelledAt: null } } },
+    }),
+    prisma.bankTransaction.count({ where: { matchStatus: "UNMATCHED" } }),
+    prisma.paymentRequest.findMany({ where: { status: "APPROVED" }, include: { organization: true } }),
   ]);
+
+  const cashInflow = sumMoney(bankTransactions.filter((t) => t.direction === "INFLOW").map((t) => t.amount));
+  const cashOutflow = sumMoney(bankTransactions.filter((t) => t.direction === "OUTFLOW").map((t) => t.amount));
+  const cashBalance = cashInflow.minus(cashOutflow);
+
+  const now = new Date();
+  let receivable = sumMoney([]);
+  let payable = sumMoney([]);
+  let overdueTotal = sumMoney([]);
+  for (const doc of unpaidDocuments) {
+    const total = sumMoney(doc.lines.map((l) => l.amount));
+    const allocated = sumMoney(doc.allocations.map((a) => a.amount));
+    const remaining = total.minus(allocated);
+    if (remaining.lessThanOrEqualTo(0)) continue;
+    if (doc.direction === "INCOME") receivable = receivable.plus(remaining);
+    else payable = payable.plus(remaining);
+    if (doc.dueDate && doc.dueDate < now) overdueTotal = overdueTotal.plus(remaining);
+  }
+
+  const upcomingPaymentsTotal = sumMoney(upcomingRequests.map((r) => r.amount));
 
   return (
     <div className="page">
       <div className="page-header">
         <div>
           <h1>Дашборд</h1>
-          <p>Структурные показатели платформы на текущий момент. Данные читаются напрямую из базы.</p>
+          <p>Показатели читаются напрямую из базы данных.</p>
         </div>
       </div>
 
       <div className="stat-grid">
-        <StatCard label="Организации и ИП" value={organizations} />
-        <StatCard label="Подразделения" value={departments} />
-        <StatCard label="Контрагенты" value={counterparties} />
-        <StatCard label="Проекты" value={projects} />
-        <StatCard label="Сотрудники" value={employees} />
-        <StatCard label="Открытые периоды" value={openPeriods} />
+        <StatCard label="Остаток денег (все счета и кассы)" value={formatMoney(cashBalance)} />
+        <StatCard label="Дебиторская задолженность" value={formatMoney(receivable)} />
+        <StatCard label="Кредиторская задолженность" value={formatMoney(payable)} />
+        <StatCard label="Просроченная задолженность" value={formatMoney(overdueTotal)} danger={overdueTotal.greaterThan(0)} />
+        <StatCard label="Несопоставленные банковские операции" value={String(unmatchedTransactions)} danger={unmatchedTransactions > 0} />
+        <StatCard label="Согласованные заявки к оплате" value={formatMoney(upcomingPaymentsTotal)} />
+      </div>
+
+      <div className="stat-grid">
+        <StatCard label="Организации и ИП" value={String(organizations)} />
+        <StatCard label="Подразделения" value={String(departments)} />
+        <StatCard label="Контрагенты" value={String(counterparties)} />
+        <StatCard label="Проекты" value={String(projects)} />
+        <StatCard label="Сотрудники" value={String(employees)} />
+        <StatCard label="Открытые периоды" value={String(openPeriods)} />
       </div>
 
       <div className="card">
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
-          Управленческая отчётность (ДДС, ОПиУ, баланс, маржинальность)
+          ДДС, ОПиУ, управленческий баланс, маржинальность, точка безубыточности
         </h2>
         <p className="text-muted">
-          Расчётное ядро отчётности подключается на Этапе 3, после ввода первичных
-          документов начисления и банковских операций. Сейчас в системе {accrualDocuments}{" "}
-          документ(ов) начисления — отчёты появятся здесь, как только будут данные,
-          и будут вычисляться из сохранённых регистров, а не из статичных значений.
+          Полное расчётное ядро отчётности — Этап 3. Остаток денег и задолженность выше уже
+          считаются из реальных банковских операций и документов начисления; выручка/расходы
+          по методу начисления, валовая/операционная прибыль и управленческий баланс подключим
+          следующим этапом.
         </p>
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <Link href="/payment-calendar" className="btn btn-secondary btn-sm">
+            Платёжный календарь
+          </Link>
+          <Link href="/reports/debts" className="btn btn-secondary btn-sm">
+            Дебиторка и кредиторка
+          </Link>
+        </div>
       </div>
     </div>
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function StatCard({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
   return (
     <div className="stat-card">
       <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
+      <div className="stat-value" style={{ color: danger ? "var(--color-danger)" : undefined, fontSize: 20 }}>
+        {value}
+      </div>
     </div>
   );
 }

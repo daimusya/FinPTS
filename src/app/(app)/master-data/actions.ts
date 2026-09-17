@@ -17,7 +17,7 @@ function parseField(field: FieldConfig, formData: FormData): unknown {
     if (field.required) {
       throw new Error(`Поле «${field.label}» обязательно для заполнения`);
     }
-    return null;
+    return field.defaultValue ?? null;
   }
   if (field.type === "number") {
     const num = Number(value);

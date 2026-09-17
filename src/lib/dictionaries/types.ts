@@ -15,6 +15,8 @@ export interface FieldConfig {
   options?: FieldOption[];
   loadOptions?: (excludeId?: string) => Promise<FieldOption[]>;
   formatValue?: (value: unknown) => string;
+  /** Used to prefill new-record forms and as the stored value when the field is left empty (for columns with a non-null DB default). */
+  defaultValue?: string;
 }
 
 export interface DictionaryDelegate {

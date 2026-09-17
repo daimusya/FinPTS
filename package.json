@@ -1,6 +1,6 @@
 {
   "name": "promtehnosfera-platform",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -21,12 +21,12 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
     "decimal.js": "^10.6.0",
-    "exceljs": "^4.4.0",
     "jose": "^6.2.12",
     "next": "16.3.5",
     "prisma": "6.19.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "xlsx": "^0.18.5",
     "zod": "^4.6.5"
   },
   "devDependencies": {
