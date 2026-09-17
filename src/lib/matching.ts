@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { sumMoney, toDecimal } from "./money";
 import { PaymentStatus, BankTransactionMatchStatus } from "@prisma/client";
+import { enqueueOutboxEvent } from "./integrations/outbox";
 
 export function computePaymentStatus(total: number | string, allocated: number | string): PaymentStatus {
   const t = toDecimal(total);
@@ -38,6 +39,30 @@ export async function recomputeAccrualDocumentStatus(documentId: string) {
     where: { id: documentId },
     data: { paymentStatus },
   });
+
+  // Только подтверждённые финансовые события уходят в Битрикс24: смена
+  // статуса оплаты проведённого документа. idempotencyKey включает сумму
+  // сопоставления, поэтому повтор с тем же состоянием не создаёт дубль.
+  if (document.status === "POSTED") {
+    const isOverdue = Boolean(document.dueDate && document.dueDate < new Date() && paymentStatus !== "PAID");
+    await enqueueOutboxEvent({
+      eventType: "payment_status_changed",
+      targetSystem: "BITRIX24",
+      idempotencyKey: `payment_status:${documentId}:${paymentStatus}:${allocated.toFixed(2)}`,
+      payload: {
+        accrualDocumentId: documentId,
+        documentNumber: document.number,
+        counterpartyId: document.counterpartyId,
+        paymentStatus,
+        totalAmount: total.toFixed(2),
+        allocatedAmount: allocated.toFixed(2),
+        outstandingAmount: total.minus(allocated).toFixed(2),
+        dueDate: document.dueDate?.toISOString() ?? null,
+        isOverdue,
+        documentUrl: `/accruals/${documentId}`,
+      },
+    });
+  }
 
   return { total, allocated, paymentStatus };
 }

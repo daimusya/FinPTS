@@ -57,6 +57,13 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    title: "Интеграции",
+    items: [
+      { href: "/integrations/1c", label: "1С: файловый обмен" },
+      { href: "/integrations/bitrix24", label: "Битрикс24: очередь" },
+    ],
+  },
+  {
     title: "Администрирование",
     items: [
       { href: "/admin/users", label: "Пользователи" },
@@ -97,7 +104,7 @@ export function Sidebar() {
           })}
         </div>
       ))}
-      <div className="sidebar-footer">Версия 0.3 · Этап 3: Отчётность</div>
+      <div className="sidebar-footer">Версия 0.4 · Этап 4: Интеграции</div>
     </aside>
   );
 }
