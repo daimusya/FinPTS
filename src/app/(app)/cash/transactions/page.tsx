@@ -20,7 +20,13 @@ const MATCH_STATUS_BADGE: Record<string, string> = {
 export default async function CashTransactionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ matchStatus?: string; direction?: string }>;
+  searchParams: Promise<{
+    matchStatus?: string;
+    direction?: string;
+    cashFlowArticleId?: string;
+    from?: string;
+    to?: string;
+  }>;
 }) {
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.CASH_VIEW)) {
@@ -31,11 +37,18 @@ export default async function CashTransactionsPage({
     );
   }
   const canManage = hasPermission(session, PERMISSIONS.CASH_MANAGE);
-  const { matchStatus, direction } = await searchParams;
+  const { matchStatus, direction, cashFlowArticleId, from, to } = await searchParams;
 
   const where: Prisma.BankTransactionWhereInput = {};
   if (matchStatus) where.matchStatus = matchStatus as never;
   if (direction) where.direction = direction as never;
+  if (cashFlowArticleId) where.cashFlowArticleId = cashFlowArticleId;
+  if (from || to) {
+    where.operationDate = {
+      ...(from ? { gte: new Date(from) } : {}),
+      ...(to ? { lte: new Date(to) } : {}),
+    };
+  }
 
   const [transactions, unmatchedCount] = await Promise.all([
     prisma.bankTransaction.findMany({
@@ -56,6 +69,12 @@ export default async function CashTransactionsPage({
             Операции загружаются из выписок или вводятся вручную. Несопоставленных операций:{" "}
             <strong>{unmatchedCount}</strong>.
           </p>
+          {cashFlowArticleId || from || to ? (
+            <p className="text-muted">
+              Фильтр из отчёта применён.{" "}
+              <Link href="/cash/transactions">Сбросить</Link>
+            </p>
+          ) : null}
         </div>
         {canManage ? (
           <div style={{ display: "flex", gap: 8 }}>

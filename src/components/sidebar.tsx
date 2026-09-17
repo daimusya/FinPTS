@@ -48,7 +48,13 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     title: "Отчёты",
-    items: [{ href: "/reports/debts", label: "Дебиторка и кредиторка" }],
+    items: [
+      { href: "/reports/cash-flow", label: "ДДС" },
+      { href: "/reports/pnl", label: "ОПиУ" },
+      { href: "/reports/balance", label: "Управленческий баланс" },
+      { href: "/reports/margin", label: "Маржинальность и ТБУ" },
+      { href: "/reports/debts", label: "Дебиторка и кредиторка" },
+    ],
   },
   {
     title: "Администрирование",
@@ -91,7 +97,7 @@ export function Sidebar() {
           })}
         </div>
       ))}
-      <div className="sidebar-footer">Версия 0.2 · Этап 2: Начисления и деньги</div>
+      <div className="sidebar-footer">Версия 0.3 · Этап 3: Отчётность</div>
     </aside>
   );
 }

@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { PeriodStatus } from "@prisma/client";
-import { formatMoney, sumMoney } from "@/lib/money";
+import { formatMoney, formatNumber, sumMoney } from "@/lib/money";
+import { resolveReportPeriod } from "@/lib/reports/period";
+import { computePnlReport } from "@/lib/reports/pnl";
 
 export default async function DashboardPage() {
+  const currentPeriod = resolveReportPeriod({});
+
   const [
     organizations,
     departments,
@@ -15,6 +19,7 @@ export default async function DashboardPage() {
     unpaidDocuments,
     unmatchedTransactions,
     upcomingRequests,
+    pnl,
   ] = await Promise.all([
     prisma.organization.count({ where: { isArchived: false } }),
     prisma.department.count({ where: { isArchived: false } }),
@@ -29,6 +34,7 @@ export default async function DashboardPage() {
     }),
     prisma.bankTransaction.count({ where: { matchStatus: "UNMATCHED" } }),
     prisma.paymentRequest.findMany({ where: { status: "APPROVED" }, include: { organization: true } }),
+    computePnlReport(currentPeriod, {}),
   ]);
 
   const cashInflow = sumMoney(bankTransactions.filter((t) => t.direction === "INFLOW").map((t) => t.amount));
@@ -78,17 +84,35 @@ export default async function DashboardPage() {
         <StatCard label="Открытые периоды" value={String(openPeriods)} />
       </div>
 
+      <div className="stat-grid">
+        <StatCard label={`Выручка (${currentPeriod.label})`} value={formatMoney(pnl.revenue)} />
+        <StatCard label="Валовая прибыль" value={formatMoney(pnl.grossProfit)} />
+        <StatCard label="Операционная прибыль" value={formatMoney(pnl.operatingProfit)} />
+        <StatCard label="Чистая прибыль" value={formatMoney(pnl.netProfit)} danger={pnl.netProfit.isNegative()} />
+        <StatCard label="Валовая рентабельность" value={pnl.grossMarginPct ? `${formatNumber(pnl.grossMarginPct)}%` : "—"} />
+        <StatCard label="Чистая рентабельность" value={pnl.netMarginPct ? `${formatNumber(pnl.netMarginPct)}%` : "—"} />
+      </div>
+
       <div className="card">
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
-          ДДС, ОПиУ, управленческий баланс, маржинальность, точка безубыточности
-        </h2>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Управленческая отчётность</h2>
         <p className="text-muted">
-          Полное расчётное ядро отчётности — Этап 3. Остаток денег и задолженность выше уже
-          считаются из реальных банковских операций и документов начисления; выручка/расходы
-          по методу начисления, валовая/операционная прибыль и управленческий баланс подключим
-          следующим этапом.
+          ДДС, ОПиУ, управленческий баланс, маржинальность и точка безубыточности считаются из
+          проведённых документов начисления и банковских операций — расшифровка до документа
+          доступна в каждом отчёте.
         </p>
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <Link href="/reports/cash-flow" className="btn btn-secondary btn-sm">
+            ДДС
+          </Link>
+          <Link href="/reports/pnl" className="btn btn-secondary btn-sm">
+            ОПиУ
+          </Link>
+          <Link href="/reports/balance" className="btn btn-secondary btn-sm">
+            Управленческий баланс
+          </Link>
+          <Link href="/reports/margin" className="btn btn-secondary btn-sm">
+            Маржинальность и ТБУ
+          </Link>
           <Link href="/payment-calendar" className="btn btn-secondary btn-sm">
             Платёжный календарь
           </Link>

@@ -15,7 +15,14 @@ import type { Prisma } from "@prisma/client";
 export default async function AccrualsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ direction?: string; status?: string; paymentStatus?: string }>;
+  searchParams: Promise<{
+    direction?: string;
+    status?: string;
+    paymentStatus?: string;
+    pnlArticleId?: string;
+    from?: string;
+    to?: string;
+  }>;
 }) {
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.ACCRUALS_VIEW)) {
@@ -26,12 +33,19 @@ export default async function AccrualsPage({
     );
   }
   const canManage = hasPermission(session, PERMISSIONS.ACCRUALS_MANAGE);
-  const { direction, status, paymentStatus } = await searchParams;
+  const { direction, status, paymentStatus, pnlArticleId, from, to } = await searchParams;
 
   const where: Prisma.AccrualDocumentWhereInput = {};
   if (direction) where.direction = direction as never;
   if (status) where.status = status as never;
   if (paymentStatus) where.paymentStatus = paymentStatus as never;
+  if (pnlArticleId) where.lines = { some: { pnlArticleId } };
+  if (from || to) {
+    where.date = {
+      ...(from ? { gte: new Date(from) } : {}),
+      ...(to ? { lte: new Date(to) } : {}),
+    };
+  }
 
   const documents = await prisma.accrualDocument.findMany({
     where,
@@ -46,6 +60,11 @@ export default async function AccrualsPage({
         <div>
           <h1>Документы начисления</h1>
           <p>Начисление отражается в ОПиУ по дате документа, независимо от факта оплаты.</p>
+          {pnlArticleId || from || to ? (
+            <p className="text-muted">
+              Фильтр из отчёта применён. <Link href="/accruals">Сбросить</Link>
+            </p>
+          ) : null}
         </div>
         {canManage ? (
           <Link href="/accruals/new" className="btn btn-primary">

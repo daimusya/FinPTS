@@ -1,20 +1,17 @@
 import Link from "next/link";
-import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
-import { formatMoney, sumMoney } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { ACCRUAL_DOCUMENT_TYPE_LABELS } from "@/lib/accruals/labels";
-import Decimal from "decimal.js";
+import { extractFilters, type ReportSearchParams } from "@/lib/reports/filters";
+import { computeDebtsReport, type DebtRow } from "@/lib/reports/debts";
+import { prisma } from "@/lib/db";
 
-interface DebtRow {
-  counterpartyId: string;
-  counterpartyName: string;
-  total: Decimal;
-  overdue: Decimal;
-  documents: Array<{ id: string; number: string; documentType: string; dueDate: Date | null; remaining: Decimal; overdue: boolean }>;
-}
-
-export default async function DebtsReportPage() {
+export default async function DebtsReportPage({
+  searchParams,
+}: {
+  searchParams: Promise<ReportSearchParams>;
+}) {
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.REPORTS_VIEW)) {
     return (
@@ -24,54 +21,17 @@ export default async function DebtsReportPage() {
     );
   }
 
-  const documents = await prisma.accrualDocument.findMany({
-    where: { status: "POSTED", paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID"] } },
-    include: { counterparty: true, lines: true, allocations: { where: { cancelledAt: null } } },
-    orderBy: { dueDate: "asc" },
-  });
+  const sp = await searchParams;
+  const filters = extractFilters(sp);
+  const [report, organizations, counterparties] = await Promise.all([
+    computeDebtsReport(filters),
+    prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
+  ]);
 
-  const now = new Date();
-  const receivables = new Map<string, DebtRow>();
-  const payables = new Map<string, DebtRow>();
-
-  for (const doc of documents) {
-    const total = sumMoney(doc.lines.map((l) => l.amount));
-    const allocated = sumMoney(doc.allocations.map((a) => a.amount));
-    const remaining = total.minus(allocated);
-    if (remaining.lessThanOrEqualTo(0)) continue;
-
-    const isOverdue = Boolean(doc.dueDate && doc.dueDate < now);
-    const bucket = doc.direction === "INCOME" ? receivables : payables;
-    const key = doc.counterpartyId;
-    const row =
-      bucket.get(key) ??
-      ({
-        counterpartyId: key,
-        counterpartyName: doc.counterparty.shortName || doc.counterparty.fullName,
-        total: new Decimal(0),
-        overdue: new Decimal(0),
-        documents: [],
-      } as DebtRow);
-
-    row.total = row.total.plus(remaining);
-    if (isOverdue) row.overdue = row.overdue.plus(remaining);
-    row.documents.push({
-      id: doc.id,
-      number: doc.number,
-      documentType: doc.documentType,
-      dueDate: doc.dueDate,
-      remaining,
-      overdue: isOverdue,
-    });
-    bucket.set(key, row);
-  }
-
-  const receivableRows = Array.from(receivables.values()).sort((a, b) => b.total.comparedTo(a.total));
-  const payableRows = Array.from(payables.values()).sort((a, b) => b.total.comparedTo(a.total));
-  const totalReceivable = sumMoney(receivableRows.map((r) => r.total));
-  const totalPayable = sumMoney(payableRows.map((r) => r.total));
-  const overdueReceivable = sumMoney(receivableRows.map((r) => r.overdue));
-  const overduePayable = sumMoney(payableRows.map((r) => r.overdue));
+  const exportHref = `/api/reports/export?type=debts${
+    filters.organizationId ? `&organizationId=${filters.organizationId}` : ""
+  }${filters.counterpartyId ? `&counterpartyId=${filters.counterpartyId}` : ""}`;
 
   return (
     <div className="page">
@@ -80,33 +40,64 @@ export default async function DebtsReportPage() {
           <h1>Дебиторская и кредиторская задолженность</h1>
           <p>Считается из проведённых непогашенных документов начисления: сумма минус сопоставленные оплаты.</p>
         </div>
+        <a href={exportHref} className="btn btn-secondary">
+          Экспорт в Excel
+        </a>
       </div>
+
+      <form className="filter-bar">
+        <label className="field">
+          <span>Организация</span>
+          <select name="organizationId" defaultValue={filters.organizationId ?? ""}>
+            <option value="">Все</option>
+            {organizations.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.shortName || o.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Контрагент</span>
+          <select name="counterpartyId" defaultValue={filters.counterpartyId ?? ""}>
+            <option value="">Все</option>
+            {counterparties.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.shortName || c.fullName}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="submit" className="btn btn-secondary">
+          Применить
+        </button>
+      </form>
 
       <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label">Дебиторская задолженность</div>
-          <div className="stat-value">{formatMoney(totalReceivable)}</div>
+          <div className="stat-value">{formatMoney(report.totalReceivable)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">в т.ч. просрочено</div>
           <div className="stat-value" style={{ color: "var(--color-danger)" }}>
-            {formatMoney(overdueReceivable)}
+            {formatMoney(report.overdueReceivable)}
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Кредиторская задолженность</div>
-          <div className="stat-value">{formatMoney(totalPayable)}</div>
+          <div className="stat-value">{formatMoney(report.totalPayable)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">в т.ч. просрочено</div>
           <div className="stat-value" style={{ color: "var(--color-danger)" }}>
-            {formatMoney(overduePayable)}
+            {formatMoney(report.overduePayable)}
           </div>
         </div>
       </div>
 
-      <DebtTable title="Дебиторская задолженность (нам должны)" rows={receivableRows} />
-      <DebtTable title="Кредиторская задолженность (мы должны)" rows={payableRows} />
+      <DebtTable title="Дебиторская задолженность (нам должны)" rows={report.receivableRows} />
+      <DebtTable title="Кредиторская задолженность (мы должны)" rows={report.payableRows} />
     </div>
   );
 }
