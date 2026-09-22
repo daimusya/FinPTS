@@ -30,6 +30,14 @@ async function counterpartyOptions(): Promise<FieldOption[]> {
   return rows.map((r) => ({ value: r.id, label: r.fullName }));
 }
 
+async function pnlArticleOptions(): Promise<FieldOption[]> {
+  const rows = await prisma.pnlArticle.findMany({
+    where: { isArchived: false },
+    orderBy: { name: "asc" },
+  });
+  return rows.map((r) => ({ value: r.id, label: r.name }));
+}
+
 async function departmentOptions(excludeId?: string): Promise<FieldOption[]> {
   const rows = await prisma.department.findMany({
     where: { isArchived: false, NOT: excludeId ? { id: excludeId } : undefined },
@@ -85,6 +93,20 @@ const PNL_ARTICLE_TYPE_OPTIONS: FieldOption[] = [
   { value: "OTHER_INCOME", label: "Прочие доходы" },
   { value: "OTHER_EXPENSE", label: "Прочие расходы" },
   { value: "TAX", label: "Налоги" },
+];
+
+const PAYMENT_METHOD_OPTIONS: FieldOption[] = [
+  { value: "CASH", label: "Наличный" },
+  { value: "BANK", label: "Безналичный" },
+  { value: "MIXED", label: "Смешанный" },
+];
+
+const TAX_BASE_OPTIONS: FieldOption[] = [
+  { value: "ndfl", label: "НДФЛ" },
+  { value: "pension", label: "Пенсионное страхование" },
+  { value: "medical", label: "Медицинское страхование" },
+  { value: "social", label: "Социальное страхование" },
+  { value: "injury", label: "Травматизм" },
 ];
 
 const BALANCE_ARTICLE_CATEGORY_OPTIONS: FieldOption[] = [
@@ -316,6 +338,67 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "name", label: "Название", type: "text", required: true },
       { name: "code", label: "Код", type: "text" },
       { name: "category", label: "Категория", type: "select", required: true, options: BALANCE_ARTICLE_CATEGORY_OPTIONS },
+    ],
+  },
+  positions: {
+    slug: "positions",
+    title: "Должности",
+    singularTitle: "Должность",
+    entityAuditType: "position",
+    delegate: delegate(prisma.position),
+    permissionView: PERMISSIONS.MASTERDATA_VIEW,
+    permissionManage: PERMISSIONS.MASTERDATA_MANAGE,
+    orderBy: { name: "asc" },
+    listColumns: ["name"],
+    fields: [{ name: "name", label: "Название", type: "text", required: true }],
+  },
+  "work-schedules": {
+    slug: "work-schedules",
+    title: "Графики работы",
+    singularTitle: "График работы",
+    entityAuditType: "work_schedule",
+    delegate: delegate(prisma.workSchedule),
+    permissionView: PERMISSIONS.MASTERDATA_VIEW,
+    permissionManage: PERMISSIONS.MASTERDATA_MANAGE,
+    orderBy: { name: "asc" },
+    listColumns: ["name"],
+    fields: [{ name: "name", label: "Название", type: "text", required: true }],
+  },
+  "payroll-accrual-types": {
+    slug: "payroll-accrual-types",
+    title: "Виды начислений зарплаты",
+    singularTitle: "Вид начисления",
+    entityAuditType: "payroll_accrual_type",
+    delegate: delegate(prisma.payrollAccrualType),
+    permissionView: PERMISSIONS.PAYROLL_VIEW,
+    permissionManage: PERMISSIONS.PAYROLL_MANAGE,
+    orderBy: { name: "asc" },
+    listColumns: ["name", "code", "paymentMethod"],
+    fields: [
+      { name: "name", label: "Название", type: "text", required: true },
+      { name: "code", label: "Код", type: "text", required: true },
+      { name: "subjectToNdfl", label: "Облагается НДФЛ", type: "checkbox" },
+      { name: "subjectToInsurance", label: "Облагается страховыми взносами", type: "checkbox" },
+      { name: "affectsAvgEarnings", label: "Влияет на средний заработок", type: "checkbox" },
+      { name: "paymentMethod", label: "Способ выплаты", type: "select", required: true, options: PAYMENT_METHOD_OPTIONS },
+      { name: "pnlArticleId", label: "Статья расходов (ОПиУ)", type: "select", loadOptions: pnlArticleOptions },
+    ],
+  },
+  "tax-rules": {
+    slug: "tax-rules",
+    title: "Налоговые и страховые правила",
+    singularTitle: "Правило",
+    entityAuditType: "tax_rule",
+    delegate: delegate(prisma.taxRule),
+    permissionView: PERMISSIONS.PAYROLL_VIEW,
+    permissionManage: PERMISSIONS.PAYROLL_MANAGE,
+    orderBy: { name: "asc" },
+    listColumns: ["name", "base", "ratePct"],
+    fields: [
+      { name: "name", label: "Название", type: "text", required: true },
+      { name: "code", label: "Код", type: "text", required: true },
+      { name: "base", label: "Вид", type: "select", required: true, options: TAX_BASE_OPTIONS },
+      { name: "ratePct", label: "Ставка, %", type: "number", required: true },
     ],
   },
 };

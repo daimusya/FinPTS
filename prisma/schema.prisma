@@ -31,6 +31,7 @@ model User {
   closedPeriods      AccountingPeriod[]       @relation("PeriodClosedBy")
   reopenedPeriods    AccountingPeriod[]       @relation("PeriodReopenedBy")
   employee           Employee?
+  importBatches      BankImportBatch[]
 
   @@map("users")
 }
@@ -163,6 +164,8 @@ model Department {
   bankTx          BankTransaction[]
   payrollLines    PayrollLine[]
   payrollAlloc    PayrollAllocation[]
+  historyFrom     EmploymentHistory[] @relation("EmploymentHistoryFromDepartment")
+  historyTo       EmploymentHistory[] @relation("EmploymentHistoryToDepartment")
 
   @@map("departments")
 }
@@ -212,6 +215,7 @@ model Project {
   payrollLines  PayrollLine[]
   payrollAlloc  PayrollAllocation[]
   employeeProj  EmployeeProjectAllocation[]
+  timeSheets    TimeSheet[]
 
   @@map("projects")
 }
@@ -525,6 +529,7 @@ model BankImportBatch {
   createdAt     DateTime @default(now())
 
   bankAccount  BankAccount       @relation(fields: [bankAccountId], references: [id])
+  importedBy   User?             @relation(fields: [importedById], references: [id])
   transactions BankTransaction[]
 
   @@map("bank_import_batches")
@@ -649,7 +654,9 @@ model Position {
   name       String
   isArchived Boolean @default(false)
 
-  employees Employee[]
+  employees   Employee[]
+  historyFrom EmploymentHistory[] @relation("EmploymentHistoryFromPosition")
+  historyTo   EmploymentHistory[] @relation("EmploymentHistoryToPosition")
 
   @@map("positions")
 }
@@ -719,7 +726,11 @@ model EmploymentHistory {
   comment    String?
   createdAt  DateTime @default(now())
 
-  employee Employee @relation(fields: [employeeId], references: [id])
+  employee      Employee    @relation(fields: [employeeId], references: [id])
+  fromDepartment Department? @relation("EmploymentHistoryFromDepartment", fields: [fromDepartmentId], references: [id])
+  toDepartment   Department? @relation("EmploymentHistoryToDepartment", fields: [toDepartmentId], references: [id])
+  fromPosition   Position?   @relation("EmploymentHistoryFromPosition", fields: [fromPositionId], references: [id])
+  toPosition     Position?   @relation("EmploymentHistoryToPosition", fields: [toPositionId], references: [id])
 
   @@map("employment_history")
 }
@@ -749,6 +760,7 @@ model TimeSheet {
   createdAt  DateTime @default(now())
 
   employee Employee @relation(fields: [employeeId], references: [id])
+  project  Project? @relation(fields: [projectId], references: [id])
 
   @@unique([employeeId, date, dayType, projectId])
   @@map("time_sheets")

@@ -34,6 +34,19 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/master-data/cash-flow-articles", label: "Статьи ДДС" },
       { href: "/master-data/pnl-articles", label: "Статьи ОПиУ" },
       { href: "/master-data/balance-articles", label: "Статьи баланса" },
+      { href: "/master-data/positions", label: "Должности" },
+      { href: "/master-data/work-schedules", label: "Графики работы" },
+      { href: "/master-data/payroll-accrual-types", label: "Виды начислений зарплаты" },
+      { href: "/master-data/tax-rules", label: "Налоговые и страховые правила" },
+    ],
+  },
+  {
+    title: "Сотрудники и зарплата",
+    items: [
+      { href: "/employees", label: "Сотрудники" },
+      { href: "/timesheet", label: "Табель" },
+      { href: "/payroll", label: "Расчёты зарплаты" },
+      { href: "/payroll/summary", label: "Сводная ведомость" },
     ],
   },
   {
@@ -104,7 +117,7 @@ export function Sidebar() {
           })}
         </div>
       ))}
-      <div className="sidebar-footer">Версия 0.4 · Этап 4: Интеграции</div>
+      <div className="sidebar-footer">Версия 0.5 · Этап 5: Кадры и зарплата</div>
     </aside>
   );
 }

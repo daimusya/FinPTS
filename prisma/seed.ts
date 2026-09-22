@@ -41,9 +41,38 @@ const INITIAL_PNL_ARTICLES: Array<{ name: string; type: "REVENUE" | "DIRECT_VARI
   { name: "Прямые переменные расходы", type: "DIRECT_VARIABLE" },
   { name: "Прямые постоянные расходы", type: "DIRECT_FIXED" },
   { name: "Косвенные расходы", type: "INDIRECT" },
+  { name: "Расходы на оплату труда", type: "DIRECT_FIXED" },
   { name: "Прочие доходы", type: "OTHER_INCOME" },
   { name: "Прочие расходы", type: "OTHER_EXPENSE" },
   { name: "Налог на прибыль / УСН", type: "TAX" },
+];
+
+const INITIAL_TAX_RULES: Array<{ name: string; code: string; base: string; ratePct: number }> = [
+  { name: "НДФЛ", code: "ndfl_13", base: "ndfl", ratePct: 13 },
+  { name: "Пенсионное страхование", code: "pension_22", base: "pension", ratePct: 22 },
+  { name: "Медицинское страхование", code: "medical_5_1", base: "medical", ratePct: 5.1 },
+  { name: "Социальное страхование", code: "social_2_9", base: "social", ratePct: 2.9 },
+  { name: "Травматизм", code: "injury_0_2", base: "injury", ratePct: 0.2 },
+];
+
+const INITIAL_PAYROLL_ACCRUAL_TYPES: Array<{
+  name: string;
+  code: string;
+  subjectToNdfl: boolean;
+  subjectToInsurance: boolean;
+  affectsAvgEarnings: boolean;
+  paymentMethod: "CASH" | "BANK" | "MIXED";
+}> = [
+  { name: "Оклад", code: "salary", subjectToNdfl: true, subjectToInsurance: true, affectsAvgEarnings: true, paymentMethod: "BANK" },
+  { name: "Аванс", code: "advance", subjectToNdfl: true, subjectToInsurance: true, affectsAvgEarnings: true, paymentMethod: "BANK" },
+  { name: "Премия", code: "bonus", subjectToNdfl: true, subjectToInsurance: true, affectsAvgEarnings: true, paymentMethod: "BANK" },
+  { name: "Проектная доплата", code: "project_bonus", subjectToNdfl: true, subjectToInsurance: true, affectsAvgEarnings: true, paymentMethod: "BANK" },
+  { name: "Отпускные", code: "vacation_pay", subjectToNdfl: true, subjectToInsurance: true, affectsAvgEarnings: false, paymentMethod: "BANK" },
+  { name: "Больничные", code: "sick_leave_pay", subjectToNdfl: true, subjectToInsurance: false, affectsAvgEarnings: false, paymentMethod: "BANK" },
+  { name: "Компенсация", code: "compensation", subjectToNdfl: false, subjectToInsurance: false, affectsAvgEarnings: false, paymentMethod: "BANK" },
+  { name: "Материальная помощь", code: "financial_aid", subjectToNdfl: false, subjectToInsurance: false, affectsAvgEarnings: false, paymentMethod: "BANK" },
+  { name: "Разовая выплата", code: "one_off_payment", subjectToNdfl: true, subjectToInsurance: true, affectsAvgEarnings: false, paymentMethod: "BANK" },
+  { name: "Удержание", code: "deduction", subjectToNdfl: false, subjectToInsurance: false, affectsAvgEarnings: false, paymentMethod: "BANK" },
 ];
 
 const INITIAL_BALANCE_ARTICLES: Array<{ name: string; category: "ASSET" | "LIABILITY" | "EQUITY" }> = [
@@ -124,6 +153,31 @@ async function main() {
     if (!existing) {
       await prisma.balanceArticle.create({ data: article });
     }
+  }
+
+  console.log("Сидирование налоговых и страховых правил...");
+  for (const rule of INITIAL_TAX_RULES) {
+    await prisma.taxRule.upsert({
+      where: { code: rule.code },
+      update: {},
+      create: rule,
+    });
+  }
+
+  console.log("Сидирование видов начислений зарплаты...");
+  const payrollArticle = await prisma.pnlArticle.findFirst({ where: { name: "Расходы на оплату труда" } });
+  for (const type of INITIAL_PAYROLL_ACCRUAL_TYPES) {
+    await prisma.payrollAccrualType.upsert({
+      where: { code: type.code },
+      update: {},
+      create: { ...type, pnlArticleId: payrollArticle?.id },
+    });
+  }
+
+  console.log("Сидирование графика работы по умолчанию...");
+  const defaultSchedule = await prisma.workSchedule.findFirst({ where: { name: "Полная занятость 5/2" } });
+  if (!defaultSchedule) {
+    await prisma.workSchedule.create({ data: { name: "Полная занятость 5/2" } });
   }
 
   console.log("Сидирование администратора...");

@@ -35,6 +35,14 @@ const LABELS: Record<string, string> = {
   ASSET: "Актив",
   LIABILITY: "Обязательство",
   EQUITY: "Капитал",
+  CASH: "Наличный",
+  BANK: "Безналичный",
+  MIXED: "Смешанный",
+  ndfl: "НДФЛ",
+  pension: "Пенсионное страхование",
+  medical: "Медицинское страхование",
+  social: "Социальное страхование",
+  injury: "Травматизм",
 };
 
 export default async function DictionaryListPage({
