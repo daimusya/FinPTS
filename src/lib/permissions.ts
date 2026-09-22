@@ -17,6 +17,8 @@ export const PERMISSIONS = {
   USERS_MANAGE: "users.manage",
   PAYMENT_REQUEST_CREATE: "payment_requests.create",
   PAYMENT_REQUEST_APPROVE: "payment_requests.approve",
+  FINANCIAL_MODEL_VIEW: "financial_model.view",
+  FINANCIAL_MODEL_MANAGE: "financial_model.manage",
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -40,6 +42,8 @@ export const PERMISSION_LABELS: Record<PermissionCode, string> = {
   [PERMISSIONS.USERS_MANAGE]: "Управление пользователями и ролями",
   [PERMISSIONS.PAYMENT_REQUEST_CREATE]: "Создание заявок на оплату",
   [PERMISSIONS.PAYMENT_REQUEST_APPROVE]: "Согласование заявок на оплату",
+  [PERMISSIONS.FINANCIAL_MODEL_VIEW]: "Просмотр финансовых сценариев",
+  [PERMISSIONS.FINANCIAL_MODEL_MANAGE]: "Управление финансовыми сценариями",
 };
 
 export const ROLE_DEFINITIONS: Array<{
@@ -69,6 +73,8 @@ export const ROLE_DEFINITIONS: Array<{
       PERMISSIONS.PERIODS_MANAGE,
       PERMISSIONS.AUDIT_VIEW,
       PERMISSIONS.PAYMENT_REQUEST_APPROVE,
+      PERMISSIONS.FINANCIAL_MODEL_VIEW,
+      PERMISSIONS.FINANCIAL_MODEL_MANAGE,
     ],
   },
   {
@@ -85,6 +91,8 @@ export const ROLE_DEFINITIONS: Array<{
       PERMISSIONS.REPORTS_EXPORT,
       PERMISSIONS.PERIODS_MANAGE,
       PERMISSIONS.PAYMENT_REQUEST_APPROVE,
+      PERMISSIONS.FINANCIAL_MODEL_VIEW,
+      PERMISSIONS.FINANCIAL_MODEL_MANAGE,
     ],
   },
   {

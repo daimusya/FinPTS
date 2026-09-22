@@ -60,6 +60,10 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    title: "Моделирование",
+    items: [{ href: "/financial-model", label: "Финансовые сценарии" }],
+  },
+  {
     title: "Отчёты",
     items: [
       { href: "/reports/cash-flow", label: "ДДС" },
@@ -117,7 +121,7 @@ export function Sidebar() {
           })}
         </div>
       ))}
-      <div className="sidebar-footer">Версия 0.5 · Этап 5: Кадры и зарплата</div>
+      <div className="sidebar-footer">Версия 0.6 · Этап 6: Моделирование</div>
     </aside>
   );
 }

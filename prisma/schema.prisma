@@ -997,7 +997,7 @@ model FinancialScenarioValue {
   year       Int
   month      Int
   driver     String
-  dimension  String?
+  dimension  String   @default("")
   value      Decimal  @db.Decimal(18, 4)
 
   scenario FinancialScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
