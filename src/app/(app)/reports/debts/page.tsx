@@ -6,6 +6,7 @@ import { ACCRUAL_DOCUMENT_TYPE_LABELS } from "@/lib/accruals/labels";
 import { extractFilters, type ReportSearchParams } from "@/lib/reports/filters";
 import { computeDebtsReport, type DebtRow } from "@/lib/reports/debts";
 import { prisma } from "@/lib/db";
+import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 
 export default async function DebtsReportPage({
   searchParams,
@@ -23,9 +24,10 @@ export default async function DebtsReportPage({
 
   const sp = await searchParams;
   const filters = extractFilters(sp);
+  const scope = await getAccessScope(session);
   const [report, organizations, counterparties] = await Promise.all([
-    computeDebtsReport(filters),
-    prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    computeDebtsReport(filters, scope),
+    prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(scope) }, orderBy: { name: "asc" } }),
     prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
   ]);
 

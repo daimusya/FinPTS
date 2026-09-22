@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { sumMoney } from "@/lib/money";
 import Decimal from "decimal.js";
 import type { ReportFilters } from "./filters";
+import { accrualScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
 
 export interface DebtDocument {
   id: string;
@@ -29,13 +30,18 @@ export interface DebtsReport {
   overduePayable: Decimal;
 }
 
-export async function computeDebtsReport(filters: ReportFilters): Promise<DebtsReport> {
+export async function computeDebtsReport(
+  filters: ReportFilters,
+  scope: AccessScope = UNRESTRICTED_SCOPE,
+): Promise<DebtsReport> {
   const documents = await prisma.accrualDocument.findMany({
     where: {
-      status: "POSTED",
-      paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID"] },
-      ...(filters.organizationId ? { organizationId: filters.organizationId } : {}),
-      ...(filters.counterpartyId ? { counterpartyId: filters.counterpartyId } : {}),
+      AND: [
+        { status: "POSTED", paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID"] } },
+        ...(filters.organizationId ? [{ organizationId: filters.organizationId }] : []),
+        ...(filters.counterpartyId ? [{ counterpartyId: filters.counterpartyId }] : []),
+        accrualScopeWhere(scope),
+      ],
     },
     include: { counterparty: true, lines: true, allocations: { where: { cancelledAt: null } } },
     orderBy: { dueDate: "asc" },

@@ -5,6 +5,7 @@ import { resolveReportPeriod } from "@/lib/reports/period";
 import { extractFilters, type ReportSearchParams } from "@/lib/reports/filters";
 import { computeMarginReport, type DimensionMarginRow } from "@/lib/reports/margin";
 import { ReportFilterBar } from "@/components/report-filter-bar";
+import { getAccessScope } from "@/lib/access-scope";
 
 export default async function MarginReportPage({
   searchParams,
@@ -23,7 +24,8 @@ export default async function MarginReportPage({
   const sp = await searchParams;
   const period = resolveReportPeriod(sp);
   const filters = extractFilters(sp);
-  const report = await computeMarginReport(period, filters);
+  const scope = await getAccessScope(session);
+  const report = await computeMarginReport(period, filters, scope);
 
   return (
     <div className="page">

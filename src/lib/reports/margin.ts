@@ -4,6 +4,7 @@ import Decimal from "decimal.js";
 import type { ReportFilters } from "./filters";
 import type { ReportPeriod } from "./period";
 import { derivePnlTotals, type PnlType } from "./pnl";
+import { accrualScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
 
 /**
  * Точка безубыточности: выручка, при которой операционная прибыль равна нулю.
@@ -37,13 +38,20 @@ export interface DimensionMarginRow {
 
 type Dimension = "project" | "productService" | "counterparty";
 
-async function aggregateByDimension(period: ReportPeriod, filters: ReportFilters, dimension: Dimension): Promise<DimensionMarginRow[]> {
+async function aggregateByDimension(
+  period: ReportPeriod,
+  filters: ReportFilters,
+  dimension: Dimension,
+  scope: AccessScope,
+): Promise<DimensionMarginRow[]> {
   const documents = await prisma.accrualDocument.findMany({
     where: {
-      status: "POSTED",
-      date: { gte: period.from, lte: period.to },
-      ...(filters.organizationId ? { organizationId: filters.organizationId } : {}),
-      ...(filters.counterpartyId ? { counterpartyId: filters.counterpartyId } : {}),
+      AND: [
+        { status: "POSTED", date: { gte: period.from, lte: period.to } },
+        ...(filters.organizationId ? [{ organizationId: filters.organizationId }] : []),
+        ...(filters.counterpartyId ? [{ counterpartyId: filters.counterpartyId }] : []),
+        accrualScopeWhere(scope),
+      ],
     },
     include: {
       counterparty: true,
@@ -106,13 +114,19 @@ export interface MarginReport {
   byCounterparty: DimensionMarginRow[];
 }
 
-export async function computeMarginReport(period: ReportPeriod, filters: ReportFilters): Promise<MarginReport> {
+export async function computeMarginReport(
+  period: ReportPeriod,
+  filters: ReportFilters,
+  scope: AccessScope = UNRESTRICTED_SCOPE,
+): Promise<MarginReport> {
   const documents = await prisma.accrualDocument.findMany({
     where: {
-      status: "POSTED",
-      date: { gte: period.from, lte: period.to },
-      ...(filters.organizationId ? { organizationId: filters.organizationId } : {}),
-      ...(filters.counterpartyId ? { counterpartyId: filters.counterpartyId } : {}),
+      AND: [
+        { status: "POSTED", date: { gte: period.from, lte: period.to } },
+        ...(filters.organizationId ? [{ organizationId: filters.organizationId }] : []),
+        ...(filters.counterpartyId ? [{ counterpartyId: filters.counterpartyId }] : []),
+        accrualScopeWhere(scope),
+      ],
     },
     include: {
       lines: {
@@ -159,9 +173,9 @@ export async function computeMarginReport(period: ReportPeriod, filters: ReportF
   const marginOfSafetyPct = computeMarginOfSafety(totals.revenue, breakEvenRevenue);
 
   const [byProject, byProductService, byCounterparty] = await Promise.all([
-    aggregateByDimension(period, filters, "project"),
-    aggregateByDimension(period, filters, "productService"),
-    aggregateByDimension(period, filters, "counterparty"),
+    aggregateByDimension(period, filters, "project", scope),
+    aggregateByDimension(period, filters, "productService", scope),
+    aggregateByDimension(period, filters, "counterparty", scope),
   ]);
 
   return {

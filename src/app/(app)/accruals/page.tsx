@@ -11,6 +11,7 @@ import {
   PAYMENT_STATUS_LABELS,
 } from "@/lib/accruals/labels";
 import type { Prisma } from "@prisma/client";
+import { accrualScopeWhere, getAccessScope } from "@/lib/access-scope";
 
 export default async function AccrualsPage({
   searchParams,
@@ -35,7 +36,9 @@ export default async function AccrualsPage({
   const canManage = hasPermission(session, PERMISSIONS.ACCRUALS_MANAGE);
   const { direction, status, paymentStatus, pnlArticleId, from, to } = await searchParams;
 
-  const where: Prisma.AccrualDocumentWhereInput = {};
+  const scope = await getAccessScope(session);
+
+  const where: Prisma.AccrualDocumentWhereInput = { ...accrualScopeWhere(scope) };
   if (direction) where.direction = direction as never;
   if (status) where.status = status as never;
   if (paymentStatus) where.paymentStatus = paymentStatus as never;

@@ -4,6 +4,7 @@ import { formatMoney } from "@/lib/money";
 import { extractFilters, type ReportSearchParams } from "@/lib/reports/filters";
 import { computeManagementBalance } from "@/lib/reports/balance";
 import { prisma } from "@/lib/db";
+import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 
 export default async function BalanceReportPage({
   searchParams,
@@ -22,9 +23,10 @@ export default async function BalanceReportPage({
   const sp = await searchParams;
   const filters = extractFilters(sp);
   const asOfDate = sp.asOf ? new Date(sp.asOf) : new Date();
+  const scope = await getAccessScope(session);
   const [balance, organizations] = await Promise.all([
-    computeManagementBalance(asOfDate, filters),
-    prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    computeManagementBalance(asOfDate, filters, scope),
+    prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(scope) }, orderBy: { name: "asc" } }),
   ]);
 
   return (

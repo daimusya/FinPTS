@@ -3,6 +3,7 @@ import { sumMoney, toDecimal } from "@/lib/money";
 import Decimal from "decimal.js";
 import type { ReportFilters } from "./filters";
 import { derivePnlTotals, type PnlType } from "./pnl";
+import { accrualScopeWhere, bankTransactionScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
 
 export interface ManagementBalance {
   asOfDate: Date;
@@ -41,34 +42,36 @@ export interface ManagementBalance {
  * скрываемая ошибка: оно означает движения денег/задолженности, которые
  * не прошли через документы начисления (или наоборот).
  */
-export async function computeManagementBalance(asOfDate: Date, filters: ReportFilters): Promise<ManagementBalance> {
-  const bankWhere = filters.organizationId
-    ? {
-        operationDate: { lte: asOfDate },
-        OR: [
-          { bankAccount: { organizationId: filters.organizationId } },
-          { cashAccount: { organizationId: filters.organizationId } },
-        ],
-      }
-    : { operationDate: { lte: asOfDate } };
+export async function computeManagementBalance(
+  asOfDate: Date,
+  filters: ReportFilters,
+  scope: AccessScope = UNRESTRICTED_SCOPE,
+): Promise<ManagementBalance> {
+  const bankAnd: Array<Record<string, unknown>> = [{ operationDate: { lte: asOfDate } }];
+  if (filters.organizationId) {
+    bankAnd.push({
+      OR: [
+        { bankAccount: { organizationId: filters.organizationId } },
+        { cashAccount: { organizationId: filters.organizationId } },
+      ],
+    });
+  }
+  const bankScopeWhere = bankTransactionScopeWhere(scope);
+  if (Object.keys(bankScopeWhere).length > 0) bankAnd.push(bankScopeWhere);
+
+  const accrualScope = accrualScopeWhere(scope);
+  const accrualAndBase: Array<Record<string, unknown>> = [{ status: "POSTED", date: { lte: asOfDate } }];
+  if (filters.organizationId) accrualAndBase.push({ organizationId: filters.organizationId });
+  if (Object.keys(accrualScope).length > 0) accrualAndBase.push(accrualScope);
 
   const [transactions, unpaidDocuments, allDocuments] = await Promise.all([
-    prisma.bankTransaction.findMany({ where: bankWhere, select: { amount: true, direction: true } }),
+    prisma.bankTransaction.findMany({ where: { AND: bankAnd }, select: { amount: true, direction: true } }),
     prisma.accrualDocument.findMany({
-      where: {
-        status: "POSTED",
-        date: { lte: asOfDate },
-        paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID", "OVERPAID"] },
-        ...(filters.organizationId ? { organizationId: filters.organizationId } : {}),
-      },
+      where: { AND: [...accrualAndBase, { paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID", "OVERPAID"] } }] },
       include: { lines: true, allocations: { where: { cancelledAt: null } } },
     }),
     prisma.accrualDocument.findMany({
-      where: {
-        status: "POSTED",
-        date: { lte: asOfDate },
-        ...(filters.organizationId ? { organizationId: filters.organizationId } : {}),
-      },
+      where: { AND: accrualAndBase },
       include: { lines: { include: { pnlArticle: true } } },
     }),
   ]);

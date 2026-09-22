@@ -4,6 +4,7 @@ import type Decimal from "decimal.js";
 import type { Prisma } from "@prisma/client";
 import type { ReportFilters } from "./filters";
 import type { ReportPeriod } from "./period";
+import { accrualScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
 
 export const PNL_TYPE_ORDER = [
   "REVENUE",
@@ -40,13 +41,14 @@ export interface PnlReport {
   netMarginPct: Decimal | null;
 }
 
-function buildWhere(period: ReportPeriod, filters: ReportFilters): Prisma.AccrualDocumentWhereInput {
-  const where: Prisma.AccrualDocumentWhereInput = {
-    status: "POSTED",
-    date: { gte: period.from, lte: period.to },
-  };
-  if (filters.organizationId) where.organizationId = filters.organizationId;
-  if (filters.counterpartyId) where.counterpartyId = filters.counterpartyId;
+function buildWhere(period: ReportPeriod, filters: ReportFilters, scope: AccessScope): Prisma.AccrualDocumentWhereInput {
+  const and: Prisma.AccrualDocumentWhereInput[] = [
+    { status: "POSTED", date: { gte: period.from, lte: period.to } },
+  ];
+  if (filters.organizationId) and.push({ organizationId: filters.organizationId });
+  if (filters.counterpartyId) and.push({ counterpartyId: filters.counterpartyId });
+  const scopeWhere = accrualScopeWhere(scope);
+  if (Object.keys(scopeWhere).length > 0) and.push(scopeWhere);
 
   const lineFilter: Prisma.AccrualDocumentLineWhereInput = {};
   if (filters.departmentId) lineFilter.departmentId = filters.departmentId;
@@ -54,14 +56,18 @@ function buildWhere(period: ReportPeriod, filters: ReportFilters): Prisma.Accrua
   if (filters.projectId) lineFilter.projectId = filters.projectId;
   if (filters.productServiceId) lineFilter.productServiceId = filters.productServiceId;
   if (Object.keys(lineFilter).length > 0) {
-    where.lines = { some: lineFilter };
+    and.push({ lines: { some: lineFilter } });
   }
-  return where;
+  return { AND: and };
 }
 
-export async function computePnlReport(period: ReportPeriod, filters: ReportFilters): Promise<PnlReport> {
+export async function computePnlReport(
+  period: ReportPeriod,
+  filters: ReportFilters,
+  scope: AccessScope = UNRESTRICTED_SCOPE,
+): Promise<PnlReport> {
   const documents = await prisma.accrualDocument.findMany({
-    where: buildWhere(period, filters),
+    where: buildWhere(period, filters, scope),
     include: {
       lines: {
         where: {

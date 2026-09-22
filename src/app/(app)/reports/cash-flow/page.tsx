@@ -6,6 +6,7 @@ import { resolveReportPeriod } from "@/lib/reports/period";
 import { extractFilters, type ReportSearchParams } from "@/lib/reports/filters";
 import { computeCashFlowReport, type CashFlowArticleRow } from "@/lib/reports/cashflow";
 import { ReportFilterBar } from "@/components/report-filter-bar";
+import { getAccessScope } from "@/lib/access-scope";
 
 function drillDownHref(row: CashFlowArticleRow, from: string, to: string) {
   const params = new URLSearchParams({ from, to });
@@ -30,7 +31,8 @@ export default async function CashFlowReportPage({
   const sp = await searchParams;
   const period = resolveReportPeriod(sp);
   const filters = extractFilters(sp);
-  const report = await computeCashFlowReport(period, filters);
+  const scope = await getAccessScope(session);
+  const report = await computeCashFlowReport(period, filters, scope);
 
   const fromStr = period.from.toISOString().slice(0, 10);
   const toStr = period.to.toISOString().slice(0, 10);

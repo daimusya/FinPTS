@@ -7,6 +7,7 @@ import { resolveReportPeriod, previousPeriod } from "@/lib/reports/period";
 import { extractFilters, type ReportSearchParams } from "@/lib/reports/filters";
 import { computePnlReport, PNL_TYPE_ORDER, type PnlArticleRow, type PnlType } from "@/lib/reports/pnl";
 import { ReportFilterBar } from "@/components/report-filter-bar";
+import { getAccessScope } from "@/lib/access-scope";
 
 const TYPE_LABELS: Record<PnlType, string> = {
   REVENUE: "Выручка",
@@ -42,9 +43,10 @@ export default async function PnlReportPage({
   const period = resolveReportPeriod(sp);
   const prior = previousPeriod(period);
   const filters = extractFilters(sp);
+  const scope = await getAccessScope(session);
   const [report, priorReport] = await Promise.all([
-    computePnlReport(period, filters),
-    computePnlReport(prior, filters),
+    computePnlReport(period, filters, scope),
+    computePnlReport(prior, filters, scope),
   ]);
 
   const fromStr = period.from.toISOString().slice(0, 10);

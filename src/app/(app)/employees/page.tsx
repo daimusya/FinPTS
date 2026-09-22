@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { EMPLOYEE_STATUS_BADGE, EMPLOYEE_STATUS_LABELS } from "@/lib/payroll/labels";
+import { employeeScopeWhere, getAccessScope } from "@/lib/access-scope";
 
 export default async function EmployeesPage() {
   const session = await getSession();
@@ -15,7 +16,9 @@ export default async function EmployeesPage() {
   }
   const canManage = hasPermission(session, PERMISSIONS.PAYROLL_MANAGE);
 
+  const scope = await getAccessScope(session);
   const employees = await prisma.employee.findMany({
+    where: employeeScopeWhere(scope),
     orderBy: { fullName: "asc" },
     include: { organization: true, department: true, position: true },
   });

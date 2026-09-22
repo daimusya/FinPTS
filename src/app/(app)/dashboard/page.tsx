@@ -1,12 +1,28 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { PeriodStatus } from "@prisma/client";
+import { PeriodStatus, type Prisma } from "@prisma/client";
 import { formatMoney, formatNumber, sumMoney } from "@/lib/money";
 import { resolveReportPeriod } from "@/lib/reports/period";
 import { computePnlReport } from "@/lib/reports/pnl";
+import { getSession } from "@/lib/session";
+import {
+  accrualScopeWhere,
+  bankTransactionScopeWhere,
+  departmentScopeWhere,
+  employeeScopeWhere,
+  getAccessScope,
+  organizationScopeWhere,
+  paymentRequestScopeWhere,
+  projectScopeWhere,
+} from "@/lib/access-scope";
 
 export default async function DashboardPage() {
   const currentPeriod = resolveReportPeriod({});
+  const session = await getSession();
+  const scope = session ? await getAccessScope(session) : { organizationIds: [], departmentIds: [], projectIds: [] };
+
+  const accrualScope = accrualScopeWhere(scope);
+  const bankScope = bankTransactionScopeWhere(scope);
 
   const [
     organizations,
@@ -21,20 +37,25 @@ export default async function DashboardPage() {
     upcomingRequests,
     pnl,
   ] = await Promise.all([
-    prisma.organization.count({ where: { isArchived: false } }),
-    prisma.department.count({ where: { isArchived: false } }),
+    prisma.organization.count({ where: { isArchived: false, ...organizationScopeWhere(scope) } }),
+    prisma.department.count({ where: { isArchived: false, ...departmentScopeWhere(scope) } }),
     prisma.counterparty.count({ where: { isArchived: false } }),
-    prisma.project.count({ where: { isArchived: false } }),
-    prisma.employee.count(),
+    prisma.project.count({ where: { isArchived: false, ...projectScopeWhere(scope) } }),
+    prisma.employee.count({ where: employeeScopeWhere(scope) }),
     prisma.accountingPeriod.count({ where: { status: PeriodStatus.OPEN } }),
-    prisma.bankTransaction.findMany({ select: { amount: true, direction: true } }),
+    prisma.bankTransaction.findMany({ where: bankScope, select: { amount: true, direction: true } }),
     prisma.accrualDocument.findMany({
-      where: { status: "POSTED", paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID"] } },
+      where: {
+        AND: [{ status: "POSTED", paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID"] } }, accrualScope],
+      } as Prisma.AccrualDocumentWhereInput,
       include: { lines: true, allocations: { where: { cancelledAt: null } } },
     }),
-    prisma.bankTransaction.count({ where: { matchStatus: "UNMATCHED" } }),
-    prisma.paymentRequest.findMany({ where: { status: "APPROVED" }, include: { organization: true } }),
-    computePnlReport(currentPeriod, {}),
+    prisma.bankTransaction.count({ where: { matchStatus: "UNMATCHED", ...bankScope } }),
+    prisma.paymentRequest.findMany({
+      where: { status: "APPROVED", ...paymentRequestScopeWhere(scope) },
+      include: { organization: true },
+    }),
+    computePnlReport(currentPeriod, {}, scope),
   ]);
 
   const cashInflow = sumMoney(bankTransactions.filter((t) => t.direction === "INFLOW").map((t) => t.amount));

@@ -83,6 +83,34 @@ export async function updateUserAction(userId: string, formData: FormData) {
   redirect("/admin/users");
 }
 
+export async function updateUserAccessScopeAction(userId: string, formData: FormData) {
+  const session = await requirePermission(PERMISSIONS.USERS_MANAGE);
+
+  const organizationIds = formData.getAll("organizationIds").map(String);
+  const departmentIds = formData.getAll("departmentIds").map(String);
+  const projectIds = formData.getAll("projectIds").map(String);
+
+  await prisma.$transaction([
+    prisma.userOrganizationAccess.deleteMany({ where: { userId } }),
+    prisma.userOrganizationAccess.createMany({ data: organizationIds.map((organizationId) => ({ userId, organizationId })) }),
+    prisma.userDepartmentAccess.deleteMany({ where: { userId } }),
+    prisma.userDepartmentAccess.createMany({ data: departmentIds.map((departmentId) => ({ userId, departmentId })) }),
+    prisma.userProjectAccess.deleteMany({ where: { userId } }),
+    prisma.userProjectAccess.createMany({ data: projectIds.map((projectId) => ({ userId, projectId })) }),
+  ]);
+
+  await logAudit({
+    userId: session.userId,
+    entityType: "user_access_scope",
+    entityId: userId,
+    action: "update",
+    after: { organizationIds, departmentIds, projectIds } as never,
+  });
+
+  revalidatePath(`/admin/users/${userId}/edit`);
+  redirect(`/admin/users/${userId}/edit`);
+}
+
 export async function resetPasswordAction(userId: string) {
   const session = await requirePermission(PERMISSIONS.USERS_MANAGE);
 

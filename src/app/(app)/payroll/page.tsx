@@ -4,6 +4,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { PAYROLL_RUN_KIND_LABELS, PAYROLL_RUN_STATUS_BADGE, PAYROLL_RUN_STATUS_LABELS } from "@/lib/payroll/labels";
 import { formatMoney, sumMoney } from "@/lib/money";
+import { getAccessScope, payrollRunScopeWhere } from "@/lib/access-scope";
 
 export default async function PayrollRunsPage() {
   const session = await getSession();
@@ -16,7 +17,9 @@ export default async function PayrollRunsPage() {
   }
   const canManage = hasPermission(session, PERMISSIONS.PAYROLL_MANAGE);
 
+  const scope = await getAccessScope(session);
   const runs = await prisma.payrollRun.findMany({
+    where: payrollRunScopeWhere(scope),
     orderBy: { payoutDate: "desc" },
     include: { organization: true, lines: true },
   });

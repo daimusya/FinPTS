@@ -4,6 +4,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney } from "@/lib/money";
 import type { Prisma } from "@prisma/client";
+import { bankTransactionScopeWhere, getAccessScope } from "@/lib/access-scope";
 
 const MATCH_STATUS_LABELS: Record<string, string> = {
   UNMATCHED: "Не сопоставлено",
@@ -39,7 +40,10 @@ export default async function CashTransactionsPage({
   const canManage = hasPermission(session, PERMISSIONS.CASH_MANAGE);
   const { matchStatus, direction, cashFlowArticleId, from, to } = await searchParams;
 
-  const where: Prisma.BankTransactionWhereInput = {};
+  const scope = await getAccessScope(session);
+  const scopeWhere = bankTransactionScopeWhere(scope);
+
+  const where: Prisma.BankTransactionWhereInput = { ...scopeWhere };
   if (matchStatus) where.matchStatus = matchStatus as never;
   if (direction) where.direction = direction as never;
   if (cashFlowArticleId) where.cashFlowArticleId = cashFlowArticleId;
@@ -57,7 +61,7 @@ export default async function CashTransactionsPage({
       take: 300,
       include: { bankAccount: true, cashAccount: true, counterparty: true, cashFlowArticle: true },
     }),
-    prisma.bankTransaction.count({ where: { matchStatus: "UNMATCHED" } }),
+    prisma.bankTransaction.count({ where: { matchStatus: "UNMATCHED", ...scopeWhere } }),
   ]);
 
   return (
