@@ -486,6 +486,7 @@ model AccrualDocument {
 
   @@unique([sourceSystem, externalId])
   @@index([organizationId, date])
+  @@index([status, paymentStatus])
   @@index([counterpartyId])
   @@map("accrual_documents")
 }
@@ -579,6 +580,7 @@ model BankTransaction {
   allocations     PaymentAllocation[]
 
   @@index([operationDate])
+  @@index([matchStatus])
   @@map("bank_transactions")
 }
 
@@ -628,6 +630,8 @@ model PaymentRequest {
   counterparty    Counterparty?              @relation(fields: [counterpartyId], references: [id])
   approvals       PaymentRequestApproval[]
 
+  @@index([dueDate])
+  @@index([status])
   @@map("payment_requests")
 }
 
@@ -810,6 +814,7 @@ model PayrollRun {
   period       AccountingPeriod @relation(fields: [periodId], references: [id])
   lines        PayrollLine[]
 
+  @@index([payoutDate])
   @@map("payroll_runs")
 }
 
@@ -878,6 +883,7 @@ model AccountingPeriod {
   closedAt     DateTime?
   reopenedById String?
   reopenedAt   DateTime?
+  closingSnapshot Json?
   createdAt    DateTime     @default(now())
 
   closedBy      User?               @relation("PeriodClosedBy", fields: [closedById], references: [id])

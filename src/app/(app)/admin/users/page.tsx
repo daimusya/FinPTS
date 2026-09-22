@@ -2,15 +2,13 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
+import { readFlash } from "@/lib/flash";
 import { resetPasswordAction } from "./actions";
 
-export default async function UsersPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ tempPassword?: string; for?: string }>;
-}) {
+export default async function UsersPage() {
   const session = await getSession();
-  const { tempPassword, for: forEmail } = await searchParams;
+  const flash = await readFlash("tempPassword");
+  const [forEmail, tempPassword] = flash ? flash.split("\n") : [null, null];
   if (!session || !hasPermission(session, PERMISSIONS.USERS_MANAGE)) {
     return (
       <div className="page">

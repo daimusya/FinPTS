@@ -7,6 +7,8 @@ import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { PeriodStatus } from "@prisma/client";
+import { runPeriodCloseChecklist } from "@/lib/period-close/checklist";
+import { computeClosingSnapshot } from "@/lib/period-close/snapshot";
 
 export async function createPeriodAction(formData: FormData) {
   await requirePermission(PERMISSIONS.PERIODS_MANAGE);
@@ -26,13 +28,54 @@ export async function createPeriodAction(formData: FormData) {
   revalidatePath("/admin/periods");
 }
 
-export async function closePeriodAction(periodId: string) {
+export async function closePeriodAction(periodId: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PERIODS_MANAGE);
 
-  const before = await prisma.accountingPeriod.findUnique({ where: { id: periodId } });
+  const before = await prisma.accountingPeriod.findUniqueOrThrow({ where: { id: periodId } });
+  const results = await runPeriodCloseChecklist(before.year, before.month);
+
+  const hasCritical = results.some((r) => r.severity === "critical" && !r.passed);
+  const hasWarning = results.some((r) => r.severity === "warning" && !r.passed);
+  const acknowledged = formData.get("acknowledgeWarnings") === "on";
+
+  await prisma.$transaction([
+    prisma.periodCloseCheck.deleteMany({ where: { periodId } }),
+    prisma.periodCloseCheck.createMany({
+      data: results.map((r) => ({
+        periodId,
+        checkType: r.checkType,
+        severity: r.severity,
+        passed: r.passed,
+        message: r.message,
+      })),
+    }),
+  ]);
+
+  if (hasCritical) {
+    redirect(
+      `/admin/periods/${periodId}/close?error=${encodeURIComponent(
+        "Есть критические ошибки контрольного листа — закрытие периода заблокировано.",
+      )}`,
+    );
+  }
+  if (hasWarning && !acknowledged) {
+    redirect(
+      `/admin/periods/${periodId}/close?error=${encodeURIComponent(
+        "Есть предупреждения контрольного листа — подтвердите осознанное закрытие галочкой ниже.",
+      )}`,
+    );
+  }
+
+  const snapshot = await computeClosingSnapshot(before.year, before.month);
+
   const updated = await prisma.accountingPeriod.update({
     where: { id: periodId },
-    data: { status: PeriodStatus.CLOSED, closedById: session.userId, closedAt: new Date() },
+    data: {
+      status: PeriodStatus.CLOSED,
+      closedById: session.userId,
+      closedAt: new Date(),
+      closingSnapshot: snapshot as never,
+    },
   });
 
   await logAudit({
@@ -41,10 +84,11 @@ export async function closePeriodAction(periodId: string) {
     entityId: periodId,
     action: "close_period",
     before: before as never,
-    after: updated as never,
+    after: { ...updated, checklist: results } as never,
   });
 
   revalidatePath("/admin/periods");
+  redirect("/admin/periods");
 }
 
 export async function reopenPeriodAction(periodId: string) {

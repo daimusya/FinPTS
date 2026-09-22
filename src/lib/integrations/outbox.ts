@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
+import { decryptSecret } from "@/lib/crypto/secret-box";
 
 /**
  * Идемпотентная постановка события в очередь на отправку в Битрикс24.
@@ -42,10 +43,11 @@ export async function sendOutboxEvent(eventId: string): Promise<SendResult> {
     prisma.integrationProfile.findFirst({ where: { system: "BITRIX24" } }),
   ]);
 
-  const webhookUrl = (profile?.config as { webhookUrl?: string } | null)?.webhookUrl;
-  if (!profile?.isEnabled || !webhookUrl) {
+  const webhookUrlEnc = (profile?.config as { webhookUrlEnc?: string } | null)?.webhookUrlEnc;
+  if (!profile?.isEnabled || !webhookUrlEnc) {
     return { ok: false, error: "Интеграция с Битрикс24 не настроена или отключена" };
   }
+  const webhookUrl = decryptSecret(webhookUrlEnc);
 
   try {
     const response = await fetch(webhookUrl, {

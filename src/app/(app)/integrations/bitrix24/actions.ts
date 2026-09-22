@@ -6,25 +6,32 @@ import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { sendOutboxEvent } from "@/lib/integrations/outbox";
+import { encryptSecret } from "@/lib/crypto/secret-box";
 
 export async function saveBitrix24ProfileAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.INTEGRATIONS_MANAGE);
 
-  const webhookUrl = String(formData.get("webhookUrl") ?? "").trim();
+  const newWebhookUrl = String(formData.get("webhookUrl") ?? "").trim();
   const isEnabled = formData.get("isEnabled") === "on";
 
-  if (isEnabled && !webhookUrl) {
+  const existing = await prisma.integrationProfile.findFirst({ where: { system: "BITRIX24" } });
+  const existingConfig = existing?.config as { webhookUrlEnc?: string } | null;
+
+  // Пустое поле = «оставить как есть» (в форме показывается маска, а не
+  // расшифрованное значение), непустое = заменить и зашифровать заново.
+  const webhookUrlEnc = newWebhookUrl ? encryptSecret(newWebhookUrl) : existingConfig?.webhookUrlEnc;
+
+  if (isEnabled && !webhookUrlEnc) {
     throw new Error("Укажите адрес вебхука перед включением интеграции");
   }
 
-  const existing = await prisma.integrationProfile.findFirst({ where: { system: "BITRIX24" } });
   const profile = existing
     ? await prisma.integrationProfile.update({
         where: { id: existing.id },
-        data: { isEnabled, config: { webhookUrl } },
+        data: { isEnabled, config: { webhookUrlEnc } },
       })
     : await prisma.integrationProfile.create({
-        data: { system: "BITRIX24", name: "Битрикс24", isEnabled, config: { webhookUrl } },
+        data: { system: "BITRIX24", name: "Битрикс24", isEnabled, config: { webhookUrlEnc } },
       });
 
   await logAudit({
@@ -32,7 +39,7 @@ export async function saveBitrix24ProfileAction(formData: FormData) {
     entityType: "integration_profile",
     entityId: profile.id,
     action: "update",
-    after: { isEnabled, hasWebhook: Boolean(webhookUrl) } as never,
+    after: { isEnabled, hasWebhook: Boolean(webhookUrlEnc), webhookChanged: Boolean(newWebhookUrl) } as never,
   });
 
   revalidatePath("/integrations/bitrix24");

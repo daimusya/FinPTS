@@ -1,7 +1,10 @@
+import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
-import { closePeriodAction, createPeriodAction, reopenPeriodAction } from "./actions";
+import { formatMoney } from "@/lib/money";
+import { createPeriodAction, reopenPeriodAction } from "./actions";
+import type { ClosingSnapshot } from "@/lib/period-close/snapshot";
 
 const MONTH_NAMES = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -32,8 +35,9 @@ export default async function PeriodsPage() {
         <div>
           <h1>Учётные периоды</h1>
           <p>
-            Закрытый период запрещает изменение документов. Полный контрольный лист закрытия
-            (Этап 7) пока не реализован — сейчас доступно ручное открытие/закрытие периода.
+            Закрытый период запрещает изменение документов. Перед закрытием проходит контрольный
+            лист — критические ошибки блокируют закрытие, предупреждения требуют осознанного
+            подтверждения.
           </p>
         </div>
       </div>
@@ -72,41 +76,67 @@ export default async function PeriodsPage() {
             </tr>
           </thead>
           <tbody>
-            {periods.map((period) => (
-              <tr key={period.id}>
-                <td>
-                  {MONTH_NAMES[period.month - 1]} {period.year}
-                </td>
-                <td>
-                  <span className={`badge ${period.status === "OPEN" ? "badge-active" : "badge-danger"}`}>
-                    {period.status === "OPEN" ? "Открыт" : "Закрыт"}
-                  </span>
-                </td>
-                <td className="text-muted">
-                  {period.closedBy ? `${period.closedBy.fullName}, ${period.closedAt?.toLocaleString("ru-RU")}` : "—"}
-                </td>
-                <td className="text-muted">
-                  {period.reopenedBy
-                    ? `${period.reopenedBy.fullName}, ${period.reopenedAt?.toLocaleString("ru-RU")}`
-                    : "—"}
-                </td>
-                <td>
-                  {period.status === "OPEN" ? (
-                    <form action={closePeriodAction.bind(null, period.id)}>
-                      <button type="submit" className="btn btn-danger btn-sm">
+            {periods.map((period) => {
+              const failedChecks = period.checks.filter((c) => !c.passed);
+              const snapshot = period.closingSnapshot as ClosingSnapshot | null;
+              return (
+                <tr key={period.id}>
+                  <td>
+                    {MONTH_NAMES[period.month - 1]} {period.year}
+                  </td>
+                  <td>
+                    <span className={`badge ${period.status === "OPEN" ? "badge-active" : "badge-danger"}`}>
+                      {period.status === "OPEN" ? "Открыт" : "Закрыт"}
+                    </span>
+                  </td>
+                  <td className="text-muted">
+                    {period.closedBy ? (
+                      <>
+                        {period.closedBy.fullName}, {period.closedAt?.toLocaleString("ru-RU")}
+                        {failedChecks.length > 0 ? (
+                          <>
+                            {" "}
+                            <span className="badge badge-warning">{failedChecks.length} предупр.</span>
+                          </>
+                        ) : null}
+                        {snapshot ? (
+                          <details style={{ marginTop: 4 }}>
+                            <summary style={{ cursor: "pointer" }}>Показатели на момент закрытия</summary>
+                            <div style={{ marginTop: 6, fontSize: 12 }}>
+                              <div>Остаток денег: {formatMoney(snapshot.cashClosing)}</div>
+                              <div>Выручка за период: {formatMoney(snapshot.revenue)}</div>
+                              <div>Чистая прибыль: {formatMoney(snapshot.netProfit)}</div>
+                              <div>Дебиторка: {formatMoney(snapshot.receivable)}</div>
+                              <div>Кредиторка: {formatMoney(snapshot.payable)}</div>
+                            </div>
+                          </details>
+                        ) : null}
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="text-muted">
+                    {period.reopenedBy
+                      ? `${period.reopenedBy.fullName}, ${period.reopenedAt?.toLocaleString("ru-RU")}`
+                      : "—"}
+                  </td>
+                  <td>
+                    {period.status === "OPEN" ? (
+                      <Link href={`/admin/periods/${period.id}/close`} className="btn btn-danger btn-sm">
                         Закрыть период
-                      </button>
-                    </form>
-                  ) : canReopen ? (
-                    <form action={reopenPeriodAction.bind(null, period.id)}>
-                      <button type="submit" className="btn btn-secondary btn-sm">
-                        Открыть заново
-                      </button>
-                    </form>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
+                      </Link>
+                    ) : canReopen ? (
+                      <form action={reopenPeriodAction.bind(null, period.id)}>
+                        <button type="submit" className="btn btn-secondary btn-sm">
+                          Открыть заново
+                        </button>
+                      </form>
+                    ) : null}
+                  </td>
+                </tr>
+              );
+            })}
             {periods.length === 0 ? (
               <tr>
                 <td colSpan={5} className="empty-state">

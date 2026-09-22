@@ -121,7 +121,7 @@ export function Sidebar() {
           })}
         </div>
       ))}
-      <div className="sidebar-footer">Версия 0.6 · Этап 6: Моделирование</div>
+      <div className="sidebar-footer">Версия 1.0 · Все 7 этапов ТЗ</div>
     </aside>
   );
 }

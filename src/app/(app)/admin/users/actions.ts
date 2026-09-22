@@ -7,6 +7,7 @@ import { requirePermission } from "@/lib/session";
 import { hashPassword } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
+import { setFlash } from "@/lib/flash";
 import crypto from "node:crypto";
 
 export async function createUserAction(formData: FormData) {
@@ -45,8 +46,9 @@ export async function createUserAction(formData: FormData) {
     after: { email, fullName, roleIds } as never,
   });
 
+  await setFlash("tempPassword", `${email}\n${tempPassword}`);
   revalidatePath("/admin/users");
-  redirect(`/admin/users?tempPassword=${encodeURIComponent(tempPassword)}&for=${encodeURIComponent(email)}`);
+  redirect("/admin/users");
 }
 
 export async function updateUserAction(userId: string, formData: FormData) {
@@ -95,6 +97,7 @@ export async function resetPasswordAction(userId: string) {
     action: "reset_password",
   });
 
+  await setFlash("tempPassword", `${user.email}\n${tempPassword}`);
   revalidatePath("/admin/users");
-  redirect(`/admin/users?tempPassword=${encodeURIComponent(tempPassword)}&for=${encodeURIComponent(user.email)}`);
+  redirect("/admin/users");
 }

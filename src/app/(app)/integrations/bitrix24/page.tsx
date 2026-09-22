@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
+import { decryptSecret, maskSecret } from "@/lib/crypto/secret-box";
 import { saveBitrix24ProfileAction, sendOutboxEventAction } from "./actions";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -34,7 +35,8 @@ export default async function Bitrix24IntegrationPage() {
     }),
   ]);
 
-  const webhookUrl = (profile?.config as { webhookUrl?: string } | null)?.webhookUrl ?? "";
+  const webhookUrlEnc = (profile?.config as { webhookUrlEnc?: string } | null)?.webhookUrlEnc;
+  const webhookMasked = webhookUrlEnc ? maskSecret(decryptSecret(webhookUrlEnc)) : null;
 
   return (
     <div className="page">
@@ -52,9 +54,14 @@ export default async function Bitrix24IntegrationPage() {
       <div className="card" style={{ marginBottom: 16, maxWidth: 560 }}>
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Настройка вебхука</h2>
         <form action={saveBitrix24ProfileAction}>
+          {webhookMasked ? (
+            <p className="text-muted" style={{ marginBottom: 8 }}>
+              Текущий вебхук: <span className="mono">{webhookMasked}</span> (хранится в зашифрованном виде)
+            </p>
+          ) : null}
           <label className="field">
-            <span>Адрес вебхука Битрикс24</span>
-            <input type="text" name="webhookUrl" defaultValue={webhookUrl} placeholder="https://your-domain.bitrix24.ru/rest/1/xxxxxxx/" />
+            <span>{webhookMasked ? "Новый адрес вебхука (оставьте пустым, чтобы не менять)" : "Адрес вебхука Битрикс24"}</span>
+            <input type="text" name="webhookUrl" placeholder="https://your-domain.bitrix24.ru/rest/1/xxxxxxx/" />
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, fontSize: 13 }}>
             <input type="checkbox" name="isEnabled" defaultChecked={profile?.isEnabled ?? false} />
