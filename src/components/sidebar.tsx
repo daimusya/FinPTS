@@ -55,6 +55,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/accruals", label: "Документы начисления" },
       { href: "/cash/transactions", label: "Банк и касса" },
       { href: "/cash/import", label: "Загрузка выписки" },
+      { href: "/cash/classification-rules", label: "Правила классификации" },
       { href: "/payment-requests", label: "Заявки на оплату" },
       { href: "/payment-calendar", label: "Платёжный календарь" },
     ],

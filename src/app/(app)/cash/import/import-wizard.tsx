@@ -42,7 +42,7 @@ export function ImportWizard({ bankAccounts }: { bankAccounts: FieldOption[] }) 
       <div className="card">
         <p className="form-success">
           Импорт завершён: загружено {importState.imported}, дубликатов пропущено {importState.duplicates}, ошибок{" "}
-          {importState.errors}.
+          {importState.errors}. Автоклассифицировано по правилам: {importState.autoClassified ?? 0}.
         </p>
         {importState.errorSamples && importState.errorSamples.length > 0 ? (
           <ul className="text-muted" style={{ marginTop: 8, paddingLeft: 18 }}>

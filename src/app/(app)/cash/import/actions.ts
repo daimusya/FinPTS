@@ -8,6 +8,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { parseSpreadsheet, type ParsedSheet } from "@/lib/bank-import/parser";
 import { extractRow, type ColumnMapping, type MappingTarget } from "@/lib/bank-import/mapping";
 import { computeFingerprint } from "@/lib/bank-import/fingerprint";
+import { classifyTransaction, type ClassificationRuleInput } from "@/lib/bank-import/classification";
 
 const MAX_ROWS = 5000;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
@@ -66,6 +67,7 @@ export interface ImportState {
   imported?: number;
   duplicates?: number;
   errors?: number;
+  autoClassified?: number;
   errorSamples?: string[];
   error?: string;
 }
@@ -116,9 +118,25 @@ export async function importBankStatementAction(_prev: ImportState, formData: Fo
     },
   });
 
+  const activeRules = await prisma.bankClassificationRule.findMany({ where: { isArchived: false } });
+  const ruleInputs: ClassificationRuleInput[] = activeRules.map((r) => ({
+    id: r.id,
+    priority: r.priority,
+    direction: r.direction,
+    purposeContains: r.purposeContains,
+    counterpartyInn: r.counterpartyInn,
+    amountEquals: r.amountEquals,
+    cashFlowArticleId: r.cashFlowArticleId,
+    departmentId: r.departmentId,
+    costCenterId: r.costCenterId,
+    projectId: r.projectId,
+    productServiceId: r.productServiceId,
+  }));
+
   let imported = 0;
   let duplicates = 0;
   let errors = 0;
+  let autoClassified = 0;
   const errorSamples: string[] = [];
 
   for (let i = 0; i < rows.length; i += 1) {
@@ -150,6 +168,14 @@ export async function importBankStatementAction(_prev: ImportState, formData: Fo
       counterpartyId = counterparty?.id ?? null;
     }
 
+    const classification = classifyTransaction(ruleInputs, {
+      direction: extracted.direction,
+      purpose: extracted.purpose,
+      counterpartyInn: extracted.counterpartyInn,
+      amount: extracted.amount,
+    });
+    if (classification) autoClassified += 1;
+
     await prisma.bankTransaction.create({
       data: {
         bankAccountId,
@@ -160,6 +186,11 @@ export async function importBankStatementAction(_prev: ImportState, formData: Fo
         purpose: extracted.purpose,
         counterpartyId,
         fingerprint,
+        cashFlowArticleId: classification?.cashFlowArticleId ?? null,
+        departmentId: classification?.departmentId ?? null,
+        costCenterId: classification?.costCenterId ?? null,
+        projectId: classification?.projectId ?? null,
+        productServiceId: classification?.productServiceId ?? null,
       },
     });
     imported += 1;
@@ -175,10 +206,10 @@ export async function importBankStatementAction(_prev: ImportState, formData: Fo
     entityType: "bank_import_batch",
     entityId: batch.id,
     action: "import",
-    after: { fileName, imported, duplicates, errors } as never,
+    after: { fileName, imported, duplicates, errors, autoClassified } as never,
   });
 
   revalidatePath("/cash/transactions");
 
-  return { done: true, imported, duplicates, errors, errorSamples };
+  return { done: true, imported, duplicates, errors, autoClassified, errorSamples };
 }

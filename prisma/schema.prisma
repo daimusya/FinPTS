@@ -166,6 +166,7 @@ model Department {
   payrollAlloc    PayrollAllocation[]
   historyFrom     EmploymentHistory[] @relation("EmploymentHistoryFromDepartment")
   historyTo       EmploymentHistory[] @relation("EmploymentHistoryToDepartment")
+  classificationRules BankClassificationRule[]
 
   @@map("departments")
 }
@@ -177,9 +178,10 @@ model CostCenter {
   isArchived Boolean  @default(false)
   createdAt  DateTime @default(now())
 
-  departments  DepartmentCostCenter[]
-  accrualLines AccrualDocumentLine[]
-  bankTx       BankTransaction[]
+  departments        DepartmentCostCenter[]
+  accrualLines       AccrualDocumentLine[]
+  bankTx             BankTransaction[]
+  classificationRules BankClassificationRule[]
 
   @@map("cost_centers")
 }
@@ -216,6 +218,7 @@ model Project {
   payrollAlloc  PayrollAllocation[]
   employeeProj  EmployeeProjectAllocation[]
   timeSheets    TimeSheet[]
+  classificationRules BankClassificationRule[]
 
   @@map("projects")
 }
@@ -240,9 +243,10 @@ model ProductService {
   isArchived  Boolean  @default(false)
   createdAt   DateTime @default(now())
 
-  direction    Direction?            @relation(fields: [directionId], references: [id])
-  accrualLines AccrualDocumentLine[]
-  bankTx       BankTransaction[]
+  direction          Direction?            @relation(fields: [directionId], references: [id])
+  accrualLines       AccrualDocumentLine[]
+  bankTx             BankTransaction[]
+  classificationRules BankClassificationRule[]
 
   @@map("products_services")
 }
@@ -334,10 +338,11 @@ model CashFlowArticle {
   parentId   String?
   isArchived Boolean           @default(false)
 
-  parent       CashFlowArticle?  @relation("CashFlowArticleHierarchy", fields: [parentId], references: [id])
-  children     CashFlowArticle[] @relation("CashFlowArticleHierarchy")
-  bankTx       BankTransaction[]
-  paymentReqs  PaymentRequest[]
+  parent             CashFlowArticle?  @relation("CashFlowArticleHierarchy", fields: [parentId], references: [id])
+  children           CashFlowArticle[] @relation("CashFlowArticleHierarchy")
+  bankTx             BankTransaction[]
+  paymentReqs        PaymentRequest[]
+  classificationRules BankClassificationRule[]
 
   @@map("cash_flow_articles")
 }
@@ -584,6 +589,41 @@ model BankTransaction {
   @@index([matchStatus])
   @@index([transferGroupId])
   @@map("bank_transactions")
+}
+
+/**
+ * Правило автоклассификации банковских операций (раздел «Банк и касса»
+ * README). Правило срабатывает, если совпадают ВСЕ заданные (не-null)
+ * условия — направление, вхождение подстроки в назначение платежа, точный
+ * ИНН контрагента, точная сумма. Правило без ни одного условия не
+ * создаётся (проверяется в действии). Применяется по возрастанию priority
+ * (меньше — раньше), первое совпавшее правило выигрывает.
+ */
+model BankClassificationRule {
+  id                String                     @id @default(cuid())
+  name              String
+  priority          Int                        @default(100)
+  isArchived        Boolean                    @default(false)
+  direction         BankTransactionDirection?
+  purposeContains   String?
+  counterpartyInn   String?
+  amountEquals      Decimal?                   @db.Decimal(18, 2)
+  cashFlowArticleId String?
+  departmentId      String?
+  costCenterId      String?
+  projectId         String?
+  productServiceId  String?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+
+  cashFlowArticle CashFlowArticle? @relation(fields: [cashFlowArticleId], references: [id])
+  department      Department?      @relation(fields: [departmentId], references: [id])
+  costCenter      CostCenter?      @relation(fields: [costCenterId], references: [id])
+  project         Project?         @relation(fields: [projectId], references: [id])
+  productService  ProductService?  @relation(fields: [productServiceId], references: [id])
+
+  @@index([priority])
+  @@map("bank_classification_rules")
 }
 
 model PaymentAllocation {
