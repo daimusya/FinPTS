@@ -158,6 +158,35 @@ export default async function NewCashTransactionPage({
             <input type="checkbox" name="isTransfer" />
             Перевод между собственными счетами
           </label>
+          <p className="text-muted" style={{ marginTop: 6 }}>
+            Если отмечено — обязательно укажите второй счёт или кассу ниже. Встречная операция на
+            нём (с противоположным направлением и той же суммой) будет создана автоматически, чтобы
+            общий остаток не искажался, если завести только одну сторону перевода.
+          </p>
+          <div className="form-grid" style={{ marginTop: 6 }}>
+            <label className="field">
+              <span>Второй банковский счёт (для перевода)</span>
+              <select name="secondBankAccountId">
+                <option value="">—</option>
+                {bankAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.bankName} · {a.accountNumber}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Вторая касса (для перевода)</span>
+              <select name="secondCashAccountId">
+                <option value="">—</option>
+                {cashAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
           <div className="form-actions">
             <button type="submit" className="btn btn-primary">

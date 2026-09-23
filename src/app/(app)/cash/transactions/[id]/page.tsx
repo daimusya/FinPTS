@@ -45,6 +45,13 @@ export default async function CashTransactionDetailPage({
   });
   if (!tx) notFound();
 
+  const linkedTransfer = tx.transferGroupId
+    ? await prisma.bankTransaction.findFirst({
+        where: { transferGroupId: tx.transferGroupId, id: { not: tx.id } },
+        include: { bankAccount: true, cashAccount: true },
+      })
+    : null;
+
   const [counterparties, cashFlowArticles, departments, costCenters, projects, productsServices] = await Promise.all([
     prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
     prisma.cashFlowArticle.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
@@ -164,6 +171,17 @@ export default async function CashTransactionDetailPage({
           {tx.purpose ? (
             <p className="text-muted" style={{ marginTop: 10 }}>
               Назначение платежа: {tx.purpose}
+            </p>
+          ) : null}
+          {linkedTransfer ? (
+            <p className="text-muted" style={{ marginTop: 10 }}>
+              Встречная операция перевода:{" "}
+              <Link href={`/cash/transactions/${linkedTransfer.id}`}>
+                {linkedTransfer.bankAccount
+                  ? `${linkedTransfer.bankAccount.bankName} · ${linkedTransfer.bankAccount.accountNumber}`
+                  : linkedTransfer.cashAccount?.name}{" "}
+                · {formatMoney(linkedTransfer.amount)}
+              </Link>
             </p>
           ) : null}
           {canManage ? (

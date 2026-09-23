@@ -566,6 +566,7 @@ model BankTransaction {
   matchStatus      BankTransactionMatchStatus  @default(UNMATCHED)
   fingerprint      String                      @unique
   isTransfer       Boolean                     @default(false)
+  transferGroupId  String?
   createdAt        DateTime                    @default(now())
 
   bankAccount     BankAccount?      @relation(fields: [bankAccountId], references: [id])
@@ -581,6 +582,7 @@ model BankTransaction {
 
   @@index([operationDate])
   @@index([matchStatus])
+  @@index([transferGroupId])
   @@map("bank_transactions")
 }
 

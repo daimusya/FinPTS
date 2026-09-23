@@ -10,6 +10,8 @@ import { recomputeAccrualDocumentStatus, recomputeBankTransactionStatus } from "
 import { toDecimal } from "@/lib/money";
 import { PERMISSIONS } from "@/lib/permissions";
 import { computeFingerprint } from "@/lib/bank-import/fingerprint";
+import { oppositeDirection, validateTransferAccounts } from "@/lib/cash/transfer";
+import crypto from "node:crypto";
 
 export async function createBankTransactionAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
@@ -27,12 +29,23 @@ export async function createBankTransactionAction(formData: FormData) {
   const projectId = String(formData.get("projectId") ?? "") || null;
   const productServiceId = String(formData.get("productServiceId") ?? "") || null;
   const isTransfer = formData.get("isTransfer") === "on";
+  const secondBankAccountId = String(formData.get("secondBankAccountId") ?? "") || null;
+  const secondCashAccountId = String(formData.get("secondCashAccountId") ?? "") || null;
 
   if ((!bankAccountId && !cashAccountId) || (bankAccountId && cashAccountId)) {
     redirect(`/cash/transactions/new?error=${encodeURIComponent("Выберите либо банковский счёт, либо кассу")}`);
   }
   if (!operationDateRaw || !direction || !amountRaw || Number(amountRaw) <= 0) {
     redirect(`/cash/transactions/new?error=${encodeURIComponent("Заполните дату, направление и сумму")}`);
+  }
+  if (isTransfer) {
+    const validationError = validateTransferAccounts(
+      { bankAccountId, cashAccountId },
+      { bankAccountId: secondBankAccountId, cashAccountId: secondCashAccountId },
+    );
+    if (validationError) {
+      redirect(`/cash/transactions/new?error=${encodeURIComponent(validationError)}`);
+    }
   }
 
   const operationDate = new Date(operationDateRaw);
@@ -51,6 +64,83 @@ export async function createBankTransactionAction(formData: FormData) {
   const existing = await prisma.bankTransaction.findUnique({ where: { fingerprint } });
   if (existing) {
     redirect(`/cash/transactions/new?error=${encodeURIComponent("Такая операция уже существует (защита от повторного ввода)")}`);
+  }
+
+  if (isTransfer) {
+    const secondDirection = oppositeDirection(direction as "INFLOW" | "OUTFLOW");
+    const secondFingerprint = computeFingerprint({
+      bankAccountId: secondBankAccountId ?? secondCashAccountId ?? "manual",
+      operationDate,
+      direction: secondDirection,
+      amount: toDecimal(amountRaw).toFixed(2),
+      purpose,
+    });
+    const secondExisting = await prisma.bankTransaction.findUnique({ where: { fingerprint: secondFingerprint } });
+    if (secondExisting) {
+      redirect(`/cash/transactions/new?error=${encodeURIComponent("Встречная операция перевода уже существует (защита от повторного ввода)")}`);
+    }
+
+    const transferGroupId = crypto.randomUUID();
+    const [created, secondLeg] = await prisma.$transaction([
+      prisma.bankTransaction.create({
+        data: {
+          bankAccountId,
+          cashAccountId,
+          operationDate,
+          direction: direction as never,
+          amount: amountRaw,
+          purpose,
+          counterpartyId,
+          cashFlowArticleId,
+          departmentId,
+          costCenterId,
+          projectId,
+          productServiceId,
+          isTransfer,
+          transferGroupId,
+          fingerprint,
+        },
+      }),
+      prisma.bankTransaction.create({
+        data: {
+          bankAccountId: secondBankAccountId,
+          cashAccountId: secondCashAccountId,
+          operationDate,
+          direction: secondDirection as never,
+          amount: amountRaw,
+          purpose,
+          counterpartyId,
+          cashFlowArticleId,
+          departmentId,
+          costCenterId,
+          projectId,
+          productServiceId,
+          isTransfer,
+          transferGroupId,
+          fingerprint: secondFingerprint,
+        },
+      }),
+    ]);
+
+    await Promise.all([
+      logAudit({
+        userId: session.userId,
+        entityType: "bank_transaction",
+        entityId: created.id,
+        action: "create_manual_transfer",
+        after: created as never,
+      }),
+      logAudit({
+        userId: session.userId,
+        entityType: "bank_transaction",
+        entityId: secondLeg.id,
+        action: "create_manual_transfer",
+        after: secondLeg as never,
+      }),
+    ]);
+
+    revalidatePath("/cash/transactions");
+    redirect(`/cash/transactions/${created.id}`);
   }
 
   const created = await prisma.bankTransaction.create({
