@@ -29,6 +29,11 @@ export default async function BalanceReportPage({
     prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(scope) }, orderBy: { name: "asc" } }),
   ]);
 
+  const asOfStr = asOfDate.toISOString().slice(0, 10);
+  const exportHref = `/api/reports/export?type=balance&asOf=${asOfStr}${
+    filters.organizationId ? `&organizationId=${filters.organizationId}` : ""
+  }`;
+
   return (
     <div className="page">
       <div className="page-header">
@@ -36,6 +41,9 @@ export default async function BalanceReportPage({
           <h1>Управленческий баланс</h1>
           <p>На дату: {balance.asOfDate.toLocaleDateString("ru-RU")}</p>
         </div>
+        <a href={exportHref} className="btn btn-secondary">
+          Экспорт в Excel
+        </a>
       </div>
 
       <form className="filter-bar">

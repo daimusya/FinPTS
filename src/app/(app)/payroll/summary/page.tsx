@@ -1,7 +1,10 @@
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
-import { formatMoney, sumMoney } from "@/lib/money";
+import { formatMoney, toDecimal } from "@/lib/money";
+import { computePayrollSummary, type PayrollSummaryLine } from "@/lib/payroll/summary";
+import { getAccessScope, payrollRunScopeWhere } from "@/lib/access-scope";
+import type Decimal from "decimal.js";
 
 export default async function PayrollSummaryPage({
   searchParams,
@@ -22,8 +25,9 @@ export default async function PayrollSummaryPage({
   const from = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const to = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59));
 
+  const scope = await getAccessScope(session);
   const runs = await prisma.payrollRun.findMany({
-    where: { payoutDate: { gte: from, lte: to } },
+    where: { payoutDate: { gte: from, lte: to }, ...payrollRunScopeWhere(scope) },
     include: {
       organization: true,
       lines: {
@@ -32,45 +36,25 @@ export default async function PayrollSummaryPage({
     },
   });
 
-  const allLines = runs.flatMap((r) => r.lines.map((l) => ({ ...l, organization: r.organization })));
-
-  const cashTotal = sumMoney(allLines.filter((l) => l.employee.paymentMethod === "CASH").map((l) => l.amount.minus(l.ndflAmount)));
-  const bankTotal = sumMoney(
-    allLines.filter((l) => l.employee.paymentMethod !== "CASH").map((l) => l.amount.minus(l.ndflAmount)),
+  const lines: PayrollSummaryLine[] = runs.flatMap((r) =>
+    r.lines.map((l) => ({
+      organizationId: r.organization.id,
+      organizationName: r.organization.shortName || r.organization.name,
+      departmentId: l.department?.id ?? null,
+      departmentName: l.department?.name ?? null,
+      projectId: l.project?.id ?? null,
+      projectName: l.project?.name ?? null,
+      employeeId: l.employeeId,
+      employeeName: l.employee.fullName,
+      paymentMethod: l.employee.paymentMethod,
+      amount: toDecimal(l.amount),
+      ndflAmount: toDecimal(l.ndflAmount),
+      insuranceAmount: toDecimal(l.insuranceAmount),
+    })),
   );
-  const ndflTotal = sumMoney(allLines.map((l) => l.ndflAmount));
-  const insuranceTotal = sumMoney(allLines.map((l) => l.insuranceAmount));
-  const grossTotal = sumMoney(allLines.map((l) => l.amount));
-  // Итоговая денежная потребность компании = начисленная сумма (включая НДФЛ,
-  // который удерживается из неё и перечисляется отдельно) + страховые взносы
-  // сверх зарплаты.
-  const cashNeedTotal = grossTotal.plus(insuranceTotal);
-
-  const byOrg = new Map<string, { name: string; net: ReturnType<typeof sumMoney> }>();
-  const byDept = new Map<string, { name: string; net: ReturnType<typeof sumMoney> }>();
-  const byProject = new Map<string, { name: string; net: ReturnType<typeof sumMoney> }>();
-  const byEmployee = new Map<string, { name: string; net: ReturnType<typeof sumMoney>; method: string }>();
-
-  for (const line of allLines) {
-    const net = line.amount.minus(line.ndflAmount);
-    const orgKey = line.organization.id;
-    byOrg.set(orgKey, { name: line.organization.shortName || line.organization.name, net: (byOrg.get(orgKey)?.net ?? sumMoney([])).plus(net) });
-
-    const deptKey = line.department?.id ?? "none";
-    byDept.set(deptKey, { name: line.department?.name ?? "Без подразделения", net: (byDept.get(deptKey)?.net ?? sumMoney([])).plus(net) });
-
-    const projKey = line.project?.id ?? "none";
-    if (line.project) {
-      byProject.set(projKey, { name: line.project.name, net: (byProject.get(projKey)?.net ?? sumMoney([])).plus(net) });
-    }
-
-    const empKey = line.employeeId;
-    byEmployee.set(empKey, {
-      name: line.employee.fullName,
-      net: (byEmployee.get(empKey)?.net ?? sumMoney([])).plus(net),
-      method: line.employee.paymentMethod,
-    });
-  }
+  const summary = computePayrollSummary(lines);
+  const dateStr = from.toISOString().slice(0, 10);
+  const exportHref = `/api/reports/export?type=payroll-summary&date=${dateStr}`;
 
   return (
     <div className="page">
@@ -79,6 +63,9 @@ export default async function PayrollSummaryPage({
           <h1>Сводная ведомость на выбранную дату</h1>
           <p>Сумма всех расчётов зарплаты с датой выплаты {from.toLocaleDateString("ru-RU")}, независимо от статуса.</p>
         </div>
+        <a href={exportHref} className="btn btn-secondary">
+          Экспорт в Excel
+        </a>
       </div>
 
       <form className="filter-bar">
@@ -94,32 +81,32 @@ export default async function PayrollSummaryPage({
       <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label">К выплате наличными</div>
-          <div className="stat-value">{formatMoney(cashTotal)}</div>
+          <div className="stat-value">{formatMoney(summary.cashTotal)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">К выплате безналично</div>
-          <div className="stat-value">{formatMoney(bankTotal)}</div>
+          <div className="stat-value">{formatMoney(summary.bankTotal)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">НДФЛ</div>
-          <div className="stat-value">{formatMoney(ndflTotal)}</div>
+          <div className="stat-value">{formatMoney(summary.ndflTotal)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Страховые взносы</div>
-          <div className="stat-value">{formatMoney(insuranceTotal)}</div>
+          <div className="stat-value">{formatMoney(summary.insuranceTotal)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Итоговая денежная потребность</div>
-          <div className="stat-value">{formatMoney(cashNeedTotal)}</div>
+          <div className="stat-value">{formatMoney(summary.cashNeedTotal)}</div>
         </div>
       </div>
 
-      <BreakdownTable title="По организациям" rows={Array.from(byOrg.values())} />
-      <BreakdownTable title="По подразделениям" rows={Array.from(byDept.values())} />
-      {byProject.size > 0 ? <BreakdownTable title="По проектам" rows={Array.from(byProject.values())} /> : null}
+      <BreakdownTable title="По организациям" rows={summary.byOrganization} />
+      <BreakdownTable title="По подразделениям" rows={summary.byDepartment} />
+      {summary.byProject.length > 0 ? <BreakdownTable title="По проектам" rows={summary.byProject} /> : null}
       <BreakdownTable
         title="По сотрудникам"
-        rows={Array.from(byEmployee.values()).map((e) => ({ name: `${e.name} (${e.method === "CASH" ? "нал." : "безнал."})`, net: e.net }))}
+        rows={summary.byEmployee.map((e) => ({ key: e.key, name: `${e.name} (${e.paymentMethod === "CASH" ? "нал." : "безнал."})`, net: e.net }))}
       />
 
       {runs.length === 0 ? <div className="card">На эту дату расчётов зарплаты нет.</div> : null}
@@ -127,7 +114,7 @@ export default async function PayrollSummaryPage({
   );
 }
 
-function BreakdownTable({ title, rows }: { title: string; rows: Array<{ name: string; net: ReturnType<typeof sumMoney> }> }) {
+function BreakdownTable({ title, rows }: { title: string; rows: Array<{ key: string; name: string; net: Decimal }> }) {
   if (rows.length === 0) return null;
   return (
     <div className="card" style={{ marginBottom: 16 }}>
@@ -142,7 +129,7 @@ function BreakdownTable({ title, rows }: { title: string; rows: Array<{ name: st
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.name}>
+              <tr key={row.key}>
                 <td>{row.name}</td>
                 <td className="mono">{formatMoney(row.net)}</td>
               </tr>

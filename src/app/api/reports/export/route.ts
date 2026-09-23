@@ -6,7 +6,12 @@ import { extractFilters } from "@/lib/reports/filters";
 import { computeCashFlowReport } from "@/lib/reports/cashflow";
 import { computePnlReport, PNL_TYPE_ORDER } from "@/lib/reports/pnl";
 import { computeDebtsReport } from "@/lib/reports/debts";
+import { computeManagementBalance } from "@/lib/reports/balance";
+import { computePayrollSummary, type PayrollSummaryLine } from "@/lib/payroll/summary";
 import { buildWorkbookBuffer, type ExportSheet } from "@/lib/reports/xlsx-export";
+import { getAccessScope, payrollRunScopeWhere } from "@/lib/access-scope";
+import { prisma } from "@/lib/db";
+import { toDecimal } from "@/lib/money";
 
 const TYPE_LABELS: Record<string, string> = {
   REVENUE: "Выручка",
@@ -23,11 +28,13 @@ function toNum(d: { toNumber: () => number }) {
 }
 
 export async function GET(request: NextRequest) {
+  let session;
   try {
-    await requirePermission(PERMISSIONS.REPORTS_EXPORT);
+    session = await requirePermission(PERMISSIONS.REPORTS_EXPORT);
   } catch {
     return new Response("Недостаточно прав", { status: 403 });
   }
+  const scope = await getAccessScope(session);
 
   const sp = Object.fromEntries(request.nextUrl.searchParams.entries());
   const type = sp.type;
@@ -38,7 +45,7 @@ export async function GET(request: NextRequest) {
 
   if (type === "cash-flow") {
     const period = resolveReportPeriod(sp);
-    const report = await computeCashFlowReport(period, filters);
+    const report = await computeCashFlowReport(period, filters, scope);
     const rows: Array<Array<string | number>> = [
       ["ДДС", period.label],
       [],
@@ -61,7 +68,7 @@ export async function GET(request: NextRequest) {
     fileName = `dds_${period.year}_${period.month}.xlsx`;
   } else if (type === "pnl") {
     const period = resolveReportPeriod(sp);
-    const report = await computePnlReport(period, filters);
+    const report = await computePnlReport(period, filters, scope);
     const rows: Array<Array<string | number>> = [["ОПиУ", period.label], []];
     for (const t of PNL_TYPE_ORDER) {
       const bucket = report.byType[t];
@@ -79,7 +86,7 @@ export async function GET(request: NextRequest) {
     sheets = [{ name: "ОПиУ", rows }];
     fileName = `opiu_${period.year}_${period.month}.xlsx`;
   } else if (type === "debts") {
-    const report = await computeDebtsReport(filters);
+    const report = await computeDebtsReport(filters, scope);
     const receivableRows: Array<Array<string | number>> = [
       ["Контрагент", "Документ", "Срок оплаты", "Остаток", "Просрочено"],
       ...report.receivableRows.flatMap((row) =>
@@ -109,6 +116,85 @@ export async function GET(request: NextRequest) {
       { name: "Кредиторская задолженность", rows: payableRows },
     ];
     fileName = "debts.xlsx";
+  } else if (type === "balance") {
+    const asOfDate = sp.asOf ? new Date(sp.asOf) : new Date();
+    const balance = await computeManagementBalance(asOfDate, filters, scope);
+    const rows: Array<Array<string | number>> = [
+      ["Управленческий баланс", "на " + balance.asOfDate.toISOString().slice(0, 10)],
+      [],
+      ["Активы"],
+      ["Денежные средства", toNum(balance.cash)],
+      ["Дебиторская задолженность", toNum(balance.receivable)],
+      ["Авансы выданные (не выделяются, всегда 0)", toNum(balance.advancesIssued)],
+      ["Прочие активы (не выделяются, всегда 0)", toNum(balance.otherAssets)],
+      ["Итого активы", toNum(balance.totalAssets)],
+      [],
+      ["Обязательства и капитал"],
+      ["Кредиторская задолженность", toNum(balance.payable)],
+      ["Авансы полученные (не выделяются, всегда 0)", toNum(balance.advancesReceived)],
+      ["Налоги и зарплата к выплате (не выделяются, всегда 0)", toNum(balance.taxesPayrollPayable)],
+      ["Займы и кредиты (не выделяются, всегда 0)", toNum(balance.loans)],
+      ["Итого обязательства", toNum(balance.totalLiabilities)],
+      ["Капитал (не выделяется, всегда 0)", toNum(balance.capital)],
+      ["Нераспределённая прибыль (по ОПиУ)", toNum(balance.retainedEarnings)],
+      ["Итого капитал", toNum(balance.totalEquity)],
+      [],
+      ["Контрольное равенство", balance.isBalanced ? "выполняется" : "расхождение"],
+      ["Расхождение", toNum(balance.discrepancy)],
+    ];
+    sheets = [{ name: "Баланс", rows }];
+    fileName = `balance_${asOfDate.toISOString().slice(0, 10)}.xlsx`;
+  } else if (type === "payroll-summary") {
+    const date = sp.date ? new Date(sp.date) : new Date();
+    const from = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    const to = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59));
+    const runs = await prisma.payrollRun.findMany({
+      where: { payoutDate: { gte: from, lte: to }, ...payrollRunScopeWhere(scope) },
+      include: {
+        organization: true,
+        lines: { include: { employee: { include: { department: true } }, department: true, project: true } },
+      },
+    });
+    const lines: PayrollSummaryLine[] = runs.flatMap((r) =>
+      r.lines.map((l) => ({
+        organizationId: r.organization.id,
+        organizationName: r.organization.shortName || r.organization.name,
+        departmentId: l.department?.id ?? null,
+        departmentName: l.department?.name ?? null,
+        projectId: l.project?.id ?? null,
+        projectName: l.project?.name ?? null,
+        employeeId: l.employeeId,
+        employeeName: l.employee.fullName,
+        paymentMethod: l.employee.paymentMethod,
+        amount: toDecimal(l.amount),
+        ndflAmount: toDecimal(l.ndflAmount),
+        insuranceAmount: toDecimal(l.insuranceAmount),
+      })),
+    );
+    const summary = computePayrollSummary(lines);
+    const rows: Array<Array<string | number>> = [
+      ["Сводная ведомость", from.toISOString().slice(0, 10)],
+      [],
+      ["К выплате наличными", toNum(summary.cashTotal)],
+      ["К выплате безналично", toNum(summary.bankTotal)],
+      ["НДФЛ", toNum(summary.ndflTotal)],
+      ["Страховые взносы", toNum(summary.insuranceTotal)],
+      ["Итоговая денежная потребность", toNum(summary.cashNeedTotal)],
+      [],
+      ["По организациям"],
+      ["Название", "К выплате"],
+      ...summary.byOrganization.map((r) => [r.name, toNum(r.net)]),
+      [],
+      ["По подразделениям"],
+      ["Название", "К выплате"],
+      ...summary.byDepartment.map((r) => [r.name, toNum(r.net)]),
+      [],
+      ["По сотрудникам"],
+      ["ФИО", "Способ выплаты", "К выплате"],
+      ...summary.byEmployee.map((r) => [r.name, r.paymentMethod === "CASH" ? "наличные" : "безналичные", toNum(r.net)]),
+    ];
+    sheets = [{ name: "Сводная ведомость", rows }];
+    fileName = `payroll_summary_${from.toISOString().slice(0, 10)}.xlsx`;
   } else {
     return new Response("Неизвестный тип отчёта", { status: 400 });
   }
