@@ -47,10 +47,13 @@ const LABELS: Record<string, string> = {
 
 export default async function DictionaryListPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ imported?: string }>;
 }) {
   const { slug } = await params;
+  const { imported } = await searchParams;
   if (!DICTIONARY_REGISTRY[slug]) notFound();
   const config = getDictionaryConfig(slug);
 
@@ -78,12 +81,28 @@ export default async function DictionaryListPage({
           <h1>{config.title}</h1>
           <p>Справочник хранится в базе данных. Архивирование не удаляет записи физически.</p>
         </div>
-        {canManage ? (
-          <Link href={`/master-data/${slug}/new`} className="btn btn-primary">
-            Добавить
-          </Link>
-        ) : null}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <a href={`/api/master-data/export?slug=${slug}`} className="btn btn-secondary">
+            Экспорт в Excel
+          </a>
+          {canManage ? (
+            <Link href={`/master-data/${slug}/import`} className="btn btn-secondary">
+              Импорт из Excel
+            </Link>
+          ) : null}
+          {canManage ? (
+            <Link href={`/master-data/${slug}/new`} className="btn btn-primary">
+              Добавить
+            </Link>
+          ) : null}
+        </div>
       </div>
+
+      {imported ? (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <p className="form-success">Загружено записей: {imported}.</p>
+        </div>
+      ) : null}
 
       <div className="table-wrap">
         <table>
@@ -92,7 +111,8 @@ export default async function DictionaryListPage({
               {config.listColumns.map((col) => (
                 <th key={col}>{config.fields.find((f) => f.name === col)?.label ?? col}</th>
               ))}
-              <th>Статус</th>
+              {/* «Статус» clashes with a dictionary's own status column (projects, contracts). */}
+              <th>Запись</th>
               <th />
             </tr>
           </thead>
