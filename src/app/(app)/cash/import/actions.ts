@@ -6,8 +6,8 @@ import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { parseSpreadsheet, type ParsedSheet } from "@/lib/bank-import/parser";
-import { extractRow, type ColumnMapping, type MappingTarget } from "@/lib/bank-import/mapping";
-import { computeFingerprint } from "@/lib/bank-import/fingerprint";
+import { extractRow, type ColumnMapping, type ExtractedRow, type MappingTarget } from "@/lib/bank-import/mapping";
+import { computeStatementFingerprints } from "@/lib/bank-import/fingerprint";
 import { classifyTransaction, type ClassificationRuleInput } from "@/lib/bank-import/classification";
 
 const MAX_ROWS = 5000;
@@ -62,12 +62,16 @@ export async function parseStatementAction(_prev: ParseState, formData: FormData
   };
 }
 
+type ValidRow = ExtractedRow & { date: Date; amount: number; direction: "INFLOW" | "OUTFLOW" };
+
 export interface ImportState {
   done?: boolean;
   imported?: number;
   duplicates?: number;
   errors?: number;
   autoClassified?: number;
+  /** Operations identical to an earlier row of the file (no bank reference) — imported as separate ones. */
+  repeatedImported?: number;
   errorSamples?: string[];
   error?: string;
 }
@@ -137,30 +141,39 @@ export async function importBankStatementAction(_prev: ImportState, formData: Fo
   let duplicates = 0;
   let errors = 0;
   let autoClassified = 0;
+  let repeatedImported = 0;
   const errorSamples: string[] = [];
 
-  for (let i = 0; i < rows.length; i += 1) {
-    const extracted = extractRow(rows[i], mapping);
+  const valid: ValidRow[] = [];
+  rows.forEach((row, i) => {
+    const extracted = extractRow(row, mapping);
     if (!extracted.date || !extracted.amount || !extracted.direction) {
       errors += 1;
       if (errorSamples.length < 10) errorSamples.push(`Строка ${i + 2}: нет даты или суммы`);
-      continue;
+      return;
     }
-
-    const fingerprint = computeFingerprint({
+    valid.push(extracted as ValidRow);
+  });
+  // Computed over the whole file so identical operations without a bank reference are numbered, not merged.
+  const fingerprints = computeStatementFingerprints(
+    valid.map((extracted) => ({
       bankAccountId,
       operationDate: extracted.date,
       direction: extracted.direction,
       amount: extracted.amount.toFixed(2),
       purpose: extracted.purpose,
       externalRef: extracted.externalRef,
-    });
+    })),
+  );
 
+  for (const [i, extracted] of valid.entries()) {
+    const { fingerprint, occurrence } = fingerprints[i];
     const existing = await prisma.bankTransaction.findUnique({ where: { fingerprint } });
     if (existing) {
       duplicates += 1;
       continue;
     }
+    if (occurrence > 1) repeatedImported += 1;
 
     let counterpartyId: string | null = null;
     if (extracted.counterpartyInn) {
@@ -206,10 +219,10 @@ export async function importBankStatementAction(_prev: ImportState, formData: Fo
     entityType: "bank_import_batch",
     entityId: batch.id,
     action: "import",
-    after: { fileName, imported, duplicates, errors, autoClassified } as never,
+    after: { fileName, imported, duplicates, errors, autoClassified, repeatedImported } as never,
   });
 
   revalidatePath("/cash/transactions");
 
-  return { done: true, imported, duplicates, errors, autoClassified, errorSamples };
+  return { done: true, imported, duplicates, errors, autoClassified, repeatedImported, errorSamples };
 }

@@ -44,6 +44,13 @@ export function ImportWizard({ bankAccounts }: { bankAccounts: FieldOption[] }) 
           Импорт завершён: загружено {importState.imported}, дубликатов пропущено {importState.duplicates}, ошибок{" "}
           {importState.errors}. Автоклассифицировано по правилам: {importState.autoClassified ?? 0}.
         </p>
+        {importState.repeatedImported ? (
+          <p className="text-muted" style={{ marginTop: 8 }}>
+            Из них {importState.repeatedImported} — повторы уже встречавшейся в файле операции (та же дата, сумма и
+            назначение, номера операции банка нет). Они загружены как отдельные операции: при повторной загрузке
+            этого же файла дублей не будет.
+          </p>
+        ) : null}
         {importState.errorSamples && importState.errorSamples.length > 0 ? (
           <ul className="text-muted" style={{ marginTop: 8, paddingLeft: 18 }}>
             {importState.errorSamples.map((s) => (
