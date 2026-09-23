@@ -8,6 +8,9 @@ import { computePnlReport, PNL_TYPE_ORDER } from "@/lib/reports/pnl";
 import { computeDebtsReport } from "@/lib/reports/debts";
 import { computeManagementBalance } from "@/lib/reports/balance";
 import { computePayrollSummary, type PayrollSummaryLine } from "@/lib/payroll/summary";
+import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
+import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
+import { MONTH_NAMES_SHORT } from "@/lib/financial-model/drivers";
 import { buildWorkbookBuffer, type ExportSheet } from "@/lib/reports/xlsx-export";
 import { getAccessScope, payrollRunScopeWhere } from "@/lib/access-scope";
 import { prisma } from "@/lib/db";
@@ -25,6 +28,13 @@ const TYPE_LABELS: Record<string, string> = {
 
 function toNum(d: { toNumber: () => number }) {
   return d.toNumber();
+}
+
+const SCENARIO_HORIZON_MONTHS = 12;
+
+function addMonths(year: number, month: number, offset: number) {
+  const total = year * 12 + (month - 1) + offset;
+  return { year: Math.floor(total / 12), month: (total % 12) + 1 };
 }
 
 export async function GET(request: NextRequest) {
@@ -195,6 +205,48 @@ export async function GET(request: NextRequest) {
     ];
     sheets = [{ name: "Сводная ведомость", rows }];
     fileName = `payroll_summary_${from.toISOString().slice(0, 10)}.xlsx`;
+  } else if (type === "scenario-forecast") {
+    const scenarioId = sp.scenarioId;
+    if (!scenarioId) return new Response("Не указан scenarioId", { status: 400 });
+    const scenario = await prisma.financialScenario.findUnique({ where: { id: scenarioId }, include: { values: true } });
+    if (!scenario) return new Response("Сценарий не найден", { status: 404 });
+
+    const now = new Date();
+    const startYear = Number(sp.startYear) || now.getFullYear();
+    const startMonth = Number(sp.startMonth) || now.getMonth() + 1;
+    const months = Array.from({ length: SCENARIO_HORIZON_MONTHS }, (_, i) => addMonths(startYear, startMonth, i));
+
+    const startingCash = await getCurrentCashBalance(scope);
+    const rows_: ScenarioValueRow[] = scenario.values.map((v) => ({
+      year: v.year,
+      month: v.month,
+      driver: v.driver,
+      dimension: v.dimension,
+      value: v.value.toString(),
+    }));
+    const projection = projectScenario(startYear, startMonth, SCENARIO_HORIZON_MONTHS, rows_, startingCash);
+
+    const monthHeaders = months.map((m) => `${MONTH_NAMES_SHORT[m.month - 1]} ${m.year}`);
+    const rows: Array<Array<string | number>> = [
+      ["Прогноз сценария", scenario.name],
+      [],
+      ["Показатель", ...monthHeaders],
+      ["Выручка", ...projection.map((p) => toNum(p.revenue))],
+      ["Переменные расходы", ...projection.map((p) => toNum(p.variableCosts))],
+      ["Комиссия посредников", ...projection.map((p) => toNum(p.intermediaryCommission))],
+      ["Валовая прибыль", ...projection.map((p) => toNum(p.grossProfit))],
+      ["Постоянные расходы", ...projection.map((p) => toNum(p.fixedCosts))],
+      ["ФОТ", ...projection.map((p) => toNum(p.payrollCost))],
+      ["Требуемая численность", ...projection.map((p) => p.totalHeadcount)],
+      ["Операционная прибыль", ...projection.map((p) => toNum(p.operatingProfit))],
+      ["Точка безубыточности", ...projection.map((p) => (p.breakEvenRevenue ? toNum(p.breakEvenRevenue) : ""))],
+      ["Запас прочности, %", ...projection.map((p) => (p.marginOfSafetyPct ? toNum(p.marginOfSafetyPct) : ""))],
+      ["Остаток денег", ...projection.map((p) => toNum(p.cashBalance))],
+    ];
+    sheets = [{ name: "Прогноз", rows }];
+    // Content-Disposition filename must be ASCII (HTTP headers are ByteString) — Cyrillic scenario names get transliterated away.
+    const safeName = scenario.name.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "scenario";
+    fileName = `scenario_${safeName}.xlsx`;
   } else {
     return new Response("Неизвестный тип отчёта", { status: 400 });
   }

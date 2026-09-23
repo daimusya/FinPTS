@@ -6,6 +6,8 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney, formatNumber, sumMoney } from "@/lib/money";
 import { GENERAL_DRIVERS, DEPARTMENT_DRIVERS, MONTH_NAMES_SHORT, SCENARIO_TYPE_LABELS } from "@/lib/financial-model/drivers";
 import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
+import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
+import { getAccessScope } from "@/lib/access-scope";
 import { saveScenarioValuesAction } from "../actions";
 
 const HORIZON_MONTHS = 12;
@@ -13,13 +15,6 @@ const HORIZON_MONTHS = 12;
 function addMonths(year: number, month: number, offset: number) {
   const total = year * 12 + (month - 1) + offset;
   return { year: Math.floor(total / 12), month: (total % 12) + 1 };
-}
-
-async function getCurrentCashBalance(): Promise<number> {
-  const transactions = await prisma.bankTransaction.findMany({ select: { amount: true, direction: true } });
-  const inflow = sumMoney(transactions.filter((t) => t.direction === "INFLOW").map((t) => t.amount));
-  const outflow = sumMoney(transactions.filter((t) => t.direction === "OUTFLOW").map((t) => t.amount));
-  return inflow.minus(outflow).toNumber();
 }
 
 export default async function ScenarioDetailPage({
@@ -68,7 +63,8 @@ export default async function ScenarioDetailPage({
     return dimension ? `v__${driver}__${dimension}__${year}_${month}` : `v__${driver}__${year}_${month}`;
   }
 
-  const startingCash = await getCurrentCashBalance();
+  const scope = await getAccessScope(session);
+  const startingCash = await getCurrentCashBalance(scope);
   const rows: ScenarioValueRow[] = scenario.values.map((v) => ({
     year: v.year,
     month: v.month,
@@ -81,6 +77,7 @@ export default async function ScenarioDetailPage({
   const totalRevenue = sumMoney(projection.map((p) => p.revenue));
   const totalOperatingProfit = sumMoney(projection.map((p) => p.operatingProfit));
   const finalCash = projection[projection.length - 1]?.cashBalance ?? sumMoney([]);
+  const exportHref = `/api/reports/export?type=scenario-forecast&scenarioId=${id}&startYear=${startYear}&startMonth=${startMonth}`;
 
   return (
     <div className="page">
@@ -94,9 +91,14 @@ export default async function ScenarioDetailPage({
             ({formatMoney(startingCash)}) взят как стартовая точка прогноза.
           </p>
         </div>
-        <Link href="/financial-model" className="btn btn-secondary">
-          К списку
-        </Link>
+        <div style={{ display: "flex", gap: 8 }}>
+          <a href={exportHref} className="btn btn-secondary">
+            Экспорт в Excel
+          </a>
+          <Link href="/financial-model" className="btn btn-secondary">
+            К списку
+          </Link>
+        </div>
       </div>
 
       <form className="filter-bar">
