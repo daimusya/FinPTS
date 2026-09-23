@@ -45,6 +45,7 @@ model Role {
 
   permissions RolePermission[]
   users       UserRole[]
+  approvalSteps PaymentApprovalRouteStep[]
 
   @@map("roles")
 }
@@ -141,6 +142,7 @@ model Organization {
   userAccess        UserOrganizationAccess[]
   payrollRuns       PayrollRun[]
   paymentRequests   PaymentRequest[]
+  approvalRoutes    PaymentApprovalRoute[]
 
   @@map("organizations")
 }
@@ -663,6 +665,11 @@ model PaymentRequest {
   status            PaymentRequestStatus  @default(DRAFT)
   comment           String?
   createdById       String
+  /// Маршрут, выбранный на момент создания заявки (снимок — правки маршрута
+  /// после создания заявки на неё уже не влияют). Null = подходящего
+  /// маршрута не нашлось, действует старое одноступенчатое согласование.
+  routeId           String?
+  currentStep       Int                   @default(1)
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
 
@@ -670,6 +677,7 @@ model PaymentRequest {
   cashFlowArticle CashFlowArticle?           @relation(fields: [cashFlowArticleId], references: [id])
   organization    Organization               @relation(fields: [organizationId], references: [id])
   counterparty    Counterparty?              @relation(fields: [counterpartyId], references: [id])
+  route           PaymentApprovalRoute?      @relation(fields: [routeId], references: [id])
   approvals       PaymentRequestApproval[]
 
   @@index([dueDate])
@@ -683,12 +691,58 @@ model PaymentRequestApproval {
   approverId       String
   decision         String   // approved / rejected
   comment          String?
+  /// Номер шага маршрута, к которому относится решение. Null — старое
+  /// одноступенчатое согласование (заявка без маршрута).
+  stepOrder        Int?
   decidedAt        DateTime @default(now())
 
   paymentRequest PaymentRequest @relation(fields: [paymentRequestId], references: [id], onDelete: Cascade)
   approver       User           @relation(fields: [approverId], references: [id])
 
   @@map("payment_request_approvals")
+}
+
+/**
+ * Настраиваемый многошаговый маршрут согласования заявок на оплату
+ * (раздел 9 ТЗ). Маршрут применяется к заявке, если сумма попадает в
+ * [minAmount, maxAmount] (null с любой стороны — без ограничения) и
+ * организация совпадает (null — любая организация). Среди подходящих
+ * маршрутов выбирается с наименьшим priority. Заявка без подходящего
+ * маршрута идёт по старому одноступенчатому согласованию
+ * (payment_requests.approve) — так добавление маршрутов не меняет
+ * поведение системы, пока администратор явно их не создаст.
+ */
+model PaymentApprovalRoute {
+  id             String   @id @default(cuid())
+  name           String
+  priority       Int      @default(100)
+  isArchived     Boolean  @default(false)
+  minAmount      Decimal? @db.Decimal(18, 2)
+  maxAmount      Decimal? @db.Decimal(18, 2)
+  organizationId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization?              @relation(fields: [organizationId], references: [id])
+  steps        PaymentApprovalRouteStep[]
+  requests     PaymentRequest[]
+
+  @@index([priority])
+  @@map("payment_approval_routes")
+}
+
+/** Один шаг маршрута — какая роль должна согласовать заявку на этом шаге. */
+model PaymentApprovalRouteStep {
+  id        String @id @default(cuid())
+  routeId   String
+  stepOrder Int
+  roleId    String
+
+  route PaymentApprovalRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  role  Role                 @relation(fields: [roleId], references: [id])
+
+  @@unique([routeId, stepOrder])
+  @@map("payment_approval_route_steps")
 }
 
 // =========================================================================

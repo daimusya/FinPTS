@@ -86,6 +86,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/admin/users", label: "Пользователи" },
       { href: "/admin/roles", label: "Роли и права" },
+      { href: "/admin/payment-approval-routes", label: "Маршруты согласования" },
       { href: "/admin/periods", label: "Периоды" },
       { href: "/admin/audit-log", label: "Журнал аудита" },
     ],
