@@ -17,7 +17,10 @@ function parseField(field: FieldConfig, formData: FormData): unknown {
     if (field.required) {
       throw new Error(`Поле «${field.label}» обязательно для заполнения`);
     }
-    return field.defaultValue ?? null;
+    // Omit rather than send null: some columns are non-nullable with a DB
+    // default (e.g. Project.status) and reject an explicit null — leaving
+    // the key out lets Prisma apply the column default instead.
+    return field.defaultValue;
   }
   if (field.type === "number") {
     const num = Number(value);

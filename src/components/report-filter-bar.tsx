@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import type { ReactNode } from "react";
 
 const MONTH_NAMES = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -16,7 +17,15 @@ export interface ReportFilterValues {
   counterpartyId?: string;
 }
 
-export async function ReportFilterBar({ values, extraQuery }: { values: ReportFilterValues; extraQuery?: string }) {
+export async function ReportFilterBar({
+  values,
+  extraQuery,
+  children,
+}: {
+  values: ReportFilterValues;
+  extraQuery?: string;
+  children?: ReactNode;
+}) {
   const [organizations, departments, costCenters, projects, productsServices, counterparties] = await Promise.all([
     prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     prisma.department.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
@@ -109,6 +118,7 @@ export async function ReportFilterBar({ values, extraQuery }: { values: ReportFi
           ))}
         </select>
       </label>
+      {children}
       <button type="submit" className="btn btn-secondary">
         Применить
       </button>

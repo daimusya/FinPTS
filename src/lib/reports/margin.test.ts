@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import Decimal from "decimal.js";
-import { computeBreakEven, computeMarginOfSafety } from "./margin";
+import { allocateIndirectCosts, computeBreakEven, computeMarginOfSafety } from "./margin";
 
 function d(n: number) {
   return new Decimal(n);
@@ -40,5 +40,67 @@ describe("computeMarginOfSafety", () => {
 
   it("can be negative when current revenue is already below break-even", () => {
     expect(computeMarginOfSafety(d(400), d(500))?.toNumber()).toBe(-25);
+  });
+});
+
+describe("allocateIndirectCosts", () => {
+  it("returns an empty allocation for no rows", () => {
+    expect(allocateIndirectCosts([], d(1000), "equal").size).toBe(0);
+  });
+
+  it("allocates zero to every row when total indirect is zero", () => {
+    const rows = [{ key: "a", revenue: d(100), grossProfit: d(50) }];
+    const result = allocateIndirectCosts(rows, d(0), "revenue");
+    expect(result.get("a")?.toNumber()).toBe(0);
+  });
+
+  it("'equal' splits indirect costs evenly regardless of size", () => {
+    const rows = [
+      { key: "a", revenue: d(1000), grossProfit: d(500) },
+      { key: "b", revenue: d(100), grossProfit: d(10) },
+    ];
+    const result = allocateIndirectCosts(rows, d(300), "equal");
+    expect(result.get("a")?.toNumber()).toBe(150);
+    expect(result.get("b")?.toNumber()).toBe(150);
+  });
+
+  it("'revenue' allocates proportionally to each row's revenue share", () => {
+    const rows = [
+      { key: "a", revenue: d(750), grossProfit: d(1) },
+      { key: "b", revenue: d(250), grossProfit: d(1) },
+    ];
+    const result = allocateIndirectCosts(rows, d(400), "revenue");
+    expect(result.get("a")?.toNumber()).toBe(300);
+    expect(result.get("b")?.toNumber()).toBe(100);
+  });
+
+  it("'grossProfit' allocates proportionally to each row's gross profit share", () => {
+    const rows = [
+      { key: "a", revenue: d(1), grossProfit: d(300) },
+      { key: "b", revenue: d(1), grossProfit: d(100) },
+    ];
+    const result = allocateIndirectCosts(rows, d(400), "grossProfit");
+    expect(result.get("a")?.toNumber()).toBe(300);
+    expect(result.get("b")?.toNumber()).toBe(100);
+  });
+
+  it("excludes negative/zero-weight rows from the proportional split (they still get zero, not a negative share)", () => {
+    const rows = [
+      { key: "profitable", revenue: d(1), grossProfit: d(200) },
+      { key: "lossmaking", revenue: d(1), grossProfit: d(-50) },
+    ];
+    const result = allocateIndirectCosts(rows, d(100), "grossProfit");
+    expect(result.get("profitable")?.toNumber()).toBe(100);
+    expect(result.get("lossmaking")?.toNumber()).toBe(0);
+  });
+
+  it("falls back to an equal split when every row has zero weight, instead of silently dropping the cost", () => {
+    const rows = [
+      { key: "a", revenue: d(1), grossProfit: d(-100) },
+      { key: "b", revenue: d(1), grossProfit: d(-50) },
+    ];
+    const result = allocateIndirectCosts(rows, d(200), "grossProfit");
+    expect(result.get("a")?.toNumber()).toBe(100);
+    expect(result.get("b")?.toNumber()).toBe(100);
   });
 });

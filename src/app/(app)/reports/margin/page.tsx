@@ -3,14 +3,20 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney, formatNumber } from "@/lib/money";
 import { resolveReportPeriod } from "@/lib/reports/period";
 import { extractFilters, type ReportSearchParams } from "@/lib/reports/filters";
-import { computeMarginReport, type DimensionMarginRow } from "@/lib/reports/margin";
+import {
+  computeMarginReport,
+  INDIRECT_DRIVER_LABELS,
+  INDIRECT_DRIVER_OPTIONS,
+  type DimensionMarginRow,
+  type IndirectDriver,
+} from "@/lib/reports/margin";
 import { ReportFilterBar } from "@/components/report-filter-bar";
 import { getAccessScope } from "@/lib/access-scope";
 
 export default async function MarginReportPage({
   searchParams,
 }: {
-  searchParams: Promise<ReportSearchParams>;
+  searchParams: Promise<ReportSearchParams & { driver?: string }>;
 }) {
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.REPORTS_VIEW)) {
@@ -25,7 +31,10 @@ export default async function MarginReportPage({
   const period = resolveReportPeriod(sp);
   const filters = extractFilters(sp);
   const scope = await getAccessScope(session);
-  const report = await computeMarginReport(period, filters, scope);
+  const driver: IndirectDriver = INDIRECT_DRIVER_OPTIONS.includes(sp.driver as IndirectDriver)
+    ? (sp.driver as IndirectDriver)
+    : "revenue";
+  const report = await computeMarginReport(period, filters, scope, driver);
 
   return (
     <div className="page">
@@ -34,13 +43,24 @@ export default async function MarginReportPage({
           <h1>Маржинальность и точка безубыточности</h1>
           <p>
             Период: {period.label}. Точка безубыточности = Постоянные затраты / Доля маржинального дохода.
-            Драйвер распределения косвенных расходов — пропорционально выручке (единственный вариант в этой
-            версии; настраиваемый драйвер — Этап 6).
+            Косвенные расходы по проектам/продуктам/клиентам обычно не заведены напрямую — распределяются между
+            ними по выбранному ниже драйверу, настраиваемому на лету.
           </p>
         </div>
       </div>
 
-      <ReportFilterBar values={{ year: period.year, month: period.month, ...filters }} />
+      <ReportFilterBar values={{ year: period.year, month: period.month, ...filters }}>
+        <label className="field">
+          <span>Драйвер косвенных расходов</span>
+          <select name="driver" defaultValue={driver}>
+            {INDIRECT_DRIVER_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {INDIRECT_DRIVER_LABELS[option]}
+              </option>
+            ))}
+          </select>
+        </label>
+      </ReportFilterBar>
 
       <div className="stat-grid">
         <div className="stat-card">
@@ -91,6 +111,9 @@ function DimensionTable({ title, rows }: { title: string; rows: DimensionMarginR
               <th>Прямые затраты</th>
               <th>Валовая прибыль</th>
               <th>Маржинальность</th>
+              <th>Косвенные (аллокация)</th>
+              <th>Операционная прибыль</th>
+              <th>Опер. маржинальность</th>
             </tr>
           </thead>
           <tbody>
@@ -101,11 +124,14 @@ function DimensionTable({ title, rows }: { title: string; rows: DimensionMarginR
                 <td className="mono">{formatMoney(row.directCost)}</td>
                 <td className="mono">{formatMoney(row.grossProfit)}</td>
                 <td className="mono">{row.grossMarginPct ? `${formatNumber(row.grossMarginPct)}%` : "—"}</td>
+                <td className="mono">{formatMoney(row.allocatedIndirect)}</td>
+                <td className="mono">{formatMoney(row.operatingProfit)}</td>
+                <td className="mono">{row.operatingMarginPct ? `${formatNumber(row.operatingMarginPct)}%` : "—"}</td>
               </tr>
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="empty-state">
+                <td colSpan={8} className="empty-state">
                   Нет данных за период.
                 </td>
               </tr>

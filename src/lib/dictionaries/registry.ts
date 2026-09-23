@@ -215,7 +215,7 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "organizationId", label: "Организация", type: "select", required: true, loadOptions: organizationOptions },
       { name: "name", label: "Название", type: "text", required: true },
       { name: "code", label: "Код", type: "text" },
-      { name: "status", label: "Статус", type: "select", options: PROJECT_STATUS_OPTIONS },
+      { name: "status", label: "Статус", type: "select", options: PROJECT_STATUS_OPTIONS, defaultValue: "active" },
       { name: "startDate", label: "Дата начала", type: "date" },
       { name: "endDate", label: "Дата окончания", type: "date" },
     ],

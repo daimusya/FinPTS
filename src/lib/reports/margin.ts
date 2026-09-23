@@ -34,6 +34,61 @@ export interface DimensionMarginRow {
   directCost: Decimal;
   grossProfit: Decimal;
   grossMarginPct: Decimal | null;
+  allocatedIndirect: Decimal;
+  operatingProfit: Decimal;
+  operatingMarginPct: Decimal | null;
+}
+
+export type IndirectDriver = "revenue" | "grossProfit" | "equal";
+
+export const INDIRECT_DRIVER_OPTIONS: IndirectDriver[] = ["revenue", "grossProfit", "equal"];
+
+export const INDIRECT_DRIVER_LABELS: Record<IndirectDriver, string> = {
+  revenue: "Пропорционально выручке",
+  grossProfit: "Пропорционально валовой прибыли",
+  equal: "Поровну между всеми",
+};
+
+/**
+ * Распределяет общую сумму косвенных расходов периода между строками
+ * измерения (проект/продукт/клиент). Косвенные расходы в документах
+ * обычно не привязаны к конкретному проекту/продукту/клиенту, поэтому
+ * распределяются только по выбранному драйверу, а не по факту.
+ * «revenue»/«grossProfit» — вес строки равен её выручке/валовой прибыли
+ * (отрицательные и нулевые веса не участвуют, только тянут долю вниз);
+ * если у всех строк вес получился нулевым (например, драйвер —
+ * grossProfit, а все строки в убытке) — распределяем поровну, чтобы
+ * расходы не потерялись молча. «equal» — поровну всегда.
+ */
+export function allocateIndirectCosts(
+  rows: Array<{ key: string; revenue: Decimal; grossProfit: Decimal }>,
+  totalIndirect: Decimal,
+  driver: IndirectDriver,
+): Map<string, Decimal> {
+  const result = new Map<string, Decimal>();
+  if (rows.length === 0) return result;
+  if (totalIndirect.equals(0)) {
+    for (const row of rows) result.set(row.key, toDecimal(0));
+    return result;
+  }
+
+  function weightFor(row: { revenue: Decimal; grossProfit: Decimal }): Decimal {
+    if (driver === "equal") return new Decimal(1);
+    const base = driver === "revenue" ? row.revenue : row.grossProfit;
+    return base.greaterThan(0) ? base : toDecimal(0);
+  }
+
+  let weights = rows.map(weightFor);
+  let totalWeight = sumMoney(weights);
+  if (totalWeight.equals(0)) {
+    weights = rows.map(() => new Decimal(1));
+    totalWeight = new Decimal(rows.length);
+  }
+
+  rows.forEach((row, i) => {
+    result.set(row.key, totalIndirect.times(weights[i]).dividedBy(totalWeight));
+  });
+  return result;
 }
 
 type Dimension = "project" | "productService" | "counterparty";
@@ -43,6 +98,8 @@ async function aggregateByDimension(
   filters: ReportFilters,
   dimension: Dimension,
   scope: AccessScope,
+  totalIndirect: Decimal,
+  driver: IndirectDriver,
 ): Promise<DimensionMarginRow[]> {
   const documents = await prisma.accrualDocument.findMany({
     where: {
@@ -82,7 +139,19 @@ async function aggregateByDimension(
         label = doc.counterparty.shortName || doc.counterparty.fullName;
       }
 
-      const row = map.get(key) ?? { key, label, revenue: toDecimal(0), directCost: toDecimal(0), grossProfit: toDecimal(0), grossMarginPct: null };
+      const row =
+        map.get(key) ??
+        ({
+          key,
+          label,
+          revenue: toDecimal(0),
+          directCost: toDecimal(0),
+          grossProfit: toDecimal(0),
+          grossMarginPct: null,
+          allocatedIndirect: toDecimal(0),
+          operatingProfit: toDecimal(0),
+          operatingMarginPct: null,
+        } as DimensionMarginRow);
       const amount = toDecimal(line.amount);
       if (type === "REVENUE") row.revenue = row.revenue.plus(amount);
       else row.directCost = row.directCost.plus(amount);
@@ -95,6 +164,14 @@ async function aggregateByDimension(
     row.grossProfit = row.revenue.minus(row.directCost);
     row.grossMarginPct = row.revenue.greaterThan(0) ? row.grossProfit.dividedBy(row.revenue).times(100) : null;
   }
+
+  const allocation = allocateIndirectCosts(rows, totalIndirect, driver);
+  for (const row of rows) {
+    row.allocatedIndirect = allocation.get(row.key) ?? toDecimal(0);
+    row.operatingProfit = row.grossProfit.minus(row.allocatedIndirect);
+    row.operatingMarginPct = row.revenue.greaterThan(0) ? row.operatingProfit.dividedBy(row.revenue).times(100) : null;
+  }
+
   return rows.sort((a, b) => b.revenue.comparedTo(a.revenue));
 }
 
@@ -118,6 +195,7 @@ export async function computeMarginReport(
   period: ReportPeriod,
   filters: ReportFilters,
   scope: AccessScope = UNRESTRICTED_SCOPE,
+  driver: IndirectDriver = "revenue",
 ): Promise<MarginReport> {
   const documents = await prisma.accrualDocument.findMany({
     where: {
@@ -173,9 +251,9 @@ export async function computeMarginReport(
   const marginOfSafetyPct = computeMarginOfSafety(totals.revenue, breakEvenRevenue);
 
   const [byProject, byProductService, byCounterparty] = await Promise.all([
-    aggregateByDimension(period, filters, "project", scope),
-    aggregateByDimension(period, filters, "productService", scope),
-    aggregateByDimension(period, filters, "counterparty", scope),
+    aggregateByDimension(period, filters, "project", scope, totals.indirect, driver),
+    aggregateByDimension(period, filters, "productService", scope, totals.indirect, driver),
+    aggregateByDimension(period, filters, "counterparty", scope, totals.indirect, driver),
   ]);
 
   return {
