@@ -18,6 +18,19 @@ export const PNL_TYPE_ORDER = [
 
 export type PnlType = (typeof PNL_TYPE_ORDER)[number];
 
+export const PNL_TYPE_LABELS: Record<PnlType, string> = {
+  REVENUE: "Выручка",
+  DIRECT_VARIABLE: "Прямые переменные расходы",
+  DIRECT_FIXED: "Прямые постоянные расходы",
+  INDIRECT: "Косвенные расходы",
+  OTHER_INCOME: "Прочие доходы",
+  OTHER_EXPENSE: "Прочие расходы",
+  TAX: "Налоги",
+};
+
+/** Доходные разделы: перевыполнение плана по ним — хорошо, по остальным (расходам) — плохо. */
+export const PNL_INCOME_TYPES: ReadonlySet<PnlType> = new Set(["REVENUE", "OTHER_INCOME"]);
+
 export interface PnlArticleRow {
   articleId: string | null;
   articleName: string;

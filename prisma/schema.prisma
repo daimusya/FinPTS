@@ -143,6 +143,7 @@ model Organization {
   payrollRuns       PayrollRun[]
   paymentRequests   PaymentRequest[]
   approvalRoutes    PaymentApprovalRoute[]
+  budgetEntries     BudgetEntry[]
 
   @@map("organizations")
 }
@@ -345,6 +346,7 @@ model CashFlowArticle {
   bankTx             BankTransaction[]
   paymentReqs        PaymentRequest[]
   classificationRules BankClassificationRule[]
+  budgetEntries      BudgetEntry[]
 
   @@map("cash_flow_articles")
 }
@@ -371,6 +373,7 @@ model PnlArticle {
   children     PnlArticle[]          @relation("PnlArticleHierarchy")
   accrualLines AccrualDocumentLine[]
   payrollTypes PayrollAccrualType[]
+  budgetEntries BudgetEntry[]
 
   @@map("pnl_articles")
 }
@@ -1106,6 +1109,34 @@ model FinancialScenarioValue {
 
   @@unique([scenarioId, year, month, driver, dimension])
   @@map("financial_scenario_values")
+}
+
+enum BudgetKind {
+  CASH_FLOW
+  PNL
+}
+
+// Плановая сумма по статье ДДС (kind = CASH_FLOW) или ОПиУ (kind = PNL) за
+// месяц. organizationId = null — план по компании в целом, без разбивки по
+// организациям. Уникальность (kind, year, month, organization, article)
+// обеспечивает сохранение сетки целиком (удалить год и записать заново):
+// составной unique с NULL в PostgreSQL не работает.
+model BudgetEntry {
+  id                String     @id @default(cuid())
+  kind              BudgetKind
+  year              Int
+  month             Int
+  organizationId    String?
+  cashFlowArticleId String?
+  pnlArticleId      String?
+  amount            Decimal    @db.Decimal(18, 2)
+
+  organization    Organization?    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  cashFlowArticle CashFlowArticle? @relation(fields: [cashFlowArticleId], references: [id], onDelete: Cascade)
+  pnlArticle      PnlArticle?      @relation(fields: [pnlArticleId], references: [id], onDelete: Cascade)
+
+  @@index([kind, year, month])
+  @@map("budget_entries")
 }
 
 // =========================================================================

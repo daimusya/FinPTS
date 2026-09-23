@@ -62,7 +62,10 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     title: "Моделирование",
-    items: [{ href: "/financial-model", label: "Финансовые сценарии" }],
+    items: [
+      { href: "/budget", label: "Бюджет (план)" },
+      { href: "/financial-model", label: "Финансовые сценарии" },
+    ],
   },
   {
     title: "Отчёты",

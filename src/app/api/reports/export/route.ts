@@ -4,7 +4,20 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { resolveReportPeriod } from "@/lib/reports/period";
 import { extractFilters } from "@/lib/reports/filters";
 import { computeCashFlowReport } from "@/lib/reports/cashflow";
-import { computePnlReport, PNL_TYPE_ORDER } from "@/lib/reports/pnl";
+import { computePnlReport, derivePnlTotals, PNL_TYPE_LABELS as TYPE_LABELS, PNL_TYPE_ORDER } from "@/lib/reports/pnl";
+import { loadPlanItems } from "@/lib/budget/load";
+import {
+  mergePlanIntoRows,
+  planFactMetrics,
+  planTotal,
+  resolvePlanAvailability,
+  type PlanFactMetrics,
+  type PlanItem,
+} from "@/lib/budget/plan-fact";
+import type { ReportFilters } from "@/lib/reports/filters";
+import type { AccessScope } from "@/lib/access-scope";
+import type { BudgetKind } from "@prisma/client";
+import type Decimal from "decimal.js";
 import { computeDebtsReport } from "@/lib/reports/debts";
 import { computeManagementBalance } from "@/lib/reports/balance";
 import { computePayrollSummary, type PayrollSummaryLine } from "@/lib/payroll/summary";
@@ -16,18 +29,27 @@ import { getAccessScope, payrollRunScopeWhere } from "@/lib/access-scope";
 import { prisma } from "@/lib/db";
 import { toDecimal } from "@/lib/money";
 
-const TYPE_LABELS: Record<string, string> = {
-  REVENUE: "Выручка",
-  DIRECT_VARIABLE: "Прямые переменные расходы",
-  DIRECT_FIXED: "Прямые постоянные расходы",
-  INDIRECT: "Косвенные расходы",
-  OTHER_INCOME: "Прочие доходы",
-  OTHER_EXPENSE: "Прочие расходы",
-  TAX: "Налоги",
-};
-
 function toNum(d: { toNumber: () => number }) {
   return d.toNumber();
+}
+
+const PLAN_HEADERS = ["План", "Отклонение", "Исполнение, %"];
+
+function planCells(m: PlanFactMetrics): Array<string | number> {
+  if (!m.plan) return ["", "", ""];
+  return [toNum(m.plan), m.deviation ? toNum(m.deviation) : "", m.executionPct ? Number(m.executionPct.toFixed(2)) : ""];
+}
+
+/** План для выгрузки — по тем же правилам, что и на экране; пусто, если с этими фильтрами план не сравним. */
+async function loadAvailablePlan(
+  kind: BudgetKind,
+  year: number,
+  month: number,
+  filters: ReportFilters,
+  scope: AccessScope,
+): Promise<PlanItem[]> {
+  const availability = resolvePlanAvailability(filters, scope);
+  return availability.available ? loadPlanItems(kind, year, month, availability.organizationIds) : [];
 }
 
 const SCENARIO_HORIZON_MONTHS = 12;
@@ -56,20 +78,35 @@ export async function GET(request: NextRequest) {
   if (type === "cash-flow") {
     const period = resolveReportPeriod(sp);
     const report = await computeCashFlowReport(period, filters, scope);
+    const planItems = await loadAvailablePlan("CASH_FLOW", period.year, period.month, filters, scope);
+    const withPlan = planItems.length > 0;
+    const header = withPlan ? ["Статья", "Факт", ...PLAN_HEADERS] : ["Статья", "Сумма"];
+    const articleRows = (rows: typeof report.inflowRows, group: string) =>
+      mergePlanIntoRows(rows, planItems.filter((p) => p.group === group), (item) => ({
+        articleId: item.articleId,
+        articleName: item.articleName,
+        amount: toDecimal(0),
+        transactionIds: [],
+      })).map((r) => [r.articleName, toNum(r.amount), ...(withPlan ? planCells(r) : [])]);
+    const totalRow = (label: string, fact: Decimal, group: string) => [
+      label,
+      toNum(fact),
+      ...(withPlan ? planCells(planFactMetrics(fact, planTotal(planItems, group))) : []),
+    ];
     const rows: Array<Array<string | number>> = [
       ["ДДС", period.label],
       [],
       ["Остаток на начало периода", toNum(report.openingBalance)],
       [],
       ["Поступления по статьям"],
-      ["Статья", "Сумма"],
-      ...report.inflowRows.map((r) => [r.articleName, toNum(r.amount)]),
-      ["Итого поступления", toNum(report.totalInflow)],
+      header,
+      ...articleRows(report.inflowRows, "INFLOW"),
+      totalRow("Итого поступления", report.totalInflow, "INFLOW"),
       [],
       ["Выплаты по статьям"],
-      ["Статья", "Сумма"],
-      ...report.outflowRows.map((r) => [r.articleName, toNum(r.amount)]),
-      ["Итого выплаты", toNum(report.totalOutflow)],
+      header,
+      ...articleRows(report.outflowRows, "OUTFLOW"),
+      totalRow("Итого выплаты", report.totalOutflow, "OUTFLOW"),
       [],
       ["Внутренние переводы (нетто)", toNum(report.transfersNet)],
       ["Остаток на конец периода", toNum(report.closingBalance)],
@@ -79,19 +116,39 @@ export async function GET(request: NextRequest) {
   } else if (type === "pnl") {
     const period = resolveReportPeriod(sp);
     const report = await computePnlReport(period, filters, scope);
+    const planItems = await loadAvailablePlan("PNL", period.year, period.month, filters, scope);
+    const withPlan = planItems.length > 0;
+    const plan = (fact: Decimal, planned: Decimal | null) => (withPlan ? planCells(planFactMetrics(fact, planned)) : []);
     const rows: Array<Array<string | number>> = [["ОПиУ", period.label], []];
+    if (withPlan) rows.push(["Статья", "Факт", ...PLAN_HEADERS]);
+    const planByType = new Map(PNL_TYPE_ORDER.map((t) => [t, planTotal(planItems, t)]));
     for (const t of PNL_TYPE_ORDER) {
       const bucket = report.byType[t];
-      rows.push([TYPE_LABELS[t], toNum(bucket.total)]);
-      for (const row of bucket.rows) {
-        rows.push([`  ${row.articleName}`, toNum(row.amount)]);
+      const merged = mergePlanIntoRows(bucket.rows, planItems.filter((p) => p.group === t), (item) => ({
+        articleId: item.articleId,
+        articleName: item.articleName,
+        amount: toDecimal(0),
+        documentIds: [],
+      }));
+      rows.push([TYPE_LABELS[t], toNum(bucket.total), ...plan(bucket.total, planByType.get(t) ?? null)]);
+      for (const row of merged) {
+        rows.push([`  ${row.articleName}`, toNum(row.amount), ...(withPlan ? planCells(row) : [])]);
       }
     }
+    const planTotals = derivePnlTotals({
+      revenue: planByType.get("REVENUE") ?? toDecimal(0),
+      directVariable: planByType.get("DIRECT_VARIABLE") ?? toDecimal(0),
+      directFixed: planByType.get("DIRECT_FIXED") ?? toDecimal(0),
+      indirect: planByType.get("INDIRECT") ?? toDecimal(0),
+      otherIncome: planByType.get("OTHER_INCOME") ?? toDecimal(0),
+      otherExpense: planByType.get("OTHER_EXPENSE") ?? toDecimal(0),
+      tax: planByType.get("TAX") ?? toDecimal(0),
+    });
     rows.push(
       [],
-      ["Валовая прибыль", toNum(report.grossProfit)],
-      ["Операционная прибыль", toNum(report.operatingProfit)],
-      ["Чистая прибыль", toNum(report.netProfit)],
+      ["Валовая прибыль", toNum(report.grossProfit), ...plan(report.grossProfit, planTotals.grossProfit)],
+      ["Операционная прибыль", toNum(report.operatingProfit), ...plan(report.operatingProfit, planTotals.operatingProfit)],
+      ["Чистая прибыль", toNum(report.netProfit), ...plan(report.netProfit, planTotals.netProfit)],
     );
     sheets = [{ name: "ОПиУ", rows }];
     fileName = `opiu_${period.year}_${period.month}.xlsx`;

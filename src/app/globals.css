@@ -532,6 +532,15 @@ tbody tr:hover {
   color: var(--color-graphite-500);
 }
 
+/* Plan-fact deviation: good or bad for the company, not merely positive or negative. */
+.text-good {
+  color: var(--color-success);
+}
+
+.text-bad {
+  color: var(--color-danger);
+}
+
 .mono {
   font-family: var(--font-mono), monospace;
 }
