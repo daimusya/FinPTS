@@ -4,6 +4,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { DICTIONARY_REGISTRY, getDictionaryConfig } from "@/lib/dictionaries/registry";
 import { DictionaryFormFields, resolveFieldDefault, type ResolvedField } from "@/components/dictionary-form-fields";
 import { updateDictionaryItem } from "../../../actions";
+import { CounterpartyDetails } from "@/components/counterparty-details";
 
 export default async function EditDictionaryItemPage({
   params,
@@ -65,6 +66,8 @@ export default async function EditDictionaryItemPage({
           </div>
         </form>
       </div>
+
+      {slug === "counterparties" ? <CounterpartyDetails counterpartyId={id} /> : null}
     </div>
   );
 }
