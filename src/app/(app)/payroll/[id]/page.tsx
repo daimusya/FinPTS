@@ -42,6 +42,10 @@ export default async function PayrollRunDetailPage({
   });
   if (!run) notFound();
 
+  const accrualDocument = await prisma.accrualDocument.findUnique({
+    where: { sourceSystem_externalId: { sourceSystem: "payroll", externalId: run.id } },
+  });
+
   const [employees, accrualTypes, departments, projects] = await Promise.all([
     prisma.employee.findMany({ where: { organizationId: run.organizationId, status: "ACTIVE" }, orderBy: { fullName: "asc" } }),
     prisma.payrollAccrualType.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
@@ -93,6 +97,22 @@ export default async function PayrollRunDetailPage({
       </div>
 
       {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
+
+      {accrualDocument ? (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <p>
+            Начисление проведено в ОПиУ:{" "}
+            <Link href={`/accruals/${accrualDocument.id}`}>документ № {accrualDocument.number}</Link>
+          </p>
+        </div>
+      ) : run.status === "APPROVED" || run.status === "PAID" ? (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <p className="text-muted">
+            Ни одна строка расчёта не привязана к статье ОПиУ (в справочнике «Виды начислений зарплаты»), поэтому
+            документ начисления не создан — расход по этому расчёту нужно провести вручную.
+          </p>
+        </div>
+      ) : null}
 
       <div className="stat-grid">
         <div className="stat-card">

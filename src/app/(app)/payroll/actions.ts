@@ -8,6 +8,7 @@ import { logAudit } from "@/lib/audit";
 import { assertPeriodOpenForDate, getOrCreatePeriod } from "@/lib/period";
 import { PERMISSIONS } from "@/lib/permissions";
 import { calculatePayrollRun, computeTaxes, loadTaxRates } from "@/lib/payroll/calculate";
+import { postPayrollRunToAccrual } from "@/lib/payroll/post-to-accrual";
 import { toDecimal } from "@/lib/money";
 import { PayrollRunStatus } from "@prisma/client";
 
@@ -151,6 +152,19 @@ async function transitionRun(id: string, from: PayrollRunStatus[], to: PayrollRu
 export async function approvePayrollRunAction(id: string) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
   await transitionRun(id, [PayrollRunStatus.CALCULATED], PayrollRunStatus.APPROVED, "approve", session.userId);
+
+  const accrualDocumentId = await postPayrollRunToAccrual(id);
+  if (accrualDocumentId) {
+    await logAudit({
+      userId: session.userId,
+      entityType: "payroll_run",
+      entityId: id,
+      action: "post_to_accrual",
+      after: { accrualDocumentId } as never,
+      accrualDocumentId,
+    });
+    revalidatePath("/accruals");
+  }
 }
 
 export async function markPayrollRunPaidAction(id: string) {
