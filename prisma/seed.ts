@@ -75,17 +75,18 @@ const INITIAL_PAYROLL_ACCRUAL_TYPES: Array<{
   { name: "Удержание", code: "deduction", subjectToNdfl: false, subjectToInsurance: false, affectsAvgEarnings: false, paymentMethod: "BANK" },
 ];
 
-const INITIAL_BALANCE_ARTICLES: Array<{ name: string; category: "ASSET" | "LIABILITY" | "EQUITY" }> = [
-  { name: "Денежные средства", category: "ASSET" },
-  { name: "Дебиторская задолженность", category: "ASSET" },
-  { name: "Авансы выданные", category: "ASSET" },
+// systemCode marks lines the management balance derives from operations (see BalanceArticle in the schema).
+const INITIAL_BALANCE_ARTICLES: Array<{ name: string; category: "ASSET" | "LIABILITY" | "EQUITY"; systemCode?: string }> = [
+  { name: "Денежные средства", category: "ASSET", systemCode: "cash" },
+  { name: "Дебиторская задолженность", category: "ASSET", systemCode: "receivable" },
+  { name: "Авансы выданные", category: "ASSET", systemCode: "advances_issued" },
   { name: "Прочие активы", category: "ASSET" },
-  { name: "Кредиторская задолженность", category: "LIABILITY" },
-  { name: "Авансы полученные", category: "LIABILITY" },
-  { name: "Налоги и зарплата к выплате", category: "LIABILITY" },
+  { name: "Кредиторская задолженность", category: "LIABILITY", systemCode: "payable" },
+  { name: "Авансы полученные", category: "LIABILITY", systemCode: "advances_received" },
+  { name: "Налоги и зарплата к выплате", category: "LIABILITY", systemCode: "payroll_payable" },
   { name: "Займы и кредиты", category: "LIABILITY" },
   { name: "Капитал", category: "EQUITY" },
-  { name: "Нераспределённая прибыль", category: "EQUITY" },
+  { name: "Нераспределённая прибыль", category: "EQUITY", systemCode: "retained_earnings" },
 ];
 
 async function main() {
@@ -152,6 +153,8 @@ async function main() {
     const existing = await prisma.balanceArticle.findFirst({ where: { name: article.name } });
     if (!existing) {
       await prisma.balanceArticle.create({ data: article });
+    } else if (article.systemCode && !existing.systemCode) {
+      await prisma.balanceArticle.update({ where: { id: existing.id }, data: { systemCode: article.systemCode } });
     }
   }
 

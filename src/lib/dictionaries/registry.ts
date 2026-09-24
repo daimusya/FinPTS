@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
 import type { DictionaryConfig, DictionaryDelegate, FieldOption } from "./types";
+import { acceptsManualEntries } from "@/lib/reports/balance-lines";
 
 function delegate(d: unknown): DictionaryDelegate {
   return d as DictionaryDelegate;
@@ -28,6 +29,13 @@ async function counterpartyOptions(): Promise<FieldOption[]> {
     orderBy: { fullName: "asc" },
   });
   return rows.map((r) => ({ value: r.id, label: r.fullName }));
+}
+
+// Only balance lines that are not derived from operations — linking a cash-flow article to cash or
+// receivables would count the same money twice (see DERIVED_SYSTEM_CODES).
+async function balanceArticleOptions(): Promise<FieldOption[]> {
+  const rows = await prisma.balanceArticle.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } });
+  return rows.filter((r) => acceptsManualEntries(r.systemCode)).map((r) => ({ value: r.id, label: r.name }));
 }
 
 async function pnlArticleOptions(): Promise<FieldOption[]> {
@@ -317,6 +325,12 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "name", label: "Название", type: "text", required: true },
       { name: "code", label: "Код", type: "text" },
       { name: "direction", label: "Направление", type: "select", required: true, options: CASH_FLOW_DIRECTION_OPTIONS },
+      {
+        name: "balanceArticleId",
+        label: "Статья баланса (займы, взносы, покупка активов)",
+        type: "select",
+        loadOptions: balanceArticleOptions,
+      },
     ],
   },
   "pnl-articles": {

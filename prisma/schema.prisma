@@ -144,6 +144,7 @@ model Organization {
   paymentRequests   PaymentRequest[]
   approvalRoutes    PaymentApprovalRoute[]
   budgetEntries     BudgetEntry[]
+  balanceEntries    BalanceEntry[]
 
   @@map("organizations")
 }
@@ -341,9 +342,13 @@ model CashFlowArticle {
   code       String?
   direction  CashFlowDirection
   parentId   String?
+  /// Статья баланса, остаток которой меняют операции по этой статье ДДС
+  /// (получение и возврат займов, взносы в капитал, покупка оборудования).
+  balanceArticleId String?
   isArchived Boolean           @default(false)
 
   parent             CashFlowArticle?  @relation("CashFlowArticleHierarchy", fields: [parentId], references: [id])
+  balanceArticle     BalanceArticle?   @relation(fields: [balanceArticleId], references: [id])
   children           CashFlowArticle[] @relation("CashFlowArticleHierarchy")
   bankTx             BankTransaction[]
   paymentReqs        PaymentRequest[]
@@ -386,14 +391,45 @@ enum BalanceArticleCategory {
   EQUITY
 }
 
+// Статья управленческого баланса. systemCode — у строк, которые баланс
+// считает сам из операций (деньги, дебиторка, авансы, кредиторка, зарплата
+// к выплате) — по ним нельзя вводить балансовые операции и привязывать
+// статьи ДДС, иначе суммы задвоятся; retained_earnings — нераспределённая
+// прибыль: считается по ОПиУ, но допускает ввод остатка на начало учёта.
+// Статьи без systemCode (займы, капитал, прочие активы и созданные
+// пользователем) меняются балансовыми операциями и привязанными статьями ДДС.
 model BalanceArticle {
   id         String                  @id @default(cuid())
   name       String
   code       String?
   category   BalanceArticleCategory
+  systemCode String?                 @unique
   isArchived Boolean                 @default(false)
 
+  entries          BalanceEntry[]
+  cashFlowArticles CashFlowArticle[]
+
   @@map("balance_articles")
+}
+
+// Балансовая операция: ручное изменение остатка статьи баланса с даты —
+// ввод остатков на начало учёта, корректировки. amount со знаком: + увеличивает
+// остаток статьи (актива, обязательства или капитала), − уменьшает.
+model BalanceEntry {
+  id               String   @id @default(cuid())
+  date             DateTime @db.Date
+  balanceArticleId String
+  organizationId   String?
+  amount           Decimal  @db.Decimal(18, 2)
+  comment          String?
+  createdById      String?
+  createdAt        DateTime @default(now())
+
+  balanceArticle BalanceArticle @relation(fields: [balanceArticleId], references: [id])
+  organization   Organization?  @relation(fields: [organizationId], references: [id])
+
+  @@index([date])
+  @@map("balance_entries")
 }
 
 // =========================================================================
