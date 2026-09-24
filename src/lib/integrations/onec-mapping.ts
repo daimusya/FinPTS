@@ -12,6 +12,11 @@ export type OnecMappingTarget =
   | "vatAmount"
   | "pnlArticleCode"
   | "comment"
+  | "lineDescription"
+  | "departmentName"
+  | "costCenterName"
+  | "projectName"
+  | "productServiceName"
   | "ignore";
 
 export const ONEC_MAPPING_LABELS: Record<OnecMappingTarget, string> = {
@@ -28,6 +33,11 @@ export const ONEC_MAPPING_LABELS: Record<OnecMappingTarget, string> = {
   vatAmount: "в т.ч. НДС",
   pnlArticleCode: "Код или название статьи ОПиУ (обязательно)",
   comment: "Комментарий",
+  lineDescription: "Строка: содержание / номенклатура",
+  departmentName: "Строка: подразделение",
+  costCenterName: "Строка: ЦФО",
+  projectName: "Строка: проект",
+  productServiceName: "Строка: продукт / услуга",
   ignore: "— не использовать —",
 };
 
@@ -46,6 +56,11 @@ export const ONEC_MAPPING_OPTIONS: OnecMappingTarget[] = [
   "vatAmount",
   "pnlArticleCode",
   "comment",
+  "lineDescription",
+  "departmentName",
+  "costCenterName",
+  "projectName",
+  "productServiceName",
 ];
 
 export const ONEC_REQUIRED_TARGETS: OnecMappingTarget[] = [
@@ -106,6 +121,11 @@ export interface ExtractedOnecRow {
   vatAmount: number | null;
   pnlArticleCode: string | null;
   comment: string | null;
+  lineDescription: string | null;
+  departmentName: string | null;
+  costCenterName: string | null;
+  projectName: string | null;
+  productServiceName: string | null;
 }
 
 export function extractOnecRow(row: Array<string | number | null>, mapping: OnecColumnMapping): ExtractedOnecRow {
@@ -123,6 +143,11 @@ export function extractOnecRow(row: Array<string | number | null>, mapping: Onec
     vatAmount: null,
     pnlArticleCode: null,
     comment: null,
+    lineDescription: null,
+    departmentName: null,
+    costCenterName: null,
+    projectName: null,
+    productServiceName: null,
   };
 
   for (const [indexStr, target] of Object.entries(mapping)) {
@@ -167,6 +192,13 @@ export function extractOnecRow(row: Array<string | number | null>, mapping: Onec
         break;
       case "comment":
         result.comment = cellToString(cell);
+        break;
+      case "lineDescription":
+      case "departmentName":
+      case "costCenterName":
+      case "projectName":
+      case "productServiceName":
+        result[target] = cellToString(cell);
         break;
       default:
         break;

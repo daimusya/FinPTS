@@ -51,6 +51,7 @@ export interface OnecImportState {
   done?: boolean;
   imported?: number;
   updated?: number;
+  lines?: number;
   errors?: number;
   errorSamples?: string[];
   error?: string;
@@ -107,6 +108,7 @@ export async function importOnecFileAction(_prev: OnecImportState, formData: For
       done: true,
       imported: result.imported,
       updated: result.updated,
+      lines: result.lines,
       errors: result.errors,
       errorSamples: result.errorSamples,
     };

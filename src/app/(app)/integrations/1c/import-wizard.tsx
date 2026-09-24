@@ -19,6 +19,12 @@ const GUESS_KEYWORDS: Array<[RegExp, OnecMappingTarget]> = [
   [/ндс/i, "vatAmount"],
   [/стать/i, "pnlArticleCode"],
   [/коммент/i, "comment"],
+  [/подраздел/i, "departmentName"],
+  [/цфо/i, "costCenterName"],
+  [/проект/i, "projectName"],
+  // Before the product rule: the template header «Строка: содержание / номенклатура» mentions both.
+  [/содержан|описан/i, "lineDescription"],
+  [/номенклат|продукт|услуг/i, "productServiceName"],
 ];
 
 function guessMapping(headers: string[]): Record<number, OnecMappingTarget> {
@@ -45,8 +51,8 @@ export function OnecImportWizard() {
     return (
       <div className="card">
         <p className="form-success">
-          Импорт завершён: создано {importState.imported}, обновлено {importState.updated}, ошибок{" "}
-          {importState.errors}.
+          Импорт завершён: документов создано {importState.imported}, обновлено {importState.updated} (строк
+          начисления: {importState.lines ?? 0}), ошибок {importState.errors}.
         </p>
         {importState.errorSamples && importState.errorSamples.length > 0 ? (
           <ul className="text-muted" style={{ marginTop: 8, paddingLeft: 18 }}>
