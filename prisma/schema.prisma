@@ -1216,6 +1216,27 @@ model BudgetEntry {
   @@map("budget_entries")
 }
 
+// Запуски резервного копирования (scripts/backup.mjs): история для
+// страницы «Резервные копии» и проверки свежести в /api/health.
+model BackupRun {
+  id              String    @id @default(cuid())
+  startedAt       DateTime  @default(now())
+  finishedAt      DateTime?
+  status          String    // running / success / failed
+  fileName        String?
+  sizeBytes       BigInt?
+  tableCount      Int?
+  // null — восстановление не проверялось; ok / mismatch — результат пробного восстановления
+  restoreCheck    String?
+  restoreDetails  String?
+  deletedOld      Int?
+  error           String?
+  host            String?
+
+  @@index([startedAt])
+  @@map("backup_runs")
+}
+
 // =========================================================================
 // AUDIT
 // =========================================================================

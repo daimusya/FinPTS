@@ -10,6 +10,8 @@
     "test": "vitest run",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
+    "db:backup": "node scripts/backup.mjs",
+    "db:backup:verify": "node scripts/backup.mjs --verify-restore",
     "db:studio": "prisma studio"
   },
   "prisma": {

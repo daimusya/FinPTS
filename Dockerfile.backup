@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1
+# Образ для сервиса резервного копирования (docker-compose: backup).
+# pg_dump не должен быть старше сервера PostgreSQL — ставим клиент 17-й версии, как у сервиса postgres.
+
+FROM node:22-alpine
+WORKDIR /app
+RUN apk add --no-cache postgresql17-client
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+COPY prisma ./prisma
+RUN npx prisma generate
+COPY scripts ./scripts
+
+# Копия с пробным восстановлением сразу при старте и затем раз в BACKUP_INTERVAL_SECONDS (по умолчанию сутки).
+CMD ["sh", "-c", "while true; do node scripts/backup.mjs --verify-restore; sleep ${BACKUP_INTERVAL_SECONDS:-86400}; done"]

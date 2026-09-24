@@ -94,6 +94,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/payment-approval-routes", label: "Маршруты согласования" },
       { href: "/admin/periods", label: "Периоды" },
       { href: "/admin/audit-log", label: "Журнал аудита" },
+      { href: "/admin/backups", label: "Резервные копии" },
     ],
   },
 ];

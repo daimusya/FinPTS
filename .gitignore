@@ -43,3 +43,6 @@ next-env.d.ts
 
 # scratch working files (not part of the delivered app)
 /scratch/
+
+# database backups — contain personal data, never commit (see scripts/backup.mjs)
+/backups/
