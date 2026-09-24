@@ -9,6 +9,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { ALL_DRIVER_DEFS } from "@/lib/financial-model/drivers";
 import { parseNewServiceForm, type NewServiceFormData } from "@/lib/financial-model/new-services";
 import { materializeScenarioDepartments } from "@/lib/financial-model/scenario-departments";
+import { parseLoanForm, type LoanFormData } from "@/lib/financial-model/loans";
 
 export async function createScenarioAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
@@ -117,6 +118,60 @@ export async function removeNewServiceAction(scenarioId: string, serviceId: stri
       entityId: scenarioId,
       action: "remove_new_service",
       before: service as never,
+    });
+  }
+
+  revalidatePath(`/financial-model/${scenarioId}`);
+  redirect(scenarioUrl(scenarioId, formData));
+}
+
+export async function addLoanAction(scenarioId: string, formData: FormData) {
+  const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
+
+  const raw = Object.fromEntries(
+    ["name", "amount", "start", "annualRatePct", "termMonths", "repayment"].map((k) => [k, String(formData.get(k) ?? "")]),
+  );
+  const parsed = parseLoanForm(raw);
+  if ("error" in parsed) redirect(scenarioUrl(scenarioId, formData, parsed.error));
+  const { data } = parsed as { data: LoanFormData };
+
+  const created = await prisma.financialScenarioLoan.create({
+    data: {
+      scenarioId,
+      name: data.name,
+      amount: data.amount.toFixed(2),
+      startYear: data.startYear,
+      startMonth: data.startMonth,
+      annualRatePct: data.annualRatePct.toFixed(3),
+      termMonths: data.termMonths,
+      repayment: data.repayment,
+    },
+  });
+
+  await logAudit({
+    userId: session.userId,
+    entityType: "financial_scenario",
+    entityId: scenarioId,
+    action: "add_loan",
+    after: created as never,
+  });
+
+  revalidatePath(`/financial-model/${scenarioId}`);
+  redirect(scenarioUrl(scenarioId, formData));
+}
+
+export async function removeLoanAction(scenarioId: string, loanId: string, formData: FormData) {
+  const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
+
+  const loan = await prisma.financialScenarioLoan.findFirst({ where: { id: loanId, scenarioId } });
+  if (loan) {
+    await prisma.financialScenarioLoan.delete({ where: { id: loanId } });
+    await logAudit({
+      userId: session.userId,
+      entityType: "financial_scenario",
+      entityId: scenarioId,
+      action: "remove_loan",
+      before: loan as never,
     });
   }
 

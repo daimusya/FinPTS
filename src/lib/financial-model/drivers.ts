@@ -10,7 +10,9 @@ export type DriverCode =
   | "headcount"
   | "avg_employee_cost"
   | "productivity_per_employee"
-  | "loan_payment";
+  | "loan_payment"
+  | "customer_payment_days"
+  | "supplier_payment_days";
 
 export interface DriverDef {
   code: DriverCode;
@@ -36,7 +38,10 @@ export const GENERAL_DRIVERS: DriverDef[] = [
   { code: "fixed_costs", label: "Постоянные расходы", unit: "₽/мес" },
   { code: "headcount", label: "Численность (прочий персонал, вручную)", unit: "чел" },
   { code: "avg_employee_cost", label: "Средняя стоимость сотрудника в месяц (ФОТ+взносы)", unit: "₽/мес" },
-  { code: "loan_payment", label: "Платежи по кредитам/лизингу/отсрочкам", unit: "₽/мес" },
+  { code: "customer_payment_days", label: "Отсрочка оплаты клиентов", unit: "дней" },
+  { code: "supplier_payment_days", label: "Отсрочка оплаты поставщикам (переменные расходы)", unit: "дней" },
+  // Loans with a schedule and interest are listed separately (FinancialScenarioLoan); this stays for ad-hoc payments.
+  { code: "loan_payment", label: "Прочие платежи по кредитам/лизингу (вручную, без графика)", unit: "₽/мес" },
 ];
 
 export const DEPARTMENT_DRIVERS: DriverDef[] = [

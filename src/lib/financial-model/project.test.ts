@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import Decimal from "decimal.js";
 import { projectScenario, rampShare, type NewServiceInput, type ScenarioValueRow } from "./project";
+import type { LoanInput } from "./cash-timing";
 
 function row(year: number, month: number, driver: string, value: number, dimension: string | null = null): ScenarioValueRow {
   return { year, month, driver, dimension, value };
@@ -147,5 +149,70 @@ describe("new services", () => {
     const rows = [row(2026, 3, "intermediary_share_pct", 50), row(2026, 3, "intermediary_commission_pct", 10)];
     const [m] = projectScenario(2026, 3, 1, rows, 0, [service()]);
     expect(m.intermediaryCommission.toNumber()).toBe(2500); // 50000 × 50% × 10%
+  });
+});
+
+describe("cash timing in the forecast", () => {
+  const revenueRows = (months: number[]) =>
+    months.flatMap((m) => [row(2026, m, "avg_check", 1000), row(2026, m, "sales_count", 100)]); // 100 000 a month
+
+  it("collects revenue after the customer payment delay and keeps the rest as receivables", () => {
+    const rows = [...revenueRows([1, 2, 3]), ...[1, 2, 3].map((m) => row(2026, m, "customer_payment_days", 30))];
+    const p = projectScenario(2026, 1, 3, rows, 10000);
+    expect(p.map((m) => m.collections.toNumber())).toEqual([0, 100000, 100000]);
+    expect(p.map((m) => m.cashBalance.toNumber())).toEqual([10000, 110000, 210000]);
+    expect(p[2].receivableEnd.toNumber()).toBe(100000);
+    expect(p[2].operatingProfit.toNumber()).toBe(100000); // profit is unaffected by when the money arrives
+  });
+
+  it("pays variable costs after the supplier delay, fixed costs in the same month", () => {
+    const rows = [
+      ...revenueRows([1, 2]),
+      row(2026, 1, "variable_cost_pct", 40),
+      row(2026, 2, "variable_cost_pct", 40),
+      row(2026, 1, "supplier_payment_days", 30),
+      row(2026, 2, "supplier_payment_days", 30),
+      row(2026, 1, "fixed_costs", 5000),
+      row(2026, 2, "fixed_costs", 5000),
+    ];
+    const p = projectScenario(2026, 1, 2, rows, 0);
+    expect(p.map((m) => m.supplierPayments.toNumber())).toEqual([0, 40000]);
+    expect(p.map((m) => m.cashBalance.toNumber())).toEqual([95000, 150000]); // 100 000 − 5 000; + 100 000 − 40 000 − 5 000
+    expect(p[1].payableEnd.toNumber()).toBe(40000);
+  });
+
+  it("collects today's receivables and pays today's payables in the first month", () => {
+    const p = projectScenario(2026, 1, 2, [], 1000, [], { openingReceivable: 50000, openingPayable: 20000 });
+    expect(p.map((m) => m.cashBalance.toNumber())).toEqual([31000, 31000]);
+    expect([p[0].openingReceivableCollected.toNumber(), p[0].openingPayablePaid.toNumber()]).toEqual([50000, 20000]);
+    expect([p[0].receivableEnd.toNumber(), p[0].payableEnd.toNumber()]).toEqual([0, 0]);
+  });
+
+  const loan = (over: Partial<LoanInput> = {}): LoanInput => ({
+    id: "l1",
+    name: "Кредит на оборудование",
+    amount: new Decimal(1200000),
+    startIndex: 2026 * 12 + 0, // January 2026
+    annualRatePct: new Decimal(12),
+    termMonths: 12,
+    repayment: "linear",
+    ...over,
+  });
+
+  it("brings the loan in, charges interest to profit and repays principal from cash only", () => {
+    const rows = revenueRows([1, 2]);
+    const p = projectScenario(2026, 1, 2, rows, 0, [], { loans: [loan()] });
+    expect([p[0].loanDrawdown.toNumber(), p[0].loanDebt.toNumber()]).toEqual([1200000, 1200000]);
+    expect([p[1].loanInterest.toNumber(), p[1].loanPrincipal.toNumber(), p[1].loanDebt.toNumber()]).toEqual([12000, 100000, 1100000]);
+    expect(p[1].operatingProfit.toNumber()).toBe(100000);
+    expect(p[1].netProfit.toNumber()).toBe(88000);
+    expect(p.map((m) => m.cashBalance.toNumber())).toEqual([1300000, 1288000]); // 1 200 000 + 100 000; + 100 000 − 12 000 − 100 000
+  });
+
+  it("starts with the remaining debt of a loan taken before the forecast", () => {
+    // Loan from January: the February payment falls before the forecast starts (March), the March one inside it.
+    const p = projectScenario(2026, 3, 1, [], 0, [], { loans: [loan()] });
+    expect(p[0].loanInterest.toNumber()).toBe(11000); // 1% of 1 100 000
+    expect(p[0].loanDebt.toNumber()).toBe(1000000);
   });
 });

@@ -2,6 +2,7 @@ import Decimal from "decimal.js";
 import { toDecimal } from "@/lib/money";
 import { computeBreakEven, computeMarginOfSafety } from "@/lib/reports/margin";
 import type { DriverCode } from "./drivers";
+import { loanSchedule, shiftByLag, type LoanInput, type LoanMonth } from "./cash-timing";
 
 export interface ScenarioValueRow {
   year: number;
@@ -63,9 +64,36 @@ export interface MonthProjection {
   operatingProfit: Decimal;
   departmentHeadcount: DepartmentHeadcount[];
   totalHeadcount: number;
+  /** Проценты по кредитам из списка кредитов сценария — расход после операционной прибыли. */
+  loanInterest: Decimal;
+  /** Прибыль после процентов по кредитам. */
+  netProfit: Decimal;
+  /** Деньги от клиентов с учётом отсрочки оплаты. */
+  collections: Decimal;
+  /** Оплата переменных расходов и комиссии посредников с учётом отсрочки. */
+  supplierPayments: Decimal;
+  /** Текущая (фактическая) дебиторка и кредиторка — погашаются в первом месяце прогноза. */
+  openingReceivableCollected: Decimal;
+  openingPayablePaid: Decimal;
+  loanDrawdown: Decimal;
+  loanPrincipal: Decimal;
+  /** Прочие платежи по кредитам и лизингу, заданные драйвером вручную. */
+  manualLoanPayments: Decimal;
+  loanDebt: Decimal;
+  receivableEnd: Decimal;
+  payableEnd: Decimal;
   cashBalance: Decimal;
   breakEvenRevenue: Decimal | null;
   marginOfSafetyPct: Decimal | null;
+}
+
+/** Остатки на старте прогноза и кредиты сценария — всё, что влияет на деньги, но не на драйверы. */
+export interface ScenarioCashExtras {
+  /** Фактическая дебиторка на сегодня. */
+  openingReceivable?: number | string | Decimal;
+  /** Фактическая кредиторка (включая зарплату к выплате) на сегодня. */
+  openingPayable?: number | string | Decimal;
+  loans?: LoanInput[];
 }
 
 const DEFAULT_100_DRIVERS = new Set<DriverCode>(["seasonality_pct", "new_service_activation_pct"]);
@@ -112,10 +140,13 @@ export function projectScenario(
   rows: ScenarioValueRow[],
   startingCash: number | string | Decimal,
   newServices: NewServiceInput[] = [],
+  extras: ScenarioCashExtras = {},
 ): MonthProjection[] {
   const lookup = new DriverLookup(rows);
   const results: MonthProjection[] = [];
-  let cashBalance = toDecimal(startingCash);
+  const customerLagDays: number[] = [];
+  const supplierLagDays: number[] = [];
+  const manualLoanPayments: Decimal[] = [];
 
   for (let i = 0; i < months; i += 1) {
     const { year, month } = addMonths(startYear, startMonth, i);
@@ -170,8 +201,9 @@ export function projectScenario(
     const grossProfit = revenue.minus(variableCosts).minus(intermediaryCommission);
     const operatingProfit = grossProfit.minus(fixedCosts).minus(payrollCost);
 
-    const loanPayment = lookup.get(year, month, "loan_payment");
-    cashBalance = cashBalance.plus(operatingProfit).minus(loanPayment);
+    customerLagDays.push(lookup.get(year, month, "customer_payment_days").toNumber());
+    supplierLagDays.push(lookup.get(year, month, "supplier_payment_days").toNumber());
+    manualLoanPayments.push(lookup.get(year, month, "loan_payment"));
 
     const breakEvenRevenue = computeBreakEven(fixedCosts.plus(payrollCost), revenue, variableCosts.plus(intermediaryCommission));
     const marginOfSafetyPct = computeMarginOfSafety(revenue, breakEvenRevenue);
@@ -191,11 +223,106 @@ export function projectScenario(
       operatingProfit,
       departmentHeadcount,
       totalHeadcount,
-      cashBalance,
+      loanInterest: zero,
+      netProfit: operatingProfit,
+      collections: zero,
+      supplierPayments: zero,
+      openingReceivableCollected: zero,
+      openingPayablePaid: zero,
+      loanDrawdown: zero,
+      loanPrincipal: zero,
+      manualLoanPayments: zero,
+      loanDebt: zero,
+      receivableEnd: zero,
+      payableEnd: zero,
+      cashBalance: zero,
       breakEvenRevenue,
       marginOfSafetyPct,
     });
   }
 
+  applyCashTiming(results, startYear, startMonth, toDecimal(startingCash), extras, {
+    customerLagDays,
+    supplierLagDays,
+    manualLoanPayments,
+  });
   return results;
+}
+
+const zero = new Decimal(0);
+
+/**
+ * Второй проход: деньги по месяцам. Выручка приходит с отсрочкой оплаты
+ * клиентов, переменные расходы и комиссия уходят с отсрочкой оплаты
+ * поставщикам, постоянные расходы и ФОТ — в том же месяце. Фактическая
+ * дебиторка и кредиторка на сегодня гасятся в первом месяце. Кредиты из
+ * списка: получение — приток, проценты — расход (прибыль после процентов) и
+ * отток, основной долг — только отток.
+ */
+function applyCashTiming(
+  results: MonthProjection[],
+  startYear: number,
+  startMonth: number,
+  startingCash: Decimal,
+  extras: ScenarioCashExtras,
+  drivers: { customerLagDays: number[]; supplierLagDays: number[]; manualLoanPayments: Decimal[] },
+) {
+  const collections = shiftByLag(
+    results.map((r) => r.revenue),
+    drivers.customerLagDays,
+  ).byMonth;
+  const supplierPayments = shiftByLag(
+    results.map((r) => r.variableCosts.plus(r.intermediaryCommission)),
+    drivers.supplierLagDays,
+  ).byMonth;
+  const schedules = (extras.loans ?? []).map(loanSchedule);
+  const startIndex = startYear * 12 + (startMonth - 1);
+  // Debt of loans taken before the horizon starts: the balance after their last month before the start.
+  let loanDebt = schedules.reduce((acc, s) => {
+    const before = [...s.entries()].filter(([i]) => i < startIndex).sort((a, b) => a[0] - b[0]);
+    return acc.plus(before.length > 0 ? before[before.length - 1][1].balance : zero);
+  }, zero);
+
+  let cash = startingCash;
+  let receivable = toDecimal(extras.openingReceivable ?? 0);
+  let payable = toDecimal(extras.openingPayable ?? 0);
+  results.forEach((r, i) => {
+    const index = startIndex + i;
+    const months = schedules.map((s) => s.get(index)).filter((m): m is LoanMonth => Boolean(m));
+    const drawdown = months.reduce((acc, m) => acc.plus(m.drawdown), zero);
+    const interest = months.reduce((acc, m) => acc.plus(m.interest), zero);
+    const principal = months.reduce((acc, m) => acc.plus(m.principal), zero);
+    loanDebt = loanDebt.plus(drawdown).minus(principal);
+
+    const openingReceivableCollected = i === 0 ? toDecimal(extras.openingReceivable ?? 0) : zero;
+    const openingPayablePaid = i === 0 ? toDecimal(extras.openingPayable ?? 0) : zero;
+    receivable = receivable.plus(r.revenue).minus(collections[i]).minus(openingReceivableCollected);
+    payable = payable.plus(r.variableCosts).plus(r.intermediaryCommission).minus(supplierPayments[i]).minus(openingPayablePaid);
+
+    cash = cash
+      .plus(collections[i])
+      .plus(openingReceivableCollected)
+      .minus(supplierPayments[i])
+      .minus(openingPayablePaid)
+      .minus(r.fixedCosts)
+      .minus(r.payrollCost)
+      .minus(drivers.manualLoanPayments[i])
+      .plus(drawdown)
+      .minus(interest)
+      .minus(principal);
+
+    r.collections = collections[i];
+    r.supplierPayments = supplierPayments[i];
+    r.openingReceivableCollected = openingReceivableCollected;
+    r.openingPayablePaid = openingPayablePaid;
+    r.manualLoanPayments = drivers.manualLoanPayments[i];
+    r.loanDrawdown = drawdown;
+    r.loanInterest = interest;
+    r.loanPrincipal = principal;
+    r.loanDebt = loanDebt;
+    r.netProfit = r.operatingProfit.minus(interest);
+    r.receivableEnd = receivable;
+    r.payableEnd = payable;
+    r.cashBalance = cash;
+  });
 }

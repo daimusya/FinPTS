@@ -1166,6 +1166,7 @@ model FinancialScenario {
   values      FinancialScenarioValue[]
   newServices FinancialScenarioNewService[]
   departments FinancialScenarioDepartment[]
+  loans       FinancialScenarioLoan[]
 
   @@map("financial_scenarios")
 }
@@ -1199,6 +1200,28 @@ model FinancialScenarioDepartment {
 
   @@id([scenarioId, departmentId])
   @@map("financial_scenario_departments")
+}
+
+// Кредит в сценарии: получение в месяц startYear/startMonth, со следующего
+// месяца — проценты (расход, уменьшает прибыль) и погашение основного долга
+// по графику repayment: annuity — равные платежи, linear — равные доли
+// основного долга, bullet — проценты ежемесячно, долг в конце срока.
+model FinancialScenarioLoan {
+  id            String   @id @default(cuid())
+  scenarioId    String
+  name          String
+  amount        Decimal  @db.Decimal(18, 2)
+  startYear     Int
+  startMonth    Int
+  annualRatePct Decimal  @db.Decimal(6, 3)
+  termMonths    Int
+  repayment     String
+  createdAt     DateTime @default(now())
+
+  scenario FinancialScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([scenarioId])
+  @@map("financial_scenario_loans")
 }
 
 // Новая услуга в сценарии (раздел 15 ТЗ): с месяца запуска добавляет

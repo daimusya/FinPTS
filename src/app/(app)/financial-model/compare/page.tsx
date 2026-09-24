@@ -6,6 +6,7 @@ import { SCENARIO_TYPE_LABELS } from "@/lib/financial-model/drivers";
 import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
 import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
 import { loadNewServices } from "@/lib/financial-model/new-services";
+import { loadLoans, loadOpeningBalances } from "@/lib/financial-model/loans";
 import { getAccessScope } from "@/lib/access-scope";
 
 const HORIZON_MONTHS = 12;
@@ -37,13 +38,17 @@ export default async function CompareScenariosPage({
   const startYear = Number(sp.startYear) || now.getFullYear();
   const startMonth = Number(sp.startMonth) || now.getMonth() + 1;
   // Same scoped starting balance as the scenario page — the local copy here used to ignore visibility restrictions.
-  const startingCash = await getCurrentCashBalance(await getAccessScope(session));
+  const scope = await getAccessScope(session);
+  const [startingCash, opening] = await Promise.all([getCurrentCashBalance(scope), loadOpeningBalances(scope)]);
 
   const scenarios = await prisma.financialScenario.findMany({
     where: { id: { in: selectedIds } },
     include: { values: true },
   });
-  const newServices = await loadNewServices(scenarios.map((s) => s.id));
+  const [newServices, loans] = await Promise.all([
+    loadNewServices(scenarios.map((s) => s.id)),
+    loadLoans(scenarios.map((s) => s.id)),
+  ]);
 
   const results = scenarios.map((s) => {
     const rows: ScenarioValueRow[] = s.values.map((v) => ({
@@ -53,13 +58,18 @@ export default async function CompareScenariosPage({
       dimension: v.dimension,
       value: v.value.toString(),
     }));
-    const projection = projectScenario(startYear, startMonth, HORIZON_MONTHS, rows, startingCash, newServices.get(s.id) ?? []);
+    const projection = projectScenario(startYear, startMonth, HORIZON_MONTHS, rows, startingCash, newServices.get(s.id) ?? [], {
+      ...opening,
+      loans: loans.get(s.id) ?? [],
+    });
     return {
       scenario: s,
       totalRevenue: sumMoney(projection.map((p) => p.revenue)),
       totalNewServicesRevenue: sumMoney(projection.map((p) => p.newServicesRevenue)),
       newServicesCount: newServices.get(s.id)?.length ?? 0,
       totalOperatingProfit: sumMoney(projection.map((p) => p.operatingProfit)),
+      totalNetProfit: sumMoney(projection.map((p) => p.netProfit)),
+      finalDebt: projection[projection.length - 1]?.loanDebt ?? sumMoney([]),
       finalCash: projection[projection.length - 1]?.cashBalance ?? sumMoney([]),
       avgBreakEven: sumMoney(projection.filter((p) => p.breakEvenRevenue !== null).map((p) => p.breakEvenRevenue!)).dividedBy(
         Math.max(1, projection.filter((p) => p.breakEvenRevenue !== null).length),
@@ -124,6 +134,22 @@ export default async function CompareScenariosPage({
               {results.map((r) => (
                 <td key={r.scenario.id} className="mono">
                   {formatMoney(r.totalOperatingProfit)}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td>Прибыль после процентов по кредитам за 12 месяцев</td>
+              {results.map((r) => (
+                <td key={r.scenario.id} className="mono">
+                  {formatMoney(r.totalNetProfit)}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td>Долг по кредитам на конец горизонта</td>
+              {results.map((r) => (
+                <td key={r.scenario.id} className="mono">
+                  {formatMoney(r.finalDebt)}
                 </td>
               ))}
             </tr>
