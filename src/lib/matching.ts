@@ -2,6 +2,7 @@ import { prisma } from "./db";
 import { sumMoney, toDecimal } from "./money";
 import { PaymentStatus, BankTransactionMatchStatus } from "@prisma/client";
 import { enqueueOutboxEvent } from "./integrations/outbox";
+import { enqueueProjectResultsForDocument } from "./integrations/project-results";
 
 export function computePaymentStatus(total: number | string, allocated: number | string): PaymentStatus {
   const t = toDecimal(total);
@@ -62,6 +63,8 @@ export async function recomputeAccrualDocumentStatus(documentId: string) {
         documentUrl: `/accruals/${documentId}`,
       },
     });
+    // Payments change the money side of the document's projects (received / outstanding).
+    await enqueueProjectResultsForDocument(documentId);
   }
 
   return { total, allocated, paymentStatus };

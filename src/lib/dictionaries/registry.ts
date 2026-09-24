@@ -237,6 +237,7 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "status", label: "Статус", type: "select", options: PROJECT_STATUS_OPTIONS, defaultValue: "active" },
       { name: "startDate", label: "Дата начала", type: "date" },
       { name: "endDate", label: "Дата окончания", type: "date" },
+      { name: "bitrixDealId", label: "ID сделки в Битрикс24 (для передачи финрезультата)", type: "text" },
     ],
   },
   directions: {

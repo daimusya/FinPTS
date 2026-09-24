@@ -10,6 +10,7 @@ import { recomputeAccrualDocumentStatus } from "@/lib/matching";
 import { PERMISSIONS } from "@/lib/permissions";
 import { AccrualDocumentStatus } from "@prisma/client";
 import type { LineDraft } from "@/components/accrual-lines-editor";
+import { enqueueProjectResultsForDocument } from "@/lib/integrations/project-results";
 
 interface DocumentHeaderInput {
   organizationId: string;
@@ -185,6 +186,7 @@ export async function postAccrualDocumentAction(id: string) {
     where: { id },
     data: { status: AccrualDocumentStatus.POSTED },
   });
+  await enqueueProjectResultsForDocument(id);
 
   await logAudit({
     userId: session.userId,
@@ -222,6 +224,7 @@ export async function cancelAccrualDocumentAction(id: string) {
     where: { id },
     data: { status: AccrualDocumentStatus.CANCELLED },
   });
+  await enqueueProjectResultsForDocument(id);
 
   await logAudit({
     userId: session.userId,

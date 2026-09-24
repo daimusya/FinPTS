@@ -7,6 +7,8 @@ import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { sendOutboxEvent } from "@/lib/integrations/outbox";
 import { encryptSecret } from "@/lib/crypto/secret-box";
+import { enqueueProjectResults } from "@/lib/integrations/project-results";
+import { redirect } from "next/navigation";
 
 export async function saveBitrix24ProfileAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.INTEGRATIONS_MANAGE);
@@ -43,6 +45,21 @@ export async function saveBitrix24ProfileAction(formData: FormData) {
   });
 
   revalidatePath("/integrations/bitrix24");
+}
+
+/** Пересчитать финансовый результат всех проектов со сделкой и поставить изменившиеся в очередь. */
+export async function enqueueAllProjectResultsAction() {
+  const session = await requirePermission(PERMISSIONS.INTEGRATIONS_MANAGE);
+  const { checked, queued } = await enqueueProjectResults();
+  await logAudit({
+    userId: session.userId,
+    entityType: "integration_outbox",
+    entityId: "project_financial_result",
+    action: "enqueue_project_results",
+    after: { checked, queued } as never,
+  });
+  revalidatePath("/integrations/bitrix24");
+  redirect(`/integrations/bitrix24?checked=${checked}&queued=${queued}`);
 }
 
 export async function sendOutboxEventAction(eventId: string) {

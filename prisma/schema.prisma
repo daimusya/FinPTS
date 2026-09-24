@@ -211,6 +211,8 @@ model Project {
   status         String    @default("active")
   startDate      DateTime?
   endDate        DateTime?
+  /// ID сделки в Битрикс24: финансовый результат проекта уходит в эту сделку (раздел 11 ТЗ).
+  bitrixDealId   String?   @unique
   isArchived     Boolean   @default(false)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt

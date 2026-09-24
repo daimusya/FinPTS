@@ -2,6 +2,7 @@ import Decimal from "decimal.js";
 import { toDecimal, type MoneyInput } from "@/lib/money";
 import { prisma } from "@/lib/db";
 import { AccrualDocumentStatus } from "@prisma/client";
+import { enqueueProjectResultsForDocument } from "@/lib/integrations/project-results";
 
 export interface PayrollLineForPosting {
   pnlArticleId: string | null;
@@ -125,5 +126,6 @@ export async function postPayrollRunToAccrual(payrollRunId: string): Promise<str
     },
   });
 
+  await enqueueProjectResultsForDocument(document.id);
   return document.id;
 }

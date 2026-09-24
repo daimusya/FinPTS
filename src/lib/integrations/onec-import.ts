@@ -5,6 +5,7 @@ import { recomputeAccrualDocumentStatus } from "@/lib/matching";
 import { ONEC_REQUIRED_TARGETS, type OnecColumnMapping } from "./onec-mapping";
 import { describeRows, groupOnecRows, type OnecDocumentGroup, type OnecLine } from "./onec-grouping";
 import { AccrualDocumentStatus } from "@prisma/client";
+import { enqueueProjectResultsForDocument } from "./project-results";
 
 export interface OnecImportResult {
   batchId: string;
@@ -119,7 +120,7 @@ async function importDocument(doc: OnecDocumentGroup, batchId: string): Promise<
     return "updated";
   }
 
-  await prisma.$transaction(async (tx) => {
+  const createdId = await prisma.$transaction(async (tx) => {
     const created = await tx.accrualDocument.create({
       data: {
         ...header,
@@ -141,7 +142,9 @@ async function importDocument(doc: OnecDocumentGroup, batchId: string): Promise<
         status: "synced",
       },
     });
+    return created.id;
   });
+  await enqueueProjectResultsForDocument(createdId);
   return "created";
 }
 

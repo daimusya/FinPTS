@@ -45,6 +45,7 @@ describe("dictionary registry vs database schema", () => {
     const projectColumns = dictionaryColumns(DICTIONARY_REGISTRY.projects);
     expect(emptyFieldValue({}, "update", orgColumns.get("inn"))).toBeNull();
     expect(emptyFieldValue({}, "update", projectColumns.get("code"))).toBeNull();
+    expect(emptyFieldValue({}, "update", projectColumns.get("bitrixDealId"))).toBeNull(); // unlinking a Bitrix24 deal
     expect(emptyFieldValue({ defaultValue: "active" }, "update", projectColumns.get("status"))).toBe("active");
   });
 });
