@@ -184,6 +184,7 @@ async function main() {
   }
 
   console.log("Сидирование администратора...");
+  // The real address goes into SEED_ADMIN_EMAIL in .env (not committed); example.com is reserved for placeholders.
   const adminEmail = process.env.SEED_ADMIN_EMAIL ?? "admin@example.com";
   const existingAdmin = await prisma.user.findUnique({ where: { email: adminEmail } });
   if (!existingAdmin) {
