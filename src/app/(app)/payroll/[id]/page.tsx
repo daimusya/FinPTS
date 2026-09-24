@@ -167,7 +167,14 @@ export default async function PayrollRunDetailPage({
               {run.lines.map((line) => (
                 <tr key={line.id}>
                   <td>{line.employee.fullName}</td>
-                  <td>{line.accrualType.name}</td>
+                  <td>
+                    {line.accrualType.name}
+                    {line.comment ? (
+                      <div className="text-muted" style={{ fontSize: 12 }}>
+                        {line.comment}
+                      </div>
+                    ) : null}
+                  </td>
                   <td>{line.department?.name ?? "—"}</td>
                   <td>{line.project?.name ?? "—"}</td>
                   <td className="mono">{formatMoney(line.amount)}</td>

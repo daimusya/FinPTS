@@ -114,6 +114,12 @@ export const PAYROLL_PARAMETER_OPTIONS: FieldOption[] = [
   { value: "mrot", label: "МРОТ на 1 января" },
 ];
 
+// Only deviations from «Mon–Fri working» are stored — see ProductionCalendarDay in the schema.
+const CALENDAR_DAY_KIND_OPTIONS: FieldOption[] = [
+  { value: "holiday", label: "Нерабочий будний день (праздник, перенос)" },
+  { value: "workday", label: "Рабочий выходной день (перенос)" },
+];
+
 const BALANCE_ARTICLE_CATEGORY_OPTIONS: FieldOption[] = [
   { value: "ASSET", label: "Актив" },
   { value: "LIABILITY", label: "Обязательство" },
@@ -420,6 +426,22 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "code", label: "Параметр", type: "select", required: true, options: PAYROLL_PARAMETER_OPTIONS },
       { name: "year", label: "Год", type: "number", required: true },
       { name: "value", label: "Значение, ₽", type: "number", required: true },
+    ],
+  },
+  "production-calendar": {
+    slug: "production-calendar",
+    title: "Производственный календарь",
+    singularTitle: "День календаря",
+    entityAuditType: "production_calendar_day",
+    delegate: delegate(prisma.productionCalendarDay),
+    permissionView: PERMISSIONS.PAYROLL_VIEW,
+    permissionManage: PERMISSIONS.PAYROLL_MANAGE,
+    orderBy: { date: "desc" },
+    listColumns: ["date", "kind", "name"],
+    fields: [
+      { name: "date", label: "Дата", type: "date", required: true },
+      { name: "kind", label: "Вид дня", type: "select", required: true, options: CALENDAR_DAY_KIND_OPTIONS },
+      { name: "name", label: "Описание", type: "text" },
     ],
   },
 };

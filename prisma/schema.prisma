@@ -927,6 +927,8 @@ model PayrollLine {
   amount        Decimal @db.Decimal(18, 2)
   ndflAmount    Decimal @default(0) @db.Decimal(18, 2)
   insuranceAmount Decimal @default(0) @db.Decimal(18, 2)
+  /// Как получена сумма, например «Отработано 17 из 22 раб. дн. (отпуск 5)».
+  comment       String?
 
   payrollRun  PayrollRun          @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
   employee    Employee            @relation(fields: [employeeId], references: [id])
@@ -966,6 +968,21 @@ model PayrollParameter {
 
   @@unique([code, year])
   @@map("payroll_parameters")
+}
+
+// Производственный календарь пятидневки: только отклонения от правила
+// «пн–пт рабочие, сб–вс выходные». kind = holiday — нерабочий будний день
+// (праздник или перенос выходного), kind = workday — рабочая суббота или
+// воскресенье (перенос). Норма рабочих дней месяца для оклада считается
+// по нему; год без единой записи считается незаполненным.
+model ProductionCalendarDay {
+  id         String   @id @default(cuid())
+  date       DateTime @unique @db.Date
+  kind       String
+  name       String?
+  isArchived Boolean  @default(false)
+
+  @@map("production_calendar_days")
 }
 
 model TaxRule {

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { toDecimal, sumMoney } from "@/lib/money";
 import Decimal from "decimal.js";
 import { PayrollRunKind } from "@prisma/client";
+import { ABSENCE_DAY_TYPES, WORK_DAY_TYPES, computeProratedSalary, type CalendarOverrides } from "./work-calendar";
 
 export interface TaxRates {
   ndflPct: Decimal;
@@ -58,6 +59,9 @@ export function splitByProjectShares(
   return result;
 }
 
+/** Ошибка, которую нужно показать пользователю, а не превращать в 500. */
+export class PayrollCalculationError extends Error {}
+
 export async function calculatePayrollRun(runId: string, userId: string) {
   const run = await prisma.payrollRun.findUniqueOrThrow({
     where: { id: runId },
@@ -73,6 +77,42 @@ export async function calculatePayrollRun(runId: string, userId: string) {
     prisma.payrollAccrualType.findFirstOrThrow({ where: { code: "advance" } }),
     prisma.payrollAccrualType.findFirstOrThrow({ where: { code: "salary" } }),
   ]);
+
+  // Month the run pays for: the advance on the 25th — its own month, the final settlement on the 10th — the previous one.
+  const shift = run.kind === PayrollRunKind.FINAL ? -1 : 0;
+  const monthIndex = run.payoutDate.getUTCFullYear() * 12 + run.payoutDate.getUTCMonth() + shift;
+  const workYear = Math.floor(monthIndex / 12);
+  const workMonth = (monthIndex % 12) + 1;
+  const monthStart = new Date(Date.UTC(workYear, workMonth - 1, 1));
+  const monthEnd = new Date(Date.UTC(workYear, workMonth, 0));
+
+  const [calendarRows, timesheetRows] = await Promise.all([
+    prisma.productionCalendarDay.findMany({ where: { isArchived: false, date: { gte: new Date(Date.UTC(workYear, 0, 1)), lte: new Date(Date.UTC(workYear, 11, 31)) } } }),
+    prisma.timeSheet.findMany({
+      where: {
+        employeeId: { in: employees.map((e) => e.id) },
+        date: { gte: monthStart, lte: monthEnd },
+        dayType: { in: [...ABSENCE_DAY_TYPES, ...WORK_DAY_TYPES] },
+      },
+      select: { employeeId: true, date: true, dayType: true },
+    }),
+  ]);
+  if (calendarRows.length === 0 && run.kind !== PayrollRunKind.ADHOC) {
+    // Checked before the old lines are deleted, so a failed recalculation leaves the run as it was.
+    throw new PayrollCalculationError(
+      `Производственный календарь на ${workYear} год не заполнен — добавьте праздники и переносы в справочнике «Производственный календарь»`,
+    );
+  }
+  const calendar: CalendarOverrides = new Map(
+    calendarRows.map((r) => [r.date.toISOString().slice(0, 10), r.kind === "workday" ? "workday" : "holiday"]),
+  );
+  const timesheetByEmployee = new Map<string, Map<string, Set<string>>>();
+  for (const row of timesheetRows) {
+    const days = timesheetByEmployee.get(row.employeeId) ?? new Map<string, Set<string>>();
+    const key = row.date.toISOString().slice(0, 10);
+    days.set(key, (days.get(key) ?? new Set<string>()).add(row.dayType));
+    timesheetByEmployee.set(row.employeeId, days);
+  }
 
   await prisma.payrollLine.deleteMany({ where: { payrollRunId: runId } });
 
@@ -103,19 +143,31 @@ export async function calculatePayrollRun(runId: string, userId: string) {
   let linesCreated = 0;
 
   for (const employee of employees) {
-    const salary = toDecimal(employee.salary!);
+    if (run.kind === PayrollRunKind.ADHOC) continue; // ADHOC runs are filled manually via addPayrollLineAction
+
+    const prorated = computeProratedSalary({
+      salary: toDecimal(employee.salary!),
+      year: workYear,
+      month: workMonth,
+      part: run.kind === PayrollRunKind.ADVANCE ? "firstHalf" : "full",
+      hireDate: employee.hireDate,
+      terminationDate: employee.terminationDate,
+      calendar,
+      calendarYears: new Set([workYear]),
+      timesheet: timesheetByEmployee.get(employee.id) ?? new Map(),
+    });
     let amount: Decimal;
     let accrualType: { id: string; subjectToNdfl: boolean; subjectToInsurance: boolean };
+    let comment = prorated.comment;
 
     if (run.kind === PayrollRunKind.ADVANCE) {
-      amount = salary.times(0.5).toDecimalPlaces(2);
+      amount = prorated.amount;
       accrualType = advanceType;
-    } else if (run.kind === PayrollRunKind.FINAL) {
-      const alreadyPaid = advancesPaidByEmployee.get(employee.id) ?? toDecimal(0);
-      amount = salary.minus(alreadyPaid);
-      accrualType = salaryType;
     } else {
-      continue; // ADHOC runs are filled manually via addPayrollLineAction
+      const alreadyPaid = advancesPaidByEmployee.get(employee.id) ?? toDecimal(0);
+      amount = prorated.amount.minus(alreadyPaid);
+      accrualType = salaryType;
+      if (alreadyPaid.greaterThan(0)) comment += `; оклад за месяц ${prorated.amount.toFixed(2)} минус аванс ${alreadyPaid.toFixed(2)}`;
     }
 
     if (amount.lessThanOrEqualTo(0)) continue;
@@ -131,6 +183,7 @@ export async function calculatePayrollRun(runId: string, userId: string) {
         amount,
         ndflAmount,
         insuranceAmount,
+        comment,
       },
     });
 

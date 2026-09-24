@@ -45,6 +45,8 @@ const LABELS: Record<string, string> = {
   injury: "Травматизм",
   insurance_base_limit: "Предельная база для страховых взносов",
   mrot: "МРОТ",
+  holiday: "Нерабочий день",
+  workday: "Рабочий день (перенос)",
 };
 
 export default async function DictionaryListPage({

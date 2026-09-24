@@ -7,7 +7,13 @@ import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { assertPeriodOpenForDate, getOrCreatePeriod } from "@/lib/period";
 import { PERMISSIONS } from "@/lib/permissions";
-import { calculatePayrollRun, computeTaxes, loadTaxRates, splitByProjectShares } from "@/lib/payroll/calculate";
+import {
+  calculatePayrollRun,
+  computeTaxes,
+  loadTaxRates,
+  PayrollCalculationError,
+  splitByProjectShares,
+} from "@/lib/payroll/calculate";
 import {
   AVERAGE_FIELDS,
   computeAverageEarnings,
@@ -68,7 +74,13 @@ export async function calculatePayrollRunAction(id: string) {
     redirect(`/payroll/${id}?error=${encodeURIComponent((e as Error).message)}`);
   }
 
-  const result = await calculatePayrollRun(id, session.userId);
+  let result: Awaited<ReturnType<typeof calculatePayrollRun>>;
+  try {
+    result = await calculatePayrollRun(id, session.userId);
+  } catch (e) {
+    if (e instanceof PayrollCalculationError) redirect(`/payroll/${id}?error=${encodeURIComponent(e.message)}`);
+    throw e;
+  }
 
   await logAudit({
     userId: session.userId,
@@ -182,6 +194,10 @@ export async function addAverageEarningsLineAction(runId: string, formData: Form
         amount,
         ndflAmount,
         insuranceAmount,
+        comment:
+          result.kind === "vacation"
+            ? `Средний дневной ${result.vacation.avgDaily.toFixed(2)} × ${request.days} дн. с ${request.startDate.toISOString().slice(0, 10)}`
+            : `Пособие ${result.sick.dailyBenefit.toFixed(2)} в день × ${result.sick.employerDays} дн. за счёт работодателя (всего за ${request.days} дн. — ${result.sick.total.toFixed(2)}, Соцфонд — ${result.sick.fundAmount.toFixed(2)})`,
       },
     });
     await tx.payrollAllocation.createMany({

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
+import { isWorkingDay, type CalendarOverrides } from "@/lib/payroll/work-calendar";
 
 export async function bulkFillTimesheetAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
@@ -25,23 +26,30 @@ export async function bulkFillTimesheetAction(formData: FormData) {
   const dateTo = new Date(dateToRaw);
   const hours = Number(hoursRaw) || 0;
 
+  // Weekends and holidays per the production calendar (without calendar rows — plain Saturday/Sunday).
+  const calendarRows = skipWeekends
+    ? await prisma.productionCalendarDay.findMany({ where: { isArchived: false, date: { gte: dateFrom, lte: dateTo } } })
+    : [];
+  const calendar: CalendarOverrides = new Map(
+    calendarRows.map((r) => [r.date.toISOString().slice(0, 10), r.kind === "workday" ? "workday" : "holiday"]),
+  );
   const dates: Date[] = [];
   for (let d = new Date(dateFrom); d <= dateTo; d.setUTCDate(d.getUTCDate() + 1)) {
-    const dow = d.getUTCDay();
-    if (skipWeekends && (dow === 0 || dow === 6)) continue;
+    if (skipWeekends && !isWorkingDay(d, calendar)) continue;
     dates.push(new Date(d));
   }
 
   let count = 0;
   for (const employeeId of employeeIds) {
     for (const date of dates) {
-      await prisma.timeSheet.upsert({
-        where: {
-          employeeId_date_dayType_projectId: { employeeId, date, dayType, projectId: projectId as never },
-        },
-        update: { hours },
-        create: { employeeId, date, dayType, hours, projectId },
-      });
+      // Not upsert: the unique key includes projectId, which Prisma rejects as null in `where` — and
+      // PostgreSQL does not enforce uniqueness for NULLs anyway, so the check happens here.
+      const existing = await prisma.timeSheet.findFirst({ where: { employeeId, date, dayType, projectId } });
+      if (existing) {
+        await prisma.timeSheet.update({ where: { id: existing.id }, data: { hours } });
+      } else {
+        await prisma.timeSheet.create({ data: { employeeId, date, dayType, hours, projectId } });
+      }
       count += 1;
     }
   }

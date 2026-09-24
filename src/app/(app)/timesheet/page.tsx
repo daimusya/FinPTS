@@ -91,7 +91,7 @@ export default async function TimesheetPage({
             </div>
             <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13 }}>
               <input type="checkbox" name="skipWeekends" defaultChecked />
-              Пропускать субботу и воскресенье
+              Пропускать выходные и праздники (по производственному календарю)
             </label>
             <div style={{ marginTop: 12 }}>
               <span style={{ fontWeight: 600, fontSize: 13 }}>Сотрудники</span>
