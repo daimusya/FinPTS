@@ -7,8 +7,9 @@ import { logAudit } from "@/lib/audit";
 import { getDictionaryConfig } from "@/lib/dictionaries/registry";
 import type { FieldConfig } from "@/lib/dictionaries/types";
 import { isUniqueViolation, UNIQUE_VIOLATION_MESSAGE } from "@/lib/dictionaries/errors";
+import { dictionaryColumns, emptyFieldValue, type ColumnInfo } from "@/lib/dictionaries/columns";
 
-function parseField(field: FieldConfig, formData: FormData): unknown {
+function parseField(field: FieldConfig, formData: FormData, mode: "create" | "update", column: ColumnInfo | undefined): unknown {
   if (field.type === "checkbox") {
     return formData.get(field.name) === "on";
   }
@@ -18,10 +19,9 @@ function parseField(field: FieldConfig, formData: FormData): unknown {
     if (field.required) {
       throw new Error(`Поле «${field.label}» обязательно для заполнения`);
     }
-    // Omit rather than send null: some columns are non-nullable with a DB
-    // default (e.g. Project.status) and reject an explicit null — leaving
-    // the key out lets Prisma apply the column default instead.
-    return field.defaultValue;
+    // On create an omitted key lets the DB default apply (Project.status is NOT NULL); on edit an
+    // omitted key would silently keep the old value, so a nullable column is cleared with null.
+    return emptyFieldValue(field, mode, column);
   }
   if (field.type === "number") {
     const num = Number(value);
@@ -40,11 +40,12 @@ function parseField(field: FieldConfig, formData: FormData): unknown {
   return value;
 }
 
-function buildData(slug: string, formData: FormData): Record<string, unknown> {
+function buildData(slug: string, formData: FormData, mode: "create" | "update"): Record<string, unknown> {
   const config = getDictionaryConfig(slug);
+  const columns = dictionaryColumns(config);
   const data: Record<string, unknown> = {};
   for (const field of config.fields) {
-    data[field.name] = parseField(field, formData);
+    data[field.name] = parseField(field, formData, mode, columns.get(field.name));
   }
   return data;
 }
@@ -55,7 +56,7 @@ export async function createDictionaryItem(slug: string, formData: FormData) {
 
   let data: Record<string, unknown>;
   try {
-    data = buildData(slug, formData);
+    data = buildData(slug, formData, "create");
   } catch (error) {
     redirect(`/master-data/${slug}/new?error=${encodeURIComponent((error as Error).message)}`);
   }
@@ -88,7 +89,7 @@ export async function updateDictionaryItem(slug: string, id: string, formData: F
 
   let data: Record<string, unknown>;
   try {
-    data = buildData(slug, formData);
+    data = buildData(slug, formData, "update");
   } catch (error) {
     redirect(`/master-data/${slug}/${id}/edit?error=${encodeURIComponent((error as Error).message)}`);
   }
