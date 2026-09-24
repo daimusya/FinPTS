@@ -11,6 +11,36 @@ export interface ScenarioValueRow {
   value: number | string | Decimal;
 }
 
+/** Новая услуга сценария (см. FinancialScenarioNewService в схеме). */
+export interface NewServiceInput {
+  id: string;
+  name: string;
+  launchYear: number;
+  launchMonth: number;
+  avgCheck: number | string | Decimal;
+  salesPerMonth: number | string | Decimal;
+  rampUpMonths: number;
+  /** Свои переменные расходы услуги, % от её выручки; null — как у сценария. */
+  variableCostPct: number | string | Decimal | null;
+}
+
+export interface NewServiceMonth {
+  id: string;
+  name: string;
+  revenue: Decimal;
+}
+
+/**
+ * Доля выхода новой услуги на полный объём в месяце monthsSinceLaunch
+ * (0 — месяц запуска): при выходе за N месяцев — 1/N, 2/N, …, затем 1.
+ * До запуска — 0.
+ */
+export function rampShare(monthsSinceLaunch: number, rampUpMonths: number): Decimal {
+  if (monthsSinceLaunch < 0) return new Decimal(0);
+  if (rampUpMonths <= 1) return new Decimal(1);
+  return Decimal.min(new Decimal(monthsSinceLaunch + 1).dividedBy(rampUpMonths), 1);
+}
+
 export interface DepartmentHeadcount {
   departmentId: string;
   requiredHeadcount: number;
@@ -19,6 +49,11 @@ export interface DepartmentHeadcount {
 export interface MonthProjection {
   year: number;
   month: number;
+  /** Выручка по драйверам сценария (средний чек × продажи × сезонность × корректировка). */
+  baseRevenue: Decimal;
+  /** Выручка новых услуг, запущенных к этому месяцу, — всего и по каждой. */
+  newServicesRevenue: Decimal;
+  newServices: NewServiceMonth[];
   revenue: Decimal;
   intermediaryCommission: Decimal;
   variableCosts: Decimal;
@@ -76,6 +111,7 @@ export function projectScenario(
   months: number,
   rows: ScenarioValueRow[],
   startingCash: number | string | Decimal,
+  newServices: NewServiceInput[] = [],
 ): MonthProjection[] {
   const lookup = new DriverLookup(rows);
   const results: MonthProjection[] = [];
@@ -88,14 +124,29 @@ export function projectScenario(
     const salesCount = lookup.get(year, month, "sales_count");
     const seasonality = lookup.get(year, month, "seasonality_pct").dividedBy(100);
     const activation = lookup.get(year, month, "new_service_activation_pct").dividedBy(100);
-    const revenue = avgCheck.times(salesCount).times(seasonality).times(activation);
+    const baseRevenue = avgCheck.times(salesCount).times(seasonality).times(activation);
+
+    const variableCostPct = lookup.get(year, month, "variable_cost_pct").dividedBy(100);
+    const monthIndex = year * 12 + month;
+    const serviceMonths: NewServiceMonth[] = [];
+    let serviceVariableCosts = toDecimal(0);
+    for (const service of newServices) {
+      const share = rampShare(monthIndex - (service.launchYear * 12 + service.launchMonth), service.rampUpMonths);
+      if (share.isZero()) continue;
+      // The scenario seasonality applies to new services too; the base-revenue adjustment does not.
+      const serviceRevenue = toDecimal(service.avgCheck).times(toDecimal(service.salesPerMonth)).times(share).times(seasonality);
+      const servicePct = service.variableCostPct === null ? variableCostPct : toDecimal(service.variableCostPct).dividedBy(100);
+      serviceVariableCosts = serviceVariableCosts.plus(serviceRevenue.times(servicePct));
+      serviceMonths.push({ id: service.id, name: service.name, revenue: serviceRevenue });
+    }
+    const newServicesRevenue = serviceMonths.reduce((acc, s) => acc.plus(s.revenue), toDecimal(0));
+    const revenue = baseRevenue.plus(newServicesRevenue);
 
     const intermediaryShare = lookup.get(year, month, "intermediary_share_pct").dividedBy(100);
     const intermediaryCommissionRate = lookup.get(year, month, "intermediary_commission_pct").dividedBy(100);
     const intermediaryCommission = revenue.times(intermediaryShare).times(intermediaryCommissionRate);
 
-    const variableCostPct = lookup.get(year, month, "variable_cost_pct").dividedBy(100);
-    const variableCosts = revenue.times(variableCostPct);
+    const variableCosts = baseRevenue.times(variableCostPct).plus(serviceVariableCosts);
 
     const fixedCosts = lookup.get(year, month, "fixed_costs");
 
@@ -128,6 +179,9 @@ export function projectScenario(
     results.push({
       year,
       month,
+      baseRevenue,
+      newServicesRevenue,
+      newServices: serviceMonths,
       revenue,
       intermediaryCommission,
       variableCosts,

@@ -7,6 +7,7 @@ import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { ALL_DRIVER_DEFS } from "@/lib/financial-model/drivers";
+import { parseNewServiceForm, type NewServiceFormData } from "@/lib/financial-model/new-services";
 
 export async function createScenarioAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
@@ -46,6 +47,80 @@ export async function archiveScenarioAction(id: string) {
   });
 
   revalidatePath("/financial-model");
+}
+
+function scenarioUrl(scenarioId: string, formData: FormData, extra = "") {
+  const params = new URLSearchParams();
+  for (const key of ["startYear", "startMonth"]) {
+    const value = String(formData.get(key) ?? "");
+    if (value) params.set(key, value);
+  }
+  if (extra) params.set("error", extra);
+  const query = params.toString();
+  return `/financial-model/${scenarioId}${query ? `?${query}` : ""}`;
+}
+
+export async function addNewServiceAction(scenarioId: string, formData: FormData) {
+  const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
+
+  const raw = Object.fromEntries(
+    ["name", "productServiceId", "launch", "avgCheck", "salesPerMonth", "rampUpMonths", "variableCostPct"].map((k) => [
+      k,
+      String(formData.get(k) ?? ""),
+    ]),
+  );
+  const product = raw.productServiceId
+    ? await prisma.productService.findFirst({ where: { id: raw.productServiceId, isArchived: false } })
+    : null;
+  if (raw.productServiceId && !product) redirect(scenarioUrl(scenarioId, formData, "Услуга из справочника не найдена"));
+
+  const parsed = parseNewServiceForm(raw, product?.name ?? null);
+  if ("error" in parsed) redirect(scenarioUrl(scenarioId, formData, parsed.error));
+  const { data } = parsed as { data: NewServiceFormData };
+
+  const created = await prisma.financialScenarioNewService.create({
+    data: {
+      scenarioId,
+      name: data.name,
+      productServiceId: data.productServiceId,
+      launchYear: data.launchYear,
+      launchMonth: data.launchMonth,
+      avgCheck: data.avgCheck.toFixed(2),
+      salesPerMonth: data.salesPerMonth.toFixed(2),
+      rampUpMonths: data.rampUpMonths,
+      variableCostPct: data.variableCostPct?.toFixed(2) ?? null,
+    },
+  });
+
+  await logAudit({
+    userId: session.userId,
+    entityType: "financial_scenario",
+    entityId: scenarioId,
+    action: "add_new_service",
+    after: created as never,
+  });
+
+  revalidatePath(`/financial-model/${scenarioId}`);
+  redirect(scenarioUrl(scenarioId, formData));
+}
+
+export async function removeNewServiceAction(scenarioId: string, serviceId: string, formData: FormData) {
+  const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
+
+  const service = await prisma.financialScenarioNewService.findFirst({ where: { id: serviceId, scenarioId } });
+  if (service) {
+    await prisma.financialScenarioNewService.delete({ where: { id: serviceId } });
+    await logAudit({
+      userId: session.userId,
+      entityType: "financial_scenario",
+      entityId: scenarioId,
+      action: "remove_new_service",
+      before: service as never,
+    });
+  }
+
+  revalidatePath(`/financial-model/${scenarioId}`);
+  redirect(scenarioUrl(scenarioId, formData));
 }
 
 /**

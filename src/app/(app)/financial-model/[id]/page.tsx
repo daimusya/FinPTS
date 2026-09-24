@@ -8,7 +8,8 @@ import { GENERAL_DRIVERS, DEPARTMENT_DRIVERS, MONTH_NAMES_SHORT, SCENARIO_TYPE_L
 import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
 import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
 import { getAccessScope } from "@/lib/access-scope";
-import { saveScenarioValuesAction } from "../actions";
+import { addNewServiceAction, removeNewServiceAction, saveScenarioValuesAction } from "../actions";
+import { loadNewServices, MAX_RAMP_UP_MONTHS } from "@/lib/financial-model/new-services";
 
 const HORIZON_MONTHS = 12;
 
@@ -22,7 +23,7 @@ export default async function ScenarioDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ startYear?: string; startMonth?: string }>;
+  searchParams: Promise<{ startYear?: string; startMonth?: string; error?: string }>;
 }) {
   const { id } = await params;
   const session = await getSession();
@@ -72,7 +73,22 @@ export default async function ScenarioDetailPage({
     dimension: v.dimension,
     value: v.value.toString(),
   }));
-  const projection = projectScenario(startYear, startMonth, HORIZON_MONTHS, rows, startingCash);
+  const [newServiceInputs, newServiceRows, products] = await Promise.all([
+    loadNewServices([id]).then((m) => m.get(id) ?? []),
+    prisma.financialScenarioNewService.findMany({
+      where: { scenarioId: id },
+      include: { productService: true },
+      orderBy: [{ launchYear: "asc" }, { launchMonth: "asc" }, { name: "asc" }],
+    }),
+    prisma.productService.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+  ]);
+  const projection = projectScenario(startYear, startMonth, HORIZON_MONTHS, rows, startingCash, newServiceInputs);
+  const keepStart = (
+    <>
+      <input type="hidden" name="startYear" value={startYear} />
+      <input type="hidden" name="startMonth" value={startMonth} />
+    </>
+  );
 
   const totalRevenue = sumMoney(projection.map((p) => p.revenue));
   const totalOperatingProfit = sumMoney(projection.map((p) => p.operatingProfit));
@@ -197,6 +213,116 @@ export default async function ScenarioDetailPage({
         </form>
       </div>
 
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Новые услуги</h2>
+        <p className="text-muted" style={{ marginBottom: 12 }}>
+          С месяца запуска каждая услуга добавляет к выручке сценария: средний чек × продажи в месяц × доля выхода на
+          мощность × сезонность сценария. При выходе на полную мощность за N месяцев продажи растут линейно: 1/N в месяц
+          запуска, 2/N во второй и т.д. Переменные расходы — свой % услуги или, если не задан, % сценария.
+        </p>
+        {sp.error ? (
+          <p className="form-error" style={{ marginBottom: 12 }}>
+            {sp.error}
+          </p>
+        ) : null}
+        <div className="table-wrap" style={{ marginBottom: 14 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Услуга</th>
+                <th>Запуск</th>
+                <th>Средний чек</th>
+                <th>Продаж в месяц (полная мощность)</th>
+                <th>Выход на мощность</th>
+                <th>Переменные расходы</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {newServiceRows.map((service) => (
+                <tr key={service.id}>
+                  <td>
+                    {service.name}
+                    {service.productService && service.productService.name !== service.name ? (
+                      <div className="text-muted" style={{ fontSize: 12 }}>
+                        {service.productService.name}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td>
+                    {MONTH_NAMES_SHORT[service.launchMonth - 1]} {service.launchYear}
+                  </td>
+                  <td className="mono">{formatMoney(service.avgCheck)}</td>
+                  <td className="mono">{formatNumber(service.salesPerMonth)}</td>
+                  <td>{service.rampUpMonths > 1 ? `${service.rampUpMonths} мес.` : "сразу"}</td>
+                  <td>{service.variableCostPct === null ? "как у сценария" : `${formatNumber(service.variableCostPct)}%`}</td>
+                  <td>
+                    {canManage ? (
+                      <form action={removeNewServiceAction.bind(null, id, service.id)}>
+                        {keepStart}
+                        <button type="submit" className="btn btn-ghost btn-sm">
+                          Удалить
+                        </button>
+                      </form>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+              {newServiceRows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="empty-state">
+                    Новых услуг в сценарии нет.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        {canManage ? (
+          <form action={addNewServiceAction.bind(null, id)} className="form-grid" style={{ alignItems: "flex-end" }}>
+            {keepStart}
+            <label className="field">
+              <span>Название</span>
+              <input type="text" name="name" placeholder="или выберите из справочника →" />
+            </label>
+            <label className="field">
+              <span>Из справочника «Продукты и услуги»</span>
+              <select name="productServiceId" defaultValue="">
+                <option value="">—</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Месяц запуска</span>
+              <input type="month" name="launch" required />
+            </label>
+            <label className="field">
+              <span>Средний чек, ₽</span>
+              <input type="text" inputMode="decimal" name="avgCheck" required style={{ width: 120 }} />
+            </label>
+            <label className="field">
+              <span>Продаж в месяц</span>
+              <input type="text" inputMode="decimal" name="salesPerMonth" required style={{ width: 100 }} />
+            </label>
+            <label className="field">
+              <span>Выход на мощность, мес.</span>
+              <input type="number" name="rampUpMonths" min={0} max={MAX_RAMP_UP_MONTHS} step={1} placeholder="0 — сразу" style={{ width: 110 }} />
+            </label>
+            <label className="field">
+              <span>Переменные расходы, %</span>
+              <input type="text" inputMode="decimal" name="variableCostPct" placeholder="как у сценария" style={{ width: 120 }} />
+            </label>
+            <button type="submit" className="btn btn-secondary">
+              Добавить услугу
+            </button>
+          </form>
+        ) : null}
+      </div>
+
       <div className="card">
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Прогноз</h2>
         <div className="table-wrap">
@@ -212,7 +338,22 @@ export default async function ScenarioDetailPage({
               </tr>
             </thead>
             <tbody>
-              <ProjectionRow label="Выручка" values={projection.map((p) => p.revenue)} format="money" />
+              {newServiceInputs.length > 0 ? (
+                <>
+                  <ProjectionRow label="Выручка — база (драйверы)" values={projection.map((p) => p.baseRevenue)} format="money" />
+                  {newServiceInputs.map((service) => (
+                    <ProjectionRow
+                      key={service.id}
+                      label={`Выручка — ${service.name}`}
+                      values={projection.map((p) => p.newServices.find((s) => s.id === service.id)?.revenue ?? null)}
+                      format="money"
+                    />
+                  ))}
+                  <ProjectionRow label="Выручка итого" values={projection.map((p) => p.revenue)} format="money" bold />
+                </>
+              ) : (
+                <ProjectionRow label="Выручка" values={projection.map((p) => p.revenue)} format="money" />
+              )}
               <ProjectionRow label="Переменные расходы" values={projection.map((p) => p.variableCosts)} format="money" />
               <ProjectionRow label="Комиссия посредников" values={projection.map((p) => p.intermediaryCommission)} format="money" />
               <ProjectionRow label="Валовая прибыль" values={projection.map((p) => p.grossProfit)} format="money" bold />

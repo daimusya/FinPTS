@@ -4,15 +4,11 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney, sumMoney } from "@/lib/money";
 import { SCENARIO_TYPE_LABELS } from "@/lib/financial-model/drivers";
 import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
+import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
+import { loadNewServices } from "@/lib/financial-model/new-services";
+import { getAccessScope } from "@/lib/access-scope";
 
 const HORIZON_MONTHS = 12;
-
-async function getCurrentCashBalance(): Promise<number> {
-  const transactions = await prisma.bankTransaction.findMany({ select: { amount: true, direction: true } });
-  const inflow = sumMoney(transactions.filter((t) => t.direction === "INFLOW").map((t) => t.amount));
-  const outflow = sumMoney(transactions.filter((t) => t.direction === "OUTFLOW").map((t) => t.amount));
-  return inflow.minus(outflow).toNumber();
-}
 
 export default async function CompareScenariosPage({
   searchParams,
@@ -40,12 +36,14 @@ export default async function CompareScenariosPage({
   const now = new Date();
   const startYear = Number(sp.startYear) || now.getFullYear();
   const startMonth = Number(sp.startMonth) || now.getMonth() + 1;
-  const startingCash = await getCurrentCashBalance();
+  // Same scoped starting balance as the scenario page — the local copy here used to ignore visibility restrictions.
+  const startingCash = await getCurrentCashBalance(await getAccessScope(session));
 
   const scenarios = await prisma.financialScenario.findMany({
     where: { id: { in: selectedIds } },
     include: { values: true },
   });
+  const newServices = await loadNewServices(scenarios.map((s) => s.id));
 
   const results = scenarios.map((s) => {
     const rows: ScenarioValueRow[] = s.values.map((v) => ({
@@ -55,10 +53,12 @@ export default async function CompareScenariosPage({
       dimension: v.dimension,
       value: v.value.toString(),
     }));
-    const projection = projectScenario(startYear, startMonth, HORIZON_MONTHS, rows, startingCash);
+    const projection = projectScenario(startYear, startMonth, HORIZON_MONTHS, rows, startingCash, newServices.get(s.id) ?? []);
     return {
       scenario: s,
       totalRevenue: sumMoney(projection.map((p) => p.revenue)),
+      totalNewServicesRevenue: sumMoney(projection.map((p) => p.newServicesRevenue)),
+      newServicesCount: newServices.get(s.id)?.length ?? 0,
       totalOperatingProfit: sumMoney(projection.map((p) => p.operatingProfit)),
       finalCash: projection[projection.length - 1]?.cashBalance ?? sumMoney([]),
       avgBreakEven: sumMoney(projection.filter((p) => p.breakEvenRevenue !== null).map((p) => p.breakEvenRevenue!)).dividedBy(
@@ -106,6 +106,16 @@ export default async function CompareScenariosPage({
               {results.map((r) => (
                 <td key={r.scenario.id} className="mono">
                   {formatMoney(r.totalRevenue)}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td className="text-muted" style={{ paddingLeft: 24 }}>
+                в т.ч. новые услуги
+              </td>
+              {results.map((r) => (
+                <td key={r.scenario.id} className="mono text-muted">
+                  {r.newServicesCount > 0 ? `${formatMoney(r.totalNewServicesRevenue)} (${r.newServicesCount} усл.)` : "—"}
                 </td>
               ))}
             </tr>

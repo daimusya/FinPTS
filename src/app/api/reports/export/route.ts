@@ -22,6 +22,7 @@ import { computeDebtsReport } from "@/lib/reports/debts";
 import { computeManagementBalance } from "@/lib/reports/balance";
 import { computePayrollSummary, type PayrollSummaryLine } from "@/lib/payroll/summary";
 import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
+import { loadNewServices } from "@/lib/financial-model/new-services";
 import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
 import { MONTH_NAMES_SHORT } from "@/lib/financial-model/drivers";
 import { buildWorkbookBuffer, type ExportSheet } from "@/lib/reports/xlsx-export";
@@ -281,14 +282,29 @@ export async function GET(request: NextRequest) {
       dimension: v.dimension,
       value: v.value.toString(),
     }));
-    const projection = projectScenario(startYear, startMonth, SCENARIO_HORIZON_MONTHS, rows_, startingCash);
+    const newServices = (await loadNewServices([scenarioId])).get(scenarioId) ?? [];
+    const projection = projectScenario(startYear, startMonth, SCENARIO_HORIZON_MONTHS, rows_, startingCash, newServices);
+    const revenueRows: Array<Array<string | number>> =
+      newServices.length > 0
+        ? [
+            ["Выручка — база (драйверы)", ...projection.map((p) => toNum(p.baseRevenue))],
+            ...newServices.map((service) => [
+              `Выручка — ${service.name}`,
+              ...projection.map((p) => {
+                const month = p.newServices.find((x) => x.id === service.id);
+                return month ? toNum(month.revenue) : 0;
+              }),
+            ]),
+            ["Выручка итого", ...projection.map((p) => toNum(p.revenue))],
+          ]
+        : [["Выручка", ...projection.map((p) => toNum(p.revenue))]];
 
     const monthHeaders = months.map((m) => `${MONTH_NAMES_SHORT[m.month - 1]} ${m.year}`);
     const rows: Array<Array<string | number>> = [
       ["Прогноз сценария", scenario.name],
       [],
       ["Показатель", ...monthHeaders],
-      ["Выручка", ...projection.map((p) => toNum(p.revenue))],
+      ...revenueRows,
       ["Переменные расходы", ...projection.map((p) => toNum(p.variableCosts))],
       ["Комиссия посредников", ...projection.map((p) => toNum(p.intermediaryCommission))],
       ["Валовая прибыль", ...projection.map((p) => toNum(p.grossProfit))],

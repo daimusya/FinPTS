@@ -27,7 +27,9 @@ export const GENERAL_DRIVERS: DriverDef[] = [
   { code: "avg_check", label: "Средний чек", unit: "₽" },
   { code: "sales_count", label: "Количество продаж", unit: "шт/мес" },
   { code: "seasonality_pct", label: "Сезонность (доля от базы)", unit: "%", defaultValue: 100 },
-  { code: "new_service_activation_pct", label: "Активация новых услуг (доля от базы)", unit: "%", defaultValue: 100 },
+  // Historically «Активация новых услуг»; new services now have their own list (FinancialScenarioNewService),
+  // this stays as a plain multiplier on the base revenue so existing scenarios keep their numbers.
+  { code: "new_service_activation_pct", label: "Корректировка базовой выручки (доля от базы)", unit: "%", defaultValue: 100 },
   { code: "intermediary_share_pct", label: "Доля продаж через посредников", unit: "%" },
   { code: "intermediary_commission_pct", label: "Комиссия посредника", unit: "%" },
   { code: "variable_cost_pct", label: "Переменные расходы (доля от выручки)", unit: "%" },

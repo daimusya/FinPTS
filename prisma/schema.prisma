@@ -250,6 +250,7 @@ model ProductService {
   accrualLines       AccrualDocumentLine[]
   bankTx             BankTransaction[]
   classificationRules BankClassificationRule[]
+  scenarioNewServices FinancialScenarioNewService[]
 
   @@map("products_services")
 }
@@ -1123,7 +1124,8 @@ model FinancialScenario {
   isArchived  Boolean  @default(false)
   createdAt   DateTime @default(now())
 
-  values FinancialScenarioValue[]
+  values      FinancialScenarioValue[]
+  newServices FinancialScenarioNewService[]
 
   @@map("financial_scenarios")
 }
@@ -1141,6 +1143,31 @@ model FinancialScenarioValue {
 
   @@unique([scenarioId, year, month, driver, dimension])
   @@map("financial_scenario_values")
+}
+
+// Новая услуга в сценарии (раздел 15 ТЗ): с месяца запуска добавляет
+// выручку = средний чек × продажи в месяц × доля выхода на мощность ×
+// сезонность сценария. rampUpMonths — за сколько месяцев услуга линейно
+// выходит на полный объём продаж (0 — сразу). variableCostPct — свои
+// переменные расходы услуги; пусто — как у сценария.
+model FinancialScenarioNewService {
+  id               String   @id @default(cuid())
+  scenarioId       String
+  name             String
+  productServiceId String?
+  launchYear       Int
+  launchMonth      Int
+  avgCheck         Decimal  @db.Decimal(18, 2)
+  salesPerMonth    Decimal  @db.Decimal(18, 2)
+  rampUpMonths     Int      @default(0)
+  variableCostPct  Decimal? @db.Decimal(5, 2)
+  createdAt        DateTime @default(now())
+
+  scenario       FinancialScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  productService ProductService?   @relation(fields: [productServiceId], references: [id])
+
+  @@index([scenarioId])
+  @@map("financial_scenario_new_services")
 }
 
 enum BudgetKind {
