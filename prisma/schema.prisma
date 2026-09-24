@@ -170,6 +170,7 @@ model Department {
   historyFrom     EmploymentHistory[] @relation("EmploymentHistoryFromDepartment")
   historyTo       EmploymentHistory[] @relation("EmploymentHistoryToDepartment")
   classificationRules BankClassificationRule[]
+  scenarios       FinancialScenarioDepartment[]
 
   @@map("departments")
 }
@@ -1126,6 +1127,7 @@ model FinancialScenario {
 
   values      FinancialScenarioValue[]
   newServices FinancialScenarioNewService[]
+  departments FinancialScenarioDepartment[]
 
   @@map("financial_scenarios")
 }
@@ -1143,6 +1145,22 @@ model FinancialScenarioValue {
 
   @@unique([scenarioId, year, month, driver, dimension])
   @@map("financial_scenario_values")
+}
+
+// Подразделения, для которых в сценарии задаются продажи и
+// производительность на сотрудника. Пока у сценария нет ни одной строки,
+// редактор показывает подразделения по умолчанию (отделы обучения и охраны
+// труда); первое добавление или удаление фиксирует список здесь.
+model FinancialScenarioDepartment {
+  scenarioId   String
+  departmentId String
+  createdAt    DateTime @default(now())
+
+  scenario   FinancialScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  department Department        @relation(fields: [departmentId], references: [id])
+
+  @@id([scenarioId, departmentId])
+  @@map("financial_scenario_departments")
 }
 
 // Новая услуга в сценарии (раздел 15 ТЗ): с месяца запуска добавляет

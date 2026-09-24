@@ -8,6 +8,7 @@ import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { ALL_DRIVER_DEFS } from "@/lib/financial-model/drivers";
 import { parseNewServiceForm, type NewServiceFormData } from "@/lib/financial-model/new-services";
+import { materializeScenarioDepartments } from "@/lib/financial-model/scenario-departments";
 
 export async function createScenarioAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
@@ -118,6 +119,55 @@ export async function removeNewServiceAction(scenarioId: string, serviceId: stri
       before: service as never,
     });
   }
+
+  revalidatePath(`/financial-model/${scenarioId}`);
+  redirect(scenarioUrl(scenarioId, formData));
+}
+
+export async function addScenarioDepartmentAction(scenarioId: string, formData: FormData) {
+  const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
+
+  const departmentId = String(formData.get("departmentId") ?? "");
+  const department = departmentId
+    ? await prisma.department.findFirst({ where: { id: departmentId, isArchived: false } })
+    : null;
+  if (!department) redirect(scenarioUrl(scenarioId, formData, "Выберите подразделение"));
+
+  await materializeScenarioDepartments(scenarioId);
+  await prisma.financialScenarioDepartment.createMany({
+    data: [{ scenarioId, departmentId: department!.id }],
+    skipDuplicates: true,
+  });
+
+  await logAudit({
+    userId: session.userId,
+    entityType: "financial_scenario",
+    entityId: scenarioId,
+    action: "add_department",
+    after: { departmentId: department!.id, name: department!.name } as never,
+  });
+
+  revalidatePath(`/financial-model/${scenarioId}`);
+  redirect(scenarioUrl(scenarioId, formData));
+}
+
+/** Убирает подразделение из сценария вместе с его продажами и производительностью. */
+export async function removeScenarioDepartmentAction(scenarioId: string, departmentId: string, formData: FormData) {
+  const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
+
+  await materializeScenarioDepartments(scenarioId);
+  const [removedValues] = await prisma.$transaction([
+    prisma.financialScenarioValue.deleteMany({ where: { scenarioId, dimension: departmentId } }),
+    prisma.financialScenarioDepartment.deleteMany({ where: { scenarioId, departmentId } }),
+  ]);
+
+  await logAudit({
+    userId: session.userId,
+    entityType: "financial_scenario",
+    entityId: scenarioId,
+    action: "remove_department",
+    before: { departmentId, removedValues: removedValues.count } as never,
+  });
 
   revalidatePath(`/financial-model/${scenarioId}`);
   redirect(scenarioUrl(scenarioId, formData));

@@ -8,7 +8,14 @@ import { GENERAL_DRIVERS, DEPARTMENT_DRIVERS, MONTH_NAMES_SHORT, SCENARIO_TYPE_L
 import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
 import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
 import { getAccessScope } from "@/lib/access-scope";
-import { addNewServiceAction, removeNewServiceAction, saveScenarioValuesAction } from "../actions";
+import {
+  addNewServiceAction,
+  addScenarioDepartmentAction,
+  removeNewServiceAction,
+  removeScenarioDepartmentAction,
+  saveScenarioValuesAction,
+} from "../actions";
+import { loadScenarioDepartments } from "@/lib/financial-model/scenario-departments";
 import { loadNewServices, MAX_RAMP_UP_MONTHS } from "@/lib/financial-model/new-services";
 
 const HORIZON_MONTHS = 12;
@@ -45,13 +52,11 @@ export default async function ScenarioDetailPage({
   const startMonth = Number(sp.startMonth) || now.getMonth() + 1;
   const months = Array.from({ length: HORIZON_MONTHS }, (_, i) => addMonths(startYear, startMonth, i));
 
-  let departments = await prisma.department.findMany({
-    where: { isArchived: false, name: { in: ["Отдел обучения", "Отдел охраны труда"] } },
-    orderBy: { name: "asc" },
-  });
-  if (departments.length === 0) {
-    departments = await prisma.department.findMany({ where: { isArchived: false }, orderBy: { name: "asc" }, take: 6 });
-  }
+  const [departments, allDepartments] = await Promise.all([
+    loadScenarioDepartments(id),
+    prisma.department.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+  ]);
+  const addableDepartments = allDepartments.filter((d) => !departments.some((shown) => shown.id === d.id));
 
   const valueMap = new Map<string, string>();
   for (const v of scenario.values) {
@@ -185,7 +190,8 @@ export default async function ScenarioDetailPage({
                   departments.map((dept) => (
                     <tr key={`${driver.code}-${dept.id}`}>
                       <td style={{ whiteSpace: "nowrap" }}>
-                        {driver.label}: {dept.name} <span className="text-muted">({driver.unit})</span>
+                        {driver.label}: {dept.name}
+                        {dept.isArchived ? " (в архиве)" : ""} <span className="text-muted">({driver.unit})</span>
                       </td>
                       {months.map((m) => (
                         <td key={`${m.year}-${m.month}`}>
@@ -211,6 +217,54 @@ export default async function ScenarioDetailPage({
             </button>
           ) : null}
         </form>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Подразделения в сценарии</h2>
+        <p className="text-muted" style={{ marginBottom: 12 }}>
+          Для каждого подразделения в таблице драйверов задаются продажи и производительность на сотрудника — из них
+          считается требуемая численность. Сохраните введённые драйверы перед добавлением или удалением подразделения:
+          страница перезагрузится. Убрать подразделение — значит удалить и его продажи и производительность в этом
+          сценарии.
+        </p>
+        <div className="tag-list" style={{ marginBottom: 12, alignItems: "center" }}>
+          {departments.map((dept) => (
+            <span key={dept.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span className="badge badge-orange">
+                {dept.name}
+                {dept.isArchived ? " (в архиве)" : ""}
+              </span>
+              {canManage ? (
+                <form action={removeScenarioDepartmentAction.bind(null, id, dept.id)}>
+                  {keepStart}
+                  <button type="submit" className="btn btn-ghost btn-sm" aria-label={`Убрать ${dept.name}`}>
+                    Убрать
+                  </button>
+                </form>
+              ) : null}
+            </span>
+          ))}
+          {departments.length === 0 ? <span className="text-muted">Подразделений нет.</span> : null}
+        </div>
+        {canManage && addableDepartments.length > 0 ? (
+          <form action={addScenarioDepartmentAction.bind(null, id)} className="form-grid" style={{ alignItems: "flex-end" }}>
+            {keepStart}
+            <label className="field">
+              <span>Подразделение</span>
+              <select name="departmentId" required defaultValue="">
+                <option value="">— выбрать —</option>
+                {addableDepartments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="submit" className="btn btn-secondary">
+              Добавить подразделение
+            </button>
+          </form>
+        ) : null}
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
