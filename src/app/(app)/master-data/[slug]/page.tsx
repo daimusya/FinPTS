@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getSession, hasPermission } from "@/lib/session";
 import { DICTIONARY_REGISTRY, getDictionaryConfig } from "@/lib/dictionaries/registry";
 import { archiveDictionaryItem, restoreDictionaryItem } from "../actions";
+import { CounterpartyCreateByInn } from "@/components/counterparty-inn";
 
 function formatCell(value: unknown): string {
   if (value === null || value === undefined) return "—";
@@ -54,10 +55,10 @@ export default async function DictionaryListPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ imported?: string }>;
+  searchParams: Promise<{ imported?: string; innError?: string }>;
 }) {
   const { slug } = await params;
-  const { imported } = await searchParams;
+  const { imported, innError } = await searchParams;
   if (!DICTIONARY_REGISTRY[slug]) notFound();
   const config = getDictionaryConfig(slug);
 
@@ -101,6 +102,8 @@ export default async function DictionaryListPage({
           ) : null}
         </div>
       </div>
+
+      {slug === "counterparties" && canManage ? <CounterpartyCreateByInn error={innError} /> : null}
 
       {imported ? (
         <div className="card" style={{ marginBottom: 16 }}>

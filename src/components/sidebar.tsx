@@ -84,6 +84,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/integrations/1c", label: "1С: файловый обмен" },
       { href: "/integrations/bitrix24", label: "Битрикс24: очередь" },
+      { href: "/integrations/inn", label: "Реквизиты по ИНН" },
     ],
   },
   {

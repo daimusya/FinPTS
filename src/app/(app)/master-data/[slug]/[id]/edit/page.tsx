@@ -5,16 +5,17 @@ import { DICTIONARY_REGISTRY, getDictionaryConfig } from "@/lib/dictionaries/reg
 import { DictionaryFormFields, resolveFieldDefault, type ResolvedField } from "@/components/dictionary-form-fields";
 import { updateDictionaryItem } from "../../../actions";
 import { CounterpartyDetails } from "@/components/counterparty-details";
+import { CounterpartyInnCard } from "@/components/counterparty-inn";
 
 export default async function EditDictionaryItemPage({
   params,
   searchParams,
 }: {
   params: Promise<{ slug: string; id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; notice?: string }>;
 }) {
   const { slug, id } = await params;
-  const { error } = await searchParams;
+  const { error, notice } = await searchParams;
   if (!DICTIONARY_REGISTRY[slug]) notFound();
   const config = getDictionaryConfig(slug);
 
@@ -54,6 +55,7 @@ export default async function EditDictionaryItemPage({
 
       <div className="card" style={{ maxWidth: 720 }}>
         {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
+        {notice ? <p className="form-success" style={{ marginBottom: 14 }}>{notice}</p> : null}
         <form action={updateDictionaryItem.bind(null, slug, id)}>
           <DictionaryFormFields fields={resolvedFields} />
           <div className="form-actions">
@@ -67,6 +69,7 @@ export default async function EditDictionaryItemPage({
         </form>
       </div>
 
+      {slug === "counterparties" ? <CounterpartyInnCard counterpartyId={id} /> : null}
       {slug === "counterparties" ? <CounterpartyDetails counterpartyId={id} /> : null}
     </div>
   );

@@ -23,6 +23,10 @@ function parseField(field: FieldConfig, formData: FormData, mode: "create" | "up
     // omitted key would silently keep the old value, so a nullable column is cleared with null.
     return emptyFieldValue(field, mode, column);
   }
+  if (field.validate) {
+    const problem = field.validate(value);
+    if (problem) throw new Error(`Поле «${field.label}»: ${problem}`);
+  }
   if (field.type === "number") {
     const num = Number(value);
     if (Number.isNaN(num)) {

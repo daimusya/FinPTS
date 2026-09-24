@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { PERMISSIONS } from "@/lib/permissions";
 import type { DictionaryConfig, DictionaryDelegate, FieldOption } from "./types";
 import { acceptsManualEntries } from "@/lib/reports/balance-lines";
+import { validateInn } from "@/lib/integrations/inn";
 
 function delegate(d: unknown): DictionaryDelegate {
   return d as DictionaryDelegate;
@@ -149,7 +150,7 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "name", label: "Полное наименование", type: "text", required: true },
       { name: "shortName", label: "Краткое наименование", type: "text" },
       { name: "type", label: "Тип", type: "select", required: true, options: ORGANIZATION_TYPE_OPTIONS },
-      { name: "inn", label: "ИНН", type: "text" },
+      { name: "inn", label: "ИНН", type: "text", validate: validateInn },
       { name: "kpp", label: "КПП", type: "text" },
       { name: "ogrn", label: "ОГРН / ОГРНИП", type: "text" },
       { name: "legalAddress", label: "Юридический адрес", type: "text" },
@@ -282,7 +283,7 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
     fields: [
       { name: "fullName", label: "Полное наименование", type: "text", required: true },
       { name: "shortName", label: "Краткое наименование", type: "text" },
-      { name: "inn", label: "ИНН", type: "text" },
+      { name: "inn", label: "ИНН", type: "text", validate: validateInn },
       { name: "kpp", label: "КПП", type: "text" },
       { name: "ogrn", label: "ОГРН / ОГРНИП", type: "text" },
       { name: "legalAddress", label: "Юридический адрес", type: "text" },
