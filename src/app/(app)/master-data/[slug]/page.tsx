@@ -43,6 +43,8 @@ const LABELS: Record<string, string> = {
   medical: "Медицинское страхование",
   social: "Социальное страхование",
   injury: "Травматизм",
+  insurance_base_limit: "Предельная база для страховых взносов",
+  mrot: "МРОТ",
 };
 
 export default async function DictionaryListPage({

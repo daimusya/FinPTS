@@ -6,6 +6,7 @@ import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { getDictionaryConfig } from "@/lib/dictionaries/registry";
 import type { FieldConfig } from "@/lib/dictionaries/types";
+import { isUniqueViolation, UNIQUE_VIOLATION_MESSAGE } from "@/lib/dictionaries/errors";
 
 function parseField(field: FieldConfig, formData: FormData): unknown {
   if (field.type === "checkbox") {
@@ -59,7 +60,13 @@ export async function createDictionaryItem(slug: string, formData: FormData) {
     redirect(`/master-data/${slug}/new?error=${encodeURIComponent((error as Error).message)}`);
   }
 
-  const created = await config.delegate.create({ data });
+  let created: Awaited<ReturnType<typeof config.delegate.create>>;
+  try {
+    created = await config.delegate.create({ data });
+  } catch (error) {
+    if (isUniqueViolation(error)) redirect(`/master-data/${slug}/new?error=${encodeURIComponent(UNIQUE_VIOLATION_MESSAGE)}`);
+    throw error;
+  }
 
   await logAudit({
     userId: session.userId,
@@ -86,7 +93,13 @@ export async function updateDictionaryItem(slug: string, id: string, formData: F
     redirect(`/master-data/${slug}/${id}/edit?error=${encodeURIComponent((error as Error).message)}`);
   }
 
-  const updated = await config.delegate.update({ where: { id }, data });
+  let updated: Awaited<ReturnType<typeof config.delegate.update>>;
+  try {
+    updated = await config.delegate.update({ where: { id }, data });
+  } catch (error) {
+    if (isUniqueViolation(error)) redirect(`/master-data/${slug}/${id}/edit?error=${encodeURIComponent(UNIQUE_VIOLATION_MESSAGE)}`);
+    throw error;
+  }
 
   await logAudit({
     userId: session.userId,

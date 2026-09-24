@@ -9,6 +9,7 @@ import { getDictionaryConfig } from "@/lib/dictionaries/registry";
 import { resolveSheetFields } from "@/lib/dictionaries/sheet-fields";
 import { parseImportRows } from "@/lib/dictionaries/spreadsheet";
 import { parseSpreadsheet, type ParsedSheet } from "@/lib/bank-import/parser";
+import { isUniqueViolation, UNIQUE_VIOLATION_MESSAGE } from "@/lib/dictionaries/errors";
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_ROWS = 5000;
@@ -46,7 +47,12 @@ export async function importDictionaryAction(slug: string, formData: FormData) {
   if (errors.length > 0) backWithErrors(slug, errors);
 
   // delegate.create returns Prisma's lazy query promise at runtime, so the batch runs atomically.
-  await prisma.$transaction(records.map((data) => config.delegate.create({ data })) as never);
+  try {
+    await prisma.$transaction(records.map((data) => config.delegate.create({ data })) as never);
+  } catch (error) {
+    if (isUniqueViolation(error)) backWithErrors(slug, [`Файл не загружен: ${UNIQUE_VIOLATION_MESSAGE.toLowerCase()}`]);
+    throw error;
+  }
 
   await logAudit({
     userId: session.userId,

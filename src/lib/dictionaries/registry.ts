@@ -109,6 +109,11 @@ const TAX_BASE_OPTIONS: FieldOption[] = [
   { value: "injury", label: "Травматизм" },
 ];
 
+export const PAYROLL_PARAMETER_OPTIONS: FieldOption[] = [
+  { value: "insurance_base_limit", label: "Предельная база для страховых взносов (за год)" },
+  { value: "mrot", label: "МРОТ на 1 января" },
+];
+
 const BALANCE_ARTICLE_CATEGORY_OPTIONS: FieldOption[] = [
   { value: "ASSET", label: "Актив" },
   { value: "LIABILITY", label: "Обязательство" },
@@ -399,6 +404,22 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "code", label: "Код", type: "text", required: true },
       { name: "base", label: "Вид", type: "select", required: true, options: TAX_BASE_OPTIONS },
       { name: "ratePct", label: "Ставка, %", type: "number", required: true },
+    ],
+  },
+  "payroll-parameters": {
+    slug: "payroll-parameters",
+    title: "Параметры расчёта зарплаты",
+    singularTitle: "Параметр",
+    entityAuditType: "payroll_parameter",
+    delegate: delegate(prisma.payrollParameter),
+    permissionView: PERMISSIONS.PAYROLL_VIEW,
+    permissionManage: PERMISSIONS.PAYROLL_MANAGE,
+    orderBy: { year: "desc" },
+    listColumns: ["code", "year", "value"],
+    fields: [
+      { name: "code", label: "Параметр", type: "select", required: true, options: PAYROLL_PARAMETER_OPTIONS },
+      { name: "year", label: "Год", type: "number", required: true },
+      { name: "value", label: "Значение, ₽", type: "number", required: true },
     ],
   },
 };

@@ -7,7 +7,14 @@ import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { assertPeriodOpenForDate, getOrCreatePeriod } from "@/lib/period";
 import { PERMISSIONS } from "@/lib/permissions";
-import { calculatePayrollRun, computeTaxes, loadTaxRates } from "@/lib/payroll/calculate";
+import { calculatePayrollRun, computeTaxes, loadTaxRates, splitByProjectShares } from "@/lib/payroll/calculate";
+import {
+  AVERAGE_FIELDS,
+  computeAverageEarnings,
+  parseAverageRequest,
+  type AverageEarningsPreview,
+  type AverageEarningsRequest,
+} from "@/lib/payroll/average-earnings-db";
 import { postPayrollRunToAccrual } from "@/lib/payroll/post-to-accrual";
 import { toDecimal } from "@/lib/money";
 import { PayrollRunStatus } from "@prisma/client";
@@ -119,6 +126,109 @@ export async function addPayrollLineAction(runId: string, formData: FormData) {
   });
 
   revalidatePath(`/payroll/${runId}`);
+}
+
+/**
+ * Добавляет строку «Отпускные» или «Больничные», рассчитанную по среднему
+ * заработку. Сумма пересчитывается здесь заново по тем же параметрам, что
+ * и предпросмотр на странице, — из формы берутся только параметры.
+ */
+export async function addAverageEarningsLineAction(runId: string, formData: FormData) {
+  const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  const back = (message: string): never => redirect(`/payroll/${runId}?error=${encodeURIComponent(message)}`);
+
+  const run = await prisma.payrollRun.findUniqueOrThrow({ where: { id: runId } });
+  if (run.status !== "DRAFT" && run.status !== "CALCULATED") back("Добавлять строки можно только в черновик или рассчитанный расчёт");
+  try {
+    await assertPeriodOpenForDate(run.payoutDate);
+  } catch (e) {
+    back((e as Error).message);
+  }
+
+  const params = Object.fromEntries(AVERAGE_FIELDS.map((f) => [f, String(formData.get(f) ?? "")]));
+  const parsed = parseAverageRequest(params);
+  if ("error" in parsed) back(parsed.error);
+  const { request } = parsed as { request: AverageEarningsRequest };
+
+  let preview: AverageEarningsPreview;
+  try {
+    preview = await computeAverageEarnings(request);
+  } catch (e) {
+    back((e as Error).message);
+  }
+  if (preview!.employee.organizationId !== run.organizationId) back("Сотрудник не из организации этого расчёта");
+  const result = preview!;
+
+  const accrualType = await prisma.payrollAccrualType.findFirst({ where: { code: result.accrualCode, isArchived: false } });
+  if (!accrualType) back(`В справочнике «Виды начислений зарплаты» нет активного вида с кодом ${result.accrualCode}`);
+
+  const rates = await loadTaxRates();
+  const amount = result.lineAmount;
+  const { ndflAmount, insuranceAmount } = computeTaxes(amount, accrualType!.subjectToNdfl, accrualType!.subjectToInsurance, rates);
+  const shares = await prisma.employeeProjectAllocation.findMany({ where: { employeeId: result.employee.id, validTo: null } });
+  const splits = splitByProjectShares(
+    amount,
+    shares.map((s) => ({ projectId: s.projectId, sharePct: toDecimal(s.sharePct) })),
+    result.employee.departmentId,
+  );
+
+  const line = await prisma.$transaction(async (tx) => {
+    const created = await tx.payrollLine.create({
+      data: {
+        payrollRunId: runId,
+        employeeId: result.employee.id,
+        accrualTypeId: accrualType!.id,
+        departmentId: result.employee.departmentId,
+        amount,
+        ndflAmount,
+        insuranceAmount,
+      },
+    });
+    await tx.payrollAllocation.createMany({
+      data: splits.map((s) => ({
+        payrollLineId: created.id,
+        departmentId: s.departmentId ?? result.employee.departmentId,
+        projectId: s.projectId,
+        sharePct: s.sharePct,
+        amount: s.amount,
+      })),
+    });
+    return created;
+  });
+
+  const calculation =
+    result.kind === "vacation"
+      ? {
+          kind: "vacation",
+          start: request.startDate.toISOString().slice(0, 10),
+          days: request.days,
+          method: result.vacation.method,
+          earnings: result.vacation.totalEarnings.toFixed(2),
+          periodDays: result.vacation.totalDays.toFixed(4),
+          avgDaily: result.vacation.avgDaily.toFixed(2),
+        }
+      : {
+          kind: "sick",
+          start: request.startDate.toISOString().slice(0, 10),
+          days: request.days,
+          tenurePct: request.tenurePct,
+          basis: result.sick.basis,
+          avgDaily: result.sick.avgDaily.toFixed(2),
+          dailyBenefit: result.sick.dailyBenefit.toFixed(2),
+          total: result.sick.total.toFixed(2),
+          employerAmount: result.sick.employerAmount.toFixed(2),
+          fundAmount: result.sick.fundAmount.toFixed(2),
+        };
+  await logAudit({
+    userId: session.userId,
+    entityType: "payroll_line",
+    entityId: line.id,
+    action: "create_by_average_earnings",
+    after: { ...line, calculation } as never,
+  });
+
+  revalidatePath(`/payroll/${runId}`);
+  redirect(`/payroll/${runId}`);
 }
 
 export async function removePayrollLineAction(runId: string, lineId: string) {

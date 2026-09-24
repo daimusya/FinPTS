@@ -953,6 +953,21 @@ model PayrollAllocation {
   @@map("payroll_allocations")
 }
 
+// Годовые параметры расчёта пособий: предельная база для страховых взносов
+// (code = insurance_base_limit) — ограничивает заработок года при расчёте
+// больничных, и МРОТ на 1 января (code = mrot) — нижняя граница среднего
+// заработка для больничных. Меняются каждый год, поэтому не зашиты в код.
+model PayrollParameter {
+  id         String  @id @default(cuid())
+  code       String
+  year       Int
+  value      Decimal @db.Decimal(18, 2)
+  isArchived Boolean @default(false)
+
+  @@unique([code, year])
+  @@map("payroll_parameters")
+}
+
 model TaxRule {
   id          String  @id @default(cuid())
   name        String

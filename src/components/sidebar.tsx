@@ -38,6 +38,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/master-data/work-schedules", label: "Графики работы" },
       { href: "/master-data/payroll-accrual-types", label: "Виды начислений зарплаты" },
       { href: "/master-data/tax-rules", label: "Налоговые и страховые правила" },
+      { href: "/master-data/payroll-parameters", label: "Параметры расчёта зарплаты" },
     ],
   },
   {

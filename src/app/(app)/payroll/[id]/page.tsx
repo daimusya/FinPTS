@@ -12,16 +12,19 @@ import {
   markPayrollRunPaidAction,
   removePayrollLineAction,
 } from "../actions";
+import { AverageEarningsCard } from "./average-earnings-card";
+import type { AverageParams } from "@/lib/payroll/average-earnings-db";
 
 export default async function PayrollRunDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string } & AverageParams>;
 }) {
   const { id } = await params;
-  const { error } = await searchParams;
+  const sp = await searchParams;
+  const { error } = sp;
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.PAYROLL_VIEW)) {
     return (
@@ -252,6 +255,10 @@ export default async function PayrollRunDetailPage({
           </>
         ) : null}
       </div>
+
+      {canManage && (run.status === "DRAFT" || run.status === "CALCULATED") ? (
+        <AverageEarningsCard runId={run.id} employees={employees} params={sp} />
+      ) : null}
     </div>
   );
 }
