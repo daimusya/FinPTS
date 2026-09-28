@@ -8,6 +8,7 @@ import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { PaymentRequestStatus } from "@prisma/client";
 import { PAYMENT_REQUEST_STATUS_LABELS } from "@/lib/payment-requests/labels";
+import { localDateKey, parseRescheduleDate, requestPlacement } from "@/lib/payment-calendar";
 import {
   selectApprovalRoute,
   roleForStep,
@@ -242,4 +243,75 @@ export async function markPaymentRequestPaidAction(id: string, formData?: FormDa
 
 export async function cancelPaymentRequestAction(id: string, formData?: FormData) {
   await transition(id, PaymentRequestStatus.CANCELLED, "cancel", formData);
+}
+
+export type RescheduleResult = { ok: true; dueDate: string } | { ok: false; error: string };
+
+/**
+ * Перенос срока оплаты заявки. Право — у тех, кто согласует заявки или ведёт
+ * деньги (казначейство). Двигать можно черновик, заявку на согласовании и
+ * согласованную; оплаченная, отклонённая и отменённая остаются на своей дате.
+ * Статус и шаг согласования не меняются: срок — это решение о времени оплаты,
+ * а не о самой заявке.
+ */
+async function rescheduleCore(id: string, dateRaw: unknown, reasonRaw: unknown): Promise<RescheduleResult> {
+  const session = await requireSession();
+  const allowed =
+    hasPermission(session, PERMISSIONS.ADMIN_FULL) ||
+    hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE) ||
+    hasPermission(session, PERMISSIONS.CASH_MANAGE);
+  if (!allowed) return { ok: false, error: "Переносить срок оплаты могут согласующие заявки и те, кто ведёт банк и кассу" };
+
+  const parsed = parseRescheduleDate(dateRaw, localDateKey());
+  if ("error" in parsed) return { ok: false, error: parsed.error };
+  const reason = String(reasonRaw ?? "").trim().slice(0, 500) || null;
+
+  const request = await prisma.paymentRequest.findUnique({ where: { id } });
+  if (!request) return { ok: false, error: "Заявка не найдена" };
+  if (!requestPlacement(request.status, true).movable) {
+    return { ok: false, error: `Заявка в статусе «${PAYMENT_REQUEST_STATUS_LABELS[request.status]}» — срок оплаты уже не переносится` };
+  }
+  const fromKey = request.dueDate.toISOString().slice(0, 10);
+  if (fromKey === parsed.key) return { ok: true, dueDate: parsed.key };
+
+  // Conditional on the date and status the user saw, so two people moving the same request don't overwrite silently.
+  const updated = await prisma.$transaction(async (db) => {
+    const moved = await db.paymentRequest.updateMany({
+      where: { id, dueDate: request.dueDate, status: request.status },
+      data: { dueDate: parsed.date },
+    });
+    if (moved.count === 0) return null;
+    await db.paymentRequestReschedule.create({
+      data: { paymentRequestId: id, fromDate: request.dueDate, toDate: parsed.date, changedById: session.userId, reason },
+    });
+    return db.paymentRequest.findUniqueOrThrow({ where: { id } });
+  });
+  if (!updated) return { ok: false, error: "Заявку только что изменили — обновите страницу и повторите" };
+
+  await logAudit({
+    userId: session.userId,
+    entityType: "payment_request",
+    entityId: id,
+    action: "reschedule",
+    before: request as never,
+    after: { ...updated, rescheduleReason: reason } as never,
+  });
+
+  revalidatePath("/payment-requests");
+  revalidatePath(`/payment-requests/${id}`);
+  revalidatePath("/payment-calendar");
+  return { ok: true, dueDate: parsed.key };
+}
+
+/** Перенос со страницы заявки (форма с датой и причиной). */
+export async function reschedulePaymentRequestAction(id: string, formData: FormData) {
+  const result = await rescheduleCore(id, formData.get("dueDate"), formData.get("reason"));
+  if (!result.ok) redirect(`/payment-requests/${id}?error=${encodeURIComponent(result.error)}`);
+  const shown = new Date(`${(result as { dueDate: string }).dueDate}T00:00:00Z`).toLocaleDateString("ru-RU", { timeZone: "UTC" });
+  redirect(`/payment-requests/${id}?notice=${encodeURIComponent(`Срок оплаты перенесён на ${shown}`)}`);
+}
+
+/** Перенос перетаскиванием в платёжном календаре: без перехода, результат — в интерфейс. */
+export async function movePaymentRequestAction(id: string, dueDate: string): Promise<RescheduleResult> {
+  return rescheduleCore(id, dueDate, null);
 }

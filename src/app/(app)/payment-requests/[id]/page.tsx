@@ -15,7 +15,9 @@ import {
   cancelPaymentRequestAction,
   markPaymentRequestPaidAction,
   rejectPaymentRequestAction,
+  reschedulePaymentRequestAction,
 } from "../actions";
+import { localDateKey, requestPlacement } from "@/lib/payment-calendar";
 
 const STATE_LABELS: Record<TimelineState, string> = {
   approved: "Согласовано",
@@ -33,6 +35,9 @@ const STATE_BADGE: Record<TimelineState, string> = {
   not_reached: "badge-archived",
 };
 
+/** Due dates are stored as UTC midnight: show them without shifting by the time zone. */
+const dueDay = (d: Date) => d.toLocaleDateString("ru-RU", { timeZone: "UTC" });
+
 const dateTime = (d: Date) =>
   d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -41,12 +46,12 @@ export default async function PaymentRequestPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; notice?: string }>;
 }) {
   const session = await getSession();
   if (!session) return null;
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error, notice } = await searchParams;
 
   const request = await prisma.paymentRequest.findUnique({
     where: { id },
@@ -57,6 +62,7 @@ export default async function PaymentRequestPage({
       createdBy: true,
       route: { include: { steps: { include: { role: true } } } },
       approvals: { include: { approver: true } },
+      reschedules: { include: { changedBy: true }, orderBy: { changedAt: "asc" } },
     },
   });
   if (!request) notFound();
@@ -64,6 +70,8 @@ export default async function PaymentRequestPage({
   const isAdmin = hasPermission(session, PERMISSIONS.ADMIN_FULL);
   const canApprove = hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE);
   const canPay = hasPermission(session, PERMISSIONS.CASH_MANAGE);
+  const canReschedule = (isAdmin || canApprove || canPay) && requestPlacement(request.status, true).movable;
+  const todayKey = localDateKey();
 
   const steps = request.route?.steps ?? [];
   const currentStepRow = steps.find((s) => s.stepOrder === request.currentStep);
@@ -100,7 +108,7 @@ export default async function PaymentRequestPage({
             Заявка на оплату · {formatMoney(request.amount)}
           </h1>
           <p>
-            {counterpartyName} · срок оплаты {request.dueDate.toLocaleDateString("ru-RU")}{" "}
+            {counterpartyName} · срок оплаты {dueDay(request.dueDate)}{" "}
             <span className={`badge ${PAYMENT_REQUEST_STATUS_BADGE[request.status]}`}>
               {PAYMENT_REQUEST_STATUS_LABELS[request.status]}
             </span>
@@ -112,6 +120,7 @@ export default async function PaymentRequestPage({
       </div>
 
       {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
+      {notice ? <p className="form-success" style={{ marginBottom: 14 }}>{notice}</p> : null}
 
       <div className="card">
         <dl className="detail-list">
@@ -124,7 +133,7 @@ export default async function PaymentRequestPage({
           <dt>Сумма</dt>
           <dd className="mono">{formatMoney(request.amount)}</dd>
           <dt>Срок оплаты</dt>
-          <dd>{request.dueDate.toLocaleDateString("ru-RU")}</dd>
+          <dd>{dueDay(request.dueDate)}</dd>
           <dt>Создал</dt>
           <dd>
             {request.createdBy.fullName}, {dateTime(request.createdAt)}
@@ -135,6 +144,54 @@ export default async function PaymentRequestPage({
           <dd>{request.route ? request.route.name : "Одна ступень (подходящего маршрута не было)"}</dd>
         </dl>
       </div>
+
+      {canReschedule || request.reschedules.length > 0 ? (
+        <div className="card" id="due-date">
+          <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+            Срок оплаты: {dueDay(request.dueDate)}
+            {request.dueDate.toISOString().slice(0, 10) < todayKey && requestPlacement(request.status, true).movable ? (
+              <span className="badge badge-danger" style={{ marginLeft: 8 }}>
+                Просрочен
+              </span>
+            ) : null}
+          </h2>
+          {request.reschedules.length > 0 ? (
+            <ul className="reschedule-list">
+              {request.reschedules.map((r) => (
+                <li key={r.id}>
+                  <span className="mono">
+                    {dueDay(r.fromDate)} → {dueDay(r.toDate)}
+                  </span>{" "}
+                  <span className="text-muted">
+                    {r.changedBy.fullName}, {dateTime(r.changedAt)}
+                  </span>
+                  {r.reason ? <div className="approval-comment" style={{ marginTop: 4 }}>{r.reason}</div> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {canReschedule ? (
+            <form action={reschedulePaymentRequestAction.bind(null, request.id)} className="form-grid" style={{ alignItems: "flex-end", marginTop: 10 }}>
+              <label className="field">
+                <span>Новый срок оплаты</span>
+                <input type="date" name="dueDate" min={todayKey} defaultValue={request.dueDate.toISOString().slice(0, 10)} required />
+              </label>
+              <label className="field" style={{ gridColumn: "span 2" }}>
+                <span>Причина переноса (необязательно)</span>
+                <input type="text" name="reason" maxLength={500} placeholder="Например: ждём поступления от заказчика" />
+              </label>
+              <button type="submit" className="btn btn-secondary">
+                Перенести срок
+              </button>
+            </form>
+          ) : null}
+          {canReschedule ? (
+            <p className="text-muted" style={{ marginTop: 8, fontSize: 12 }}>
+              Срок можно передвинуть и в <Link href={`/payment-calendar?month=${request.dueDate.toISOString().slice(0, 7)}`}>платёжном календаре</Link> — перетащив заявку на другой день. Статус и согласование при переносе не меняются.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="card">
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>История согласования</h2>

@@ -30,6 +30,7 @@ export default async function PaymentRequestsPage({
         createdBy: true,
         route: { include: { steps: { include: { role: true } } } },
         approvals: { orderBy: { decidedAt: "desc" }, take: 1 },
+        _count: { select: { reschedules: true } },
       },
     }),
     prisma.userRole.findMany({ where: { userId: session.userId }, select: { roleId: true } }),
@@ -107,7 +108,12 @@ export default async function PaymentRequestsPage({
               return (
                 <tr key={req.id}>
                   <td className="mono">
-                    <Link href={`/payment-requests/${req.id}`}>{req.dueDate.toLocaleDateString("ru-RU")}</Link>
+                    <Link href={`/payment-requests/${req.id}`}>{req.dueDate.toLocaleDateString("ru-RU", { timeZone: "UTC" })}</Link>
+                    {req._count.reschedules > 0 ? (
+                      <div className="text-muted" style={{ fontSize: 11 }}>
+                        перенесён{req._count.reschedules > 1 ? ` ×${req._count.reschedules}` : ""}
+                      </div>
+                    ) : null}
                   </td>
                   <td>{req.organization.shortName || req.organization.name}</td>
                   <td>{req.counterparty ? req.counterparty.shortName || req.counterparty.fullName : "—"}</td>

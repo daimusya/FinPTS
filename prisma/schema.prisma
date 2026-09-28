@@ -28,6 +28,7 @@ model User {
   responsibleFor     AccrualDocument[]        @relation("AccrualResponsible")
   paymentRequests    PaymentRequest[]         @relation("PaymentRequestCreatedBy")
   approvals          PaymentRequestApproval[]
+  paymentRequestReschedules PaymentRequestReschedule[]
   closedPeriods      AccountingPeriod[]       @relation("PeriodClosedBy")
   reopenedPeriods    AccountingPeriod[]       @relation("PeriodReopenedBy")
   employee           Employee?
@@ -722,6 +723,7 @@ model PaymentRequest {
   counterparty    Counterparty?              @relation(fields: [counterpartyId], references: [id])
   route           PaymentApprovalRoute?      @relation(fields: [routeId], references: [id])
   approvals       PaymentRequestApproval[]
+  reschedules     PaymentRequestReschedule[]
 
   @@index([dueDate])
   @@index([status])
@@ -743,6 +745,24 @@ model PaymentRequestApproval {
   approver       User           @relation(fields: [approverId], references: [id])
 
   @@map("payment_request_approvals")
+}
+
+/// Перенос срока оплаты заявки (со страницы заявки или перетаскиванием в
+/// платёжном календаре): с какой даты на какую, кто, когда и почему.
+model PaymentRequestReschedule {
+  id               String   @id @default(cuid())
+  paymentRequestId String
+  fromDate         DateTime
+  toDate           DateTime
+  changedById      String
+  reason           String?
+  changedAt        DateTime @default(now())
+
+  paymentRequest PaymentRequest @relation(fields: [paymentRequestId], references: [id], onDelete: Cascade)
+  changedBy      User           @relation(fields: [changedById], references: [id])
+
+  @@index([paymentRequestId])
+  @@map("payment_request_reschedules")
 }
 
 /**
