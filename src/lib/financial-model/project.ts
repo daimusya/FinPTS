@@ -23,12 +23,27 @@ export interface NewServiceInput {
   rampUpMonths: number;
   /** Свои переменные расходы услуги, % от её выручки; null — как у сценария. */
   variableCostPct: number | string | Decimal | null;
+  /** Персонал под услугу на полной мощности; набирается по мере выхода на мощность. */
+  staffHeadcount?: number | null;
+  /** Стоимость сотрудника услуги в месяц; null — средняя по сценарию (драйвер «Средняя стоимость сотрудника»). */
+  staffCostPerEmployee?: number | string | Decimal | null;
+  /** Постоянные расходы услуги в месяц — с месяца запуска. */
+  monthlyFixedCosts?: number | string | Decimal | null;
+  /** Разовые расходы на запуск — в месяц запуска. */
+  launchCosts?: number | string | Decimal | null;
 }
 
 export interface NewServiceMonth {
   id: string;
   name: string;
   revenue: Decimal;
+  variableCosts: Decimal;
+  headcount: number;
+  payrollCost: Decimal;
+  /** Постоянные расходы услуги в месяц плюс, в месяц запуска, разовые расходы на запуск. */
+  fixedCosts: Decimal;
+  /** Вклад услуги в операционную прибыль: выручка − переменные − ФОТ − постоянные (без комиссии посредников). */
+  contribution: Decimal;
 }
 
 /**
@@ -158,17 +173,40 @@ export function projectScenario(
     const baseRevenue = avgCheck.times(salesCount).times(seasonality).times(activation);
 
     const variableCostPct = lookup.get(year, month, "variable_cost_pct").dividedBy(100);
+    const avgEmployeeCost = lookup.get(year, month, "avg_employee_cost");
     const monthIndex = year * 12 + month;
     const serviceMonths: NewServiceMonth[] = [];
     let serviceVariableCosts = toDecimal(0);
+    let serviceHeadcount = 0;
+    let servicePayroll = toDecimal(0);
+    let serviceFixed = toDecimal(0);
     for (const service of newServices) {
-      const share = rampShare(monthIndex - (service.launchYear * 12 + service.launchMonth), service.rampUpMonths);
+      const sinceLaunch = monthIndex - (service.launchYear * 12 + service.launchMonth);
+      const share = rampShare(sinceLaunch, service.rampUpMonths);
       if (share.isZero()) continue;
       // The scenario seasonality applies to new services too; the base-revenue adjustment does not.
       const serviceRevenue = toDecimal(service.avgCheck).times(toDecimal(service.salesPerMonth)).times(share).times(seasonality);
       const servicePct = service.variableCostPct === null ? variableCostPct : toDecimal(service.variableCostPct).dividedBy(100);
-      serviceVariableCosts = serviceVariableCosts.plus(serviceRevenue.times(servicePct));
-      serviceMonths.push({ id: service.id, name: service.name, revenue: serviceRevenue });
+      const variable = serviceRevenue.times(servicePct);
+      // Staff is hired as the service ramps up: the full headcount × the ramp share, rounded up.
+      const headcount = service.staffHeadcount ? share.times(service.staffHeadcount).ceil().toNumber() : 0;
+      const costPerEmployee = service.staffCostPerEmployee ? toDecimal(service.staffCostPerEmployee) : avgEmployeeCost;
+      const payroll = costPerEmployee.times(headcount);
+      const fixed = toDecimal(service.monthlyFixedCosts ?? 0).plus(sinceLaunch === 0 ? toDecimal(service.launchCosts ?? 0) : 0);
+      serviceVariableCosts = serviceVariableCosts.plus(variable);
+      serviceHeadcount += headcount;
+      servicePayroll = servicePayroll.plus(payroll);
+      serviceFixed = serviceFixed.plus(fixed);
+      serviceMonths.push({
+        id: service.id,
+        name: service.name,
+        revenue: serviceRevenue,
+        variableCosts: variable,
+        headcount,
+        payrollCost: payroll,
+        fixedCosts: fixed,
+        contribution: serviceRevenue.minus(variable).minus(payroll).minus(fixed),
+      });
     }
     const newServicesRevenue = serviceMonths.reduce((acc, s) => acc.plus(s.revenue), toDecimal(0));
     const revenue = baseRevenue.plus(newServicesRevenue);
@@ -179,7 +217,7 @@ export function projectScenario(
 
     const variableCosts = baseRevenue.times(variableCostPct).plus(serviceVariableCosts);
 
-    const fixedCosts = lookup.get(year, month, "fixed_costs");
+    const fixedCosts = lookup.get(year, month, "fixed_costs").plus(serviceFixed);
 
     const departmentIds = new Set([
       ...lookup.departmentDimensionsForMonth(year, month, "sales_count"),
@@ -193,10 +231,9 @@ export function projectScenario(
       departmentHeadcount.push({ departmentId, requiredHeadcount: required });
     }
     const manualHeadcount = lookup.get(year, month, "headcount").toNumber();
-    const totalHeadcount = departmentHeadcount.reduce((acc, d) => acc + d.requiredHeadcount, 0) + manualHeadcount;
-
-    const avgEmployeeCost = lookup.get(year, month, "avg_employee_cost");
-    const payrollCost = avgEmployeeCost.times(totalHeadcount);
+    const scenarioHeadcount = departmentHeadcount.reduce((acc, d) => acc + d.requiredHeadcount, 0) + manualHeadcount;
+    const totalHeadcount = scenarioHeadcount + serviceHeadcount;
+    const payrollCost = avgEmployeeCost.times(scenarioHeadcount).plus(servicePayroll);
 
     const grossProfit = revenue.minus(variableCosts).minus(intermediaryCommission);
     const operatingProfit = grossProfit.minus(fixedCosts).minus(payrollCost);

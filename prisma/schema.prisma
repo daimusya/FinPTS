@@ -1346,6 +1346,12 @@ model FinancialScenarioNewService {
   salesPerMonth    Decimal  @db.Decimal(18, 2)
   rampUpMonths     Int      @default(0)
   variableCostPct  Decimal? @db.Decimal(5, 2)
+  /// Персонал под услугу на полной мощности и стоимость сотрудника в месяц (пусто — средняя по сценарию).
+  staffHeadcount       Int?
+  staffCostPerEmployee Decimal? @db.Decimal(18, 2)
+  /// Постоянные расходы услуги в месяц (с запуска) и разовые расходы на запуск (в месяц запуска).
+  monthlyFixedCosts Decimal? @db.Decimal(18, 2)
+  launchCosts       Decimal? @db.Decimal(18, 2)
   createdAt        DateTime @default(now())
 
   scenario       FinancialScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)

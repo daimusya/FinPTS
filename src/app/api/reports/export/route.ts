@@ -315,6 +315,13 @@ export async function GET(request: NextRequest) {
       ["ФОТ", ...projection.map((p) => toNum(p.payrollCost))],
       ["Требуемая численность", ...projection.map((p) => p.totalHeadcount)],
       ["Операционная прибыль", ...projection.map((p) => toNum(p.operatingProfit))],
+      ...newServices.map((service) => [
+        `в т.ч. вклад «${service.name}»`,
+        ...projection.map((p) => {
+          const month = p.newServices.find((x) => x.id === service.id);
+          return month ? toNum(month.contribution) : 0;
+        }),
+      ]),
       ["Точка безубыточности", ...projection.map((p) => (p.breakEvenRevenue ? toNum(p.breakEvenRevenue) : ""))],
       ["Запас прочности, %", ...projection.map((p) => (p.marginOfSafetyPct ? toNum(p.marginOfSafetyPct) : ""))],
       ["Проценты по кредитам", ...projection.map((p) => toNum(p.loanInterest))],

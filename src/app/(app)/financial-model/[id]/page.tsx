@@ -11,6 +11,7 @@ import { getAccessScope } from "@/lib/access-scope";
 import {
   addLoanAction,
   addNewServiceAction,
+  updateNewServiceAction,
   addScenarioDepartmentAction,
   removeLoanAction,
   removeNewServiceAction,
@@ -34,7 +35,7 @@ export default async function ScenarioDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ startYear?: string; startMonth?: string; error?: string }>;
+  searchParams: Promise<{ startYear?: string; startMonth?: string; error?: string; editService?: string }>;
 }) {
   const { id } = await params;
   const session = await getSession();
@@ -103,6 +104,7 @@ export default async function ScenarioDetailPage({
   });
   const totalNetProfit = sumMoney(projection.map((p) => p.netProfit));
   const finalDebt = projection[projection.length - 1]?.loanDebt ?? sumMoney([]);
+  const noService = null as (typeof newServiceRows)[number] | null;
   const keepStart = (
     <>
       <input type="hidden" name="startYear" value={startYear} />
@@ -297,7 +299,11 @@ export default async function ScenarioDetailPage({
         <p className="text-muted" style={{ marginBottom: 12 }}>
           С месяца запуска каждая услуга добавляет к выручке сценария: средний чек × продажи в месяц × доля выхода на
           мощность × сезонность сценария. При выходе на полную мощность за N месяцев продажи растут линейно: 1/N в месяц
-          запуска, 2/N во второй и т.д. Переменные расходы — свой % услуги или, если не задан, % сценария.
+          запуска, 2/N во второй и т.д. Переменные расходы — свой % услуги или, если не задан, % сценария. Персонал
+          услуги набирается вместе с выходом на мощность (полная численность × доля, с округлением вверх) — ФОТ по её
+          стоимости сотрудника или средней по сценарию; постоянные расходы услуги — с месяца запуска, расходы на запуск —
+          разово в месяц запуска. Всё это входит в общие ФОТ, численность и постоянные расходы, а вклад каждой услуги
+          показан в прогнозе отдельной строкой.
         </p>
         {sp.error ? (
           <p className="form-error" style={{ marginBottom: 12 }}>
@@ -314,11 +320,81 @@ export default async function ScenarioDetailPage({
                 <th>Продаж в месяц (полная мощность)</th>
                 <th>Выход на мощность</th>
                 <th>Переменные расходы</th>
+                <th>Персонал</th>
+                <th>Постоянные в мес. / на запуск</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {newServiceRows.map((service) => (
+              {newServiceRows.map((service) =>
+                canManage && sp.editService === service.id ? (
+                  <tr key={service.id} className="row-editing">
+                    <td colSpan={9}>
+                      <form action={updateNewServiceAction.bind(null, id, service.id)} className="form-grid" style={{ alignItems: "flex-end" }}>
+                        {keepStart}
+                        <label className="field">
+                          <span>Название</span>
+                          <input type="text" name="name" defaultValue={service?.name ?? ""} placeholder="или выберите из справочника →" />
+                        </label>
+                        <label className="field">
+                          <span>Из справочника «Продукты и услуги»</span>
+                          <select name="productServiceId" defaultValue={service?.productServiceId ?? ""}>
+                            <option value="">—</option>
+                            {products.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Месяц запуска</span>
+                          <input type="month" name="launch" required defaultValue={service ? `${service.launchYear}-${String(service.launchMonth).padStart(2, "0")}` : ""} />
+                        </label>
+                        <label className="field">
+                          <span>Средний чек, ₽</span>
+                          <input type="text" inputMode="decimal" name="avgCheck" required defaultValue={service?.avgCheck.toString() ?? ""} style={{ width: 120 }} />
+                        </label>
+                        <label className="field">
+                          <span>Продаж в месяц</span>
+                          <input type="text" inputMode="decimal" name="salesPerMonth" required defaultValue={service?.salesPerMonth.toString() ?? ""} style={{ width: 100 }} />
+                        </label>
+                        <label className="field">
+                          <span>Выход на мощность, мес.</span>
+                          <input type="number" name="rampUpMonths" min={0} max={MAX_RAMP_UP_MONTHS} step={1} defaultValue={service?.rampUpMonths ?? ""} placeholder="0 — сразу" style={{ width: 110 }} />
+                        </label>
+                        <label className="field">
+                          <span>Переменные расходы, %</span>
+                          <input type="text" inputMode="decimal" name="variableCostPct" defaultValue={service?.variableCostPct?.toString() ?? ""} placeholder="как у сценария" style={{ width: 120 }} />
+                        </label>
+                        <label className="field">
+                          <span>Персонал на полной мощности, чел.</span>
+                          <input type="number" name="staffHeadcount" min={0} step={1} defaultValue={service?.staffHeadcount ?? ""} placeholder="нет" style={{ width: 110 }} />
+                        </label>
+                        <label className="field">
+                          <span>Стоимость сотрудника в месяц, ₽</span>
+                          <input type="text" inputMode="decimal" name="staffCostPerEmployee" defaultValue={service?.staffCostPerEmployee?.toString() ?? ""} placeholder="средняя по сценарию" style={{ width: 150 }} />
+                        </label>
+                        <label className="field">
+                          <span>Постоянные расходы услуги в месяц, ₽</span>
+                          <input type="text" inputMode="decimal" name="monthlyFixedCosts" defaultValue={service?.monthlyFixedCosts?.toString() ?? ""} placeholder="0" style={{ width: 140 }} />
+                        </label>
+                        <label className="field">
+                          <span>Расходы на запуск (разово), ₽</span>
+                          <input type="text" inputMode="decimal" name="launchCosts" defaultValue={service?.launchCosts?.toString() ?? ""} placeholder="0" style={{ width: 140 }} />
+                        </label>
+                        <div className="form-actions">
+                          <button type="submit" className="btn btn-primary btn-sm">
+                            Сохранить
+                          </button>
+                          <Link href={`/financial-model/${id}?startYear=${startYear}&startMonth=${startMonth}`} className="btn btn-ghost btn-sm">
+                            Отмена
+                          </Link>
+                        </div>
+                      </form>
+                    </td>
+                  </tr>
+                ) : (
                 <tr key={service.id}>
                   <td>
                     {service.name}
@@ -336,20 +412,36 @@ export default async function ScenarioDetailPage({
                   <td>{service.rampUpMonths > 1 ? `${service.rampUpMonths} мес.` : "сразу"}</td>
                   <td>{service.variableCostPct === null ? "как у сценария" : `${formatNumber(service.variableCostPct)}%`}</td>
                   <td>
+                    {service.staffHeadcount
+                      ? `${service.staffHeadcount} чел. × ${service.staffCostPerEmployee ? formatMoney(service.staffCostPerEmployee) : "средняя"}`
+                      : "—"}
+                  </td>
+                  <td className="mono">
+                    {service.monthlyFixedCosts || service.launchCosts
+                      ? `${formatMoney(service.monthlyFixedCosts ?? 0)} / ${formatMoney(service.launchCosts ?? 0)}`
+                      : "—"}
+                  </td>
+                  <td>
                     {canManage ? (
-                      <form action={removeNewServiceAction.bind(null, id, service.id)}>
-                        {keepStart}
-                        <button type="submit" className="btn btn-ghost btn-sm">
-                          Удалить
-                        </button>
-                      </form>
+                      <div className="row-actions">
+                        <Link href={`/financial-model/${id}?startYear=${startYear}&startMonth=${startMonth}&editService=${service.id}`} className="btn btn-ghost btn-sm">
+                          Изменить
+                        </Link>
+                        <form action={removeNewServiceAction.bind(null, id, service.id)}>
+                          {keepStart}
+                          <button type="submit" className="btn btn-ghost btn-sm">
+                            Удалить
+                          </button>
+                        </form>
+                      </div>
                     ) : null}
                   </td>
                 </tr>
-              ))}
+                ),
+              )}
               {newServiceRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="empty-state">
+                  <td colSpan={9} className="empty-state">
                     Новых услуг в сценарии нет.
                   </td>
                 </tr>
@@ -362,11 +454,11 @@ export default async function ScenarioDetailPage({
             {keepStart}
             <label className="field">
               <span>Название</span>
-              <input type="text" name="name" placeholder="или выберите из справочника →" />
+              <input type="text" name="name" defaultValue={noService?.name ?? ""} placeholder="или выберите из справочника →" />
             </label>
             <label className="field">
               <span>Из справочника «Продукты и услуги»</span>
-              <select name="productServiceId" defaultValue="">
+              <select name="productServiceId" defaultValue={noService?.productServiceId ?? ""}>
                 <option value="">—</option>
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -377,23 +469,39 @@ export default async function ScenarioDetailPage({
             </label>
             <label className="field">
               <span>Месяц запуска</span>
-              <input type="month" name="launch" required />
+              <input type="month" name="launch" required defaultValue={noService ? `${noService.launchYear}-${String(noService.launchMonth).padStart(2, "0")}` : ""} />
             </label>
             <label className="field">
               <span>Средний чек, ₽</span>
-              <input type="text" inputMode="decimal" name="avgCheck" required style={{ width: 120 }} />
+              <input type="text" inputMode="decimal" name="avgCheck" required defaultValue={noService?.avgCheck.toString() ?? ""} style={{ width: 120 }} />
             </label>
             <label className="field">
               <span>Продаж в месяц</span>
-              <input type="text" inputMode="decimal" name="salesPerMonth" required style={{ width: 100 }} />
+              <input type="text" inputMode="decimal" name="salesPerMonth" required defaultValue={noService?.salesPerMonth.toString() ?? ""} style={{ width: 100 }} />
             </label>
             <label className="field">
               <span>Выход на мощность, мес.</span>
-              <input type="number" name="rampUpMonths" min={0} max={MAX_RAMP_UP_MONTHS} step={1} placeholder="0 — сразу" style={{ width: 110 }} />
+              <input type="number" name="rampUpMonths" min={0} max={MAX_RAMP_UP_MONTHS} step={1} defaultValue={noService?.rampUpMonths ?? ""} placeholder="0 — сразу" style={{ width: 110 }} />
             </label>
             <label className="field">
               <span>Переменные расходы, %</span>
-              <input type="text" inputMode="decimal" name="variableCostPct" placeholder="как у сценария" style={{ width: 120 }} />
+              <input type="text" inputMode="decimal" name="variableCostPct" defaultValue={noService?.variableCostPct?.toString() ?? ""} placeholder="как у сценария" style={{ width: 120 }} />
+            </label>
+            <label className="field">
+              <span>Персонал на полной мощности, чел.</span>
+              <input type="number" name="staffHeadcount" min={0} step={1} defaultValue={noService?.staffHeadcount ?? ""} placeholder="нет" style={{ width: 110 }} />
+            </label>
+            <label className="field">
+              <span>Стоимость сотрудника в месяц, ₽</span>
+              <input type="text" inputMode="decimal" name="staffCostPerEmployee" defaultValue={noService?.staffCostPerEmployee?.toString() ?? ""} placeholder="средняя по сценарию" style={{ width: 150 }} />
+            </label>
+            <label className="field">
+              <span>Постоянные расходы услуги в месяц, ₽</span>
+              <input type="text" inputMode="decimal" name="monthlyFixedCosts" defaultValue={noService?.monthlyFixedCosts?.toString() ?? ""} placeholder="0" style={{ width: 140 }} />
+            </label>
+            <label className="field">
+              <span>Расходы на запуск (разово), ₽</span>
+              <input type="text" inputMode="decimal" name="launchCosts" defaultValue={noService?.launchCosts?.toString() ?? ""} placeholder="0" style={{ width: 140 }} />
             </label>
             <button type="submit" className="btn btn-secondary">
               Добавить услугу
@@ -539,6 +647,14 @@ export default async function ScenarioDetailPage({
               <ProjectionRow label="ФОТ" values={projection.map((p) => p.payrollCost)} format="money" />
               <ProjectionRow label="Требуемая численность" values={projection.map((p) => p.totalHeadcount)} format="number" />
               <ProjectionRow label="Операционная прибыль" values={projection.map((p) => p.operatingProfit)} format="money" bold />
+              {newServiceInputs.map((service) => (
+                <ProjectionRow
+                  key={`c-${service.id}`}
+                  label={`в т.ч. вклад «${service.name}» (выручка − переменные − ФОТ − постоянные)`}
+                  values={projection.map((p) => p.newServices.find((x) => x.id === service.id)?.contribution ?? null)}
+                  format="money"
+                />
+              ))}
               <ProjectionRow label="Точка безубыточности" values={projection.map((p) => p.breakEvenRevenue)} format="money" />
               <ProjectionRow label="Запас прочности, %" values={projection.map((p) => p.marginOfSafetyPct)} format="pct" />
               {loanInputs.length > 0 ? (

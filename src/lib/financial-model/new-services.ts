@@ -13,7 +13,26 @@ export interface NewServiceFormData {
   salesPerMonth: Decimal;
   rampUpMonths: number;
   variableCostPct: Decimal | null;
+  staffHeadcount: number | null;
+  staffCostPerEmployee: Decimal | null;
+  monthlyFixedCosts: Decimal | null;
+  launchCosts: Decimal | null;
 }
+
+/** Поля формы новой услуги — общие для добавления и правки. */
+export const NEW_SERVICE_FIELDS = [
+  "name",
+  "productServiceId",
+  "launch",
+  "avgCheck",
+  "salesPerMonth",
+  "rampUpMonths",
+  "variableCostPct",
+  "staffHeadcount",
+  "staffCostPerEmployee",
+  "monthlyFixedCosts",
+  "launchCosts",
+] as const;
 
 function parseAmount(raw: string): Decimal | null {
   const cleaned = raw.replace(/[\s ]/g, "").replace(",", ".");
@@ -54,6 +73,22 @@ export function parseNewServiceForm(
     if (!variableCostPct || variableCostPct.greaterThan(100)) return { error: "Переменные расходы услуги — от 0 до 100%" };
   }
 
+  const staffRaw = (raw.staffHeadcount ?? "").trim();
+  const staffHeadcount = staffRaw === "" ? null : Number(staffRaw);
+  if (staffHeadcount !== null && (!Number.isInteger(staffHeadcount) || staffHeadcount < 0 || staffHeadcount > 10000)) {
+    return { error: "Персонал под услугу — целое число человек" };
+  }
+  const optionalAmount = (key: string, label: string): Decimal | null | { error: string } => {
+    const value = (raw[key] ?? "").trim();
+    if (value === "") return null;
+    const amount = parseAmount(value);
+    return amount ? amount : { error: `${label} — неотрицательная сумма` };
+  };
+  const staffCost = optionalAmount("staffCostPerEmployee", "Стоимость сотрудника");
+  const monthlyFixed = optionalAmount("monthlyFixedCosts", "Постоянные расходы услуги");
+  const launchCosts = optionalAmount("launchCosts", "Расходы на запуск");
+  for (const v of [staffCost, monthlyFixed, launchCosts]) if (v && "error" in v) return v;
+
   return {
     data: {
       name,
@@ -64,7 +99,30 @@ export function parseNewServiceForm(
       salesPerMonth,
       rampUpMonths,
       variableCostPct,
+      staffHeadcount: staffHeadcount || null,
+      staffCostPerEmployee: staffCost as Decimal | null,
+      monthlyFixedCosts: monthlyFixed as Decimal | null,
+      launchCosts: launchCosts as Decimal | null,
     },
+  };
+}
+
+/** Данные новой услуги для записи в БД (суммы — строками с копейками). */
+export function newServiceDbData(data: NewServiceFormData) {
+  const money = (d: Decimal | null) => (d === null ? null : d.toFixed(2));
+  return {
+    name: data.name,
+    productServiceId: data.productServiceId,
+    launchYear: data.launchYear,
+    launchMonth: data.launchMonth,
+    avgCheck: data.avgCheck.toFixed(2),
+    salesPerMonth: data.salesPerMonth.toFixed(2),
+    rampUpMonths: data.rampUpMonths,
+    variableCostPct: money(data.variableCostPct),
+    staffHeadcount: data.staffHeadcount,
+    staffCostPerEmployee: money(data.staffCostPerEmployee),
+    monthlyFixedCosts: money(data.monthlyFixedCosts),
+    launchCosts: money(data.launchCosts),
   };
 }
 
@@ -85,6 +143,10 @@ export async function loadNewServices(scenarioIds: string[]): Promise<Map<string
       salesPerMonth: r.salesPerMonth.toString(),
       rampUpMonths: r.rampUpMonths,
       variableCostPct: r.variableCostPct === null ? null : r.variableCostPct.toString(),
+      staffHeadcount: r.staffHeadcount,
+      staffCostPerEmployee: r.staffCostPerEmployee?.toString() ?? null,
+      monthlyFixedCosts: r.monthlyFixedCosts?.toString() ?? null,
+      launchCosts: r.launchCosts?.toString() ?? null,
     });
   }
   return byScenario;

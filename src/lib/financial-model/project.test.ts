@@ -145,6 +145,26 @@ describe("new services", () => {
     expect(inherited.grossProfit.toNumber()).toBe(105000); // 150000 − 45000
   });
 
+  it("adds the service's staff as it ramps up, its fixed costs from launch and launch costs once", () => {
+    const rows = [3, 4, 5].flatMap((m) => [row(2026, m, "avg_employee_cost", 50000), row(2026, m, "headcount", 2)]);
+    const staffed = service({ rampUpMonths: 3, staffHeadcount: 4, staffCostPerEmployee: 60000, monthlyFixedCosts: 20000, launchCosts: 100000 });
+    const projection = projectScenario(2026, 3, 3, rows, 0, [staffed]);
+    expect(projection.map((m) => m.newServices[0].headcount)).toEqual([2, 3, 4]); // ceil(4 × 1/3, 2/3, 1)
+    expect(projection.map((m) => m.totalHeadcount)).toEqual([4, 5, 6]);
+    expect(projection.map((m) => m.payrollCost.toNumber())).toEqual([220000, 280000, 340000]); // 2 × 50 000 + service staff × 60 000
+    expect(projection.map((m) => m.fixedCosts.toNumber())).toEqual([120000, 20000, 20000]);
+    expect(projection[2].newServices[0]).toMatchObject({ revenue: expect.anything(), payrollCost: expect.anything() });
+    expect(projection[2].newServices[0].contribution.toNumber()).toBe(-210000); // 50 000 − 240 000 − 20 000
+    expect(projection[2].operatingProfit.toNumber()).toBe(50000 - 340000 - 20000);
+  });
+
+  it("prices the service's staff at the scenario's average cost when its own is not set", () => {
+    const rows = [row(2026, 3, "avg_employee_cost", 50000)];
+    const [m] = projectScenario(2026, 3, 1, rows, 0, [service({ staffHeadcount: 3 })]);
+    expect(m.newServices[0].payrollCost.toNumber()).toBe(150000);
+    expect(m.payrollCost.toNumber()).toBe(150000);
+  });
+
   it("charges the intermediary commission on new-service revenue as well", () => {
     const rows = [row(2026, 3, "intermediary_share_pct", 50), row(2026, 3, "intermediary_commission_pct", 10)];
     const [m] = projectScenario(2026, 3, 1, rows, 0, [service()]);

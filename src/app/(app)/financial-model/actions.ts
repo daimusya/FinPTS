@@ -7,7 +7,7 @@ import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { ALL_DRIVER_DEFS } from "@/lib/financial-model/drivers";
-import { parseNewServiceForm, type NewServiceFormData } from "@/lib/financial-model/new-services";
+import { parseNewServiceForm, type NewServiceFormData, NEW_SERVICE_FIELDS, newServiceDbData } from "@/lib/financial-model/new-services";
 import { materializeScenarioDepartments } from "@/lib/financial-model/scenario-departments";
 import { parseLoanForm, type LoanFormData } from "@/lib/financial-model/loans";
 
@@ -51,13 +51,15 @@ export async function archiveScenarioAction(id: string) {
   revalidatePath("/financial-model");
 }
 
-function scenarioUrl(scenarioId: string, formData: FormData, extra = "") {
+function scenarioUrl(scenarioId: string, formData: FormData, extra = "", editService = "") {
   const params = new URLSearchParams();
   for (const key of ["startYear", "startMonth"]) {
     const value = String(formData.get(key) ?? "");
     if (value) params.set(key, value);
   }
   if (extra) params.set("error", extra);
+  // An error while editing keeps the row open.
+  if (editService) params.set("editService", editService);
   const query = params.toString();
   return `/financial-model/${scenarioId}${query ? `?${query}` : ""}`;
 }
@@ -65,12 +67,7 @@ function scenarioUrl(scenarioId: string, formData: FormData, extra = "") {
 export async function addNewServiceAction(scenarioId: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
 
-  const raw = Object.fromEntries(
-    ["name", "productServiceId", "launch", "avgCheck", "salesPerMonth", "rampUpMonths", "variableCostPct"].map((k) => [
-      k,
-      String(formData.get(k) ?? ""),
-    ]),
-  );
+  const raw = Object.fromEntries(NEW_SERVICE_FIELDS.map((k) => [k, String(formData.get(k) ?? "")]));
   const product = raw.productServiceId
     ? await prisma.productService.findFirst({ where: { id: raw.productServiceId, isArchived: false } })
     : null;
@@ -80,19 +77,7 @@ export async function addNewServiceAction(scenarioId: string, formData: FormData
   if ("error" in parsed) redirect(scenarioUrl(scenarioId, formData, parsed.error));
   const { data } = parsed as { data: NewServiceFormData };
 
-  const created = await prisma.financialScenarioNewService.create({
-    data: {
-      scenarioId,
-      name: data.name,
-      productServiceId: data.productServiceId,
-      launchYear: data.launchYear,
-      launchMonth: data.launchMonth,
-      avgCheck: data.avgCheck.toFixed(2),
-      salesPerMonth: data.salesPerMonth.toFixed(2),
-      rampUpMonths: data.rampUpMonths,
-      variableCostPct: data.variableCostPct?.toFixed(2) ?? null,
-    },
-  });
+  const created = await prisma.financialScenarioNewService.create({ data: { scenarioId, ...newServiceDbData(data) } });
 
   await logAudit({
     userId: session.userId,
@@ -100,6 +85,33 @@ export async function addNewServiceAction(scenarioId: string, formData: FormData
     entityId: scenarioId,
     action: "add_new_service",
     after: created as never,
+  });
+
+  revalidatePath(`/financial-model/${scenarioId}`);
+  redirect(scenarioUrl(scenarioId, formData));
+}
+
+/** Правка уже добавленной услуги: те же поля и проверки, что при добавлении. */
+export async function updateNewServiceAction(scenarioId: string, serviceId: string, formData: FormData) {
+  const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
+
+  const before = await prisma.financialScenarioNewService.findFirst({ where: { id: serviceId, scenarioId } });
+  if (!before) redirect(scenarioUrl(scenarioId, formData, "Услуга не найдена — возможно, её уже удалили"));
+  const raw = Object.fromEntries(NEW_SERVICE_FIELDS.map((k) => [k, String(formData.get(k) ?? "")]));
+  const product = raw.productServiceId ? await prisma.productService.findFirst({ where: { id: raw.productServiceId } }) : null;
+  if (raw.productServiceId && !product) redirect(scenarioUrl(scenarioId, formData, "Услуга из справочника не найдена"));
+  const parsed = parseNewServiceForm(raw, product?.name ?? null);
+  if ("error" in parsed) redirect(scenarioUrl(scenarioId, formData, parsed.error, serviceId));
+  const { data } = parsed as { data: NewServiceFormData };
+
+  const updated = await prisma.financialScenarioNewService.update({ where: { id: serviceId }, data: newServiceDbData(data) });
+  await logAudit({
+    userId: session.userId,
+    entityType: "financial_scenario",
+    entityId: scenarioId,
+    action: "update_new_service",
+    before: before as never,
+    after: updated as never,
   });
 
   revalidatePath(`/financial-model/${scenarioId}`);
