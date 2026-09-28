@@ -4,41 +4,39 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import {
+  accountKey,
   adjacentMonths,
   buildCalendarRows,
   buildMonthGrid,
   HIDDEN_REQUEST_STATUSES,
+  itemScope,
   localDateKey,
+  parseAccountKey,
   requestPlacement,
   type CalendarMovement,
+  type ForecastScope,
 } from "@/lib/payment-calendar";
 import { formatMoney, sumMoney } from "@/lib/money";
 import { PAYMENT_REQUEST_STATUS_LABELS } from "@/lib/payment-requests/labels";
-import { PaymentCalendarBoard, type BoardDay, type BoardRequest } from "@/components/payment-calendar-board";
+import { ACCRUAL_DOCUMENT_TYPE_LABELS } from "@/lib/accruals/labels";
+import { canPlanDocuments, canPlanRequests } from "@/lib/payment-plan/service";
+import { PaymentCalendarBoard, type AccountOption, type BoardDay, type BoardItem } from "@/components/payment-calendar-board";
 
-const MONTH_NAMES = [
-  "Январь",
-  "Февраль",
-  "Март",
-  "Апрель",
-  "Май",
-  "Июнь",
-  "Июль",
-  "Август",
-  "Сентябрь",
-  "Октябрь",
-  "Ноябрь",
-  "Декабрь",
-];
+const MONTH_NAMES = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const WEEKDAY_NAMES = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
 const compact = new Intl.NumberFormat("ru-RU", { notation: "compact", maximumFractionDigits: 1 });
 const short = (value: Decimal) => compact.format(value.toNumber());
+const showDay = (key: string) => new Date(`${key}T00:00:00Z`).toLocaleDateString("ru-RU", { timeZone: "UTC" });
+const keyOf = (d: Date) => d.toISOString().slice(0, 10);
+
+/** Платёж календаря до отбора по срезу: знает свою организацию и счёт оплаты. */
+type Item = Omit<BoardItem, "unassigned"> & { amountValue: Decimal };
 
 export default async function PaymentCalendarPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; pending?: string }>;
+  searchParams: Promise<{ month?: string; pending?: string; org?: string; account?: string }>;
 }) {
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.CASH_VIEW)) {
@@ -48,10 +46,8 @@ export default async function PaymentCalendarPage({
       </div>
     );
   }
-  const canMove =
-    hasPermission(session, PERMISSIONS.ADMIN_FULL) ||
-    hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE) ||
-    hasPermission(session, PERMISSIONS.CASH_MANAGE);
+  const planRequests = canPlanRequests(session);
+  const planDocuments = canPlanDocuments(session);
 
   const params = await searchParams;
   const todayKey = localDateKey();
@@ -60,15 +56,18 @@ export default async function PaymentCalendarPage({
   const { prev, next } = adjacentMonths(month);
   const [year, monthNumber] = month.split("-").map(Number);
 
-  const [flows, unpaidDocuments, requests, calendarDays] = await Promise.all([
-    prisma.bankTransaction.groupBy({ by: ["direction"], _sum: { amount: true } }),
+  const [organizations, bankAccounts, cashAccounts, flows, unpaidDocuments, requests, calendarDays] = await Promise.all([
+    prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    prisma.bankAccount.findMany({ include: { organization: true }, orderBy: { bankName: "asc" } }),
+    prisma.cashAccount.findMany({ include: { organization: true }, orderBy: { name: "asc" } }),
+    prisma.bankTransaction.groupBy({ by: ["bankAccountId", "cashAccountId", "direction"], _sum: { amount: true } }),
     prisma.accrualDocument.findMany({
       where: { status: "POSTED", paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID"] } },
-      include: { lines: true, allocations: { where: { cancelledAt: null } } },
+      include: { lines: true, allocations: { where: { cancelledAt: null } }, counterparty: true, organization: true },
     }),
     prisma.paymentRequest.findMany({
       where: { status: { notIn: [...HIDDEN_REQUEST_STATUSES] } },
-      include: { organization: true, counterparty: true, cashFlowArticle: true },
+      include: { organization: true, counterparty: true, cashFlowArticle: true, parts: { orderBy: [{ dueDate: "asc" }, { sortOrder: "asc" }] } },
       orderBy: [{ dueDate: "asc" }, { amount: "desc" }],
     }),
     prisma.productionCalendarDay.findMany({
@@ -76,32 +75,138 @@ export default async function PaymentCalendarPage({
     }),
   ]);
 
-  const sumOf = (direction: string) => new Decimal(flows.find((f) => f.direction === direction)?._sum.amount?.toString() ?? 0);
-  const currentBalance = sumOf("INFLOW").minus(sumOf("OUTFLOW"));
+  // Accounts: names, organization, current balance from bank and cash operations.
+  const accountInfo = new Map<string, { label: string; organizationId: string; organization: string; archived: boolean }>();
+  for (const a of bankAccounts) {
+    accountInfo.set(`bank:${a.id}`, {
+      label: `${a.bankName} · ${a.accountNumber}`,
+      organizationId: a.organizationId,
+      organization: a.organization.shortName || a.organization.name,
+      archived: a.isArchived,
+    });
+  }
+  for (const a of cashAccounts) {
+    accountInfo.set(`cash:${a.id}`, {
+      label: `Касса «${a.name}»`,
+      organizationId: a.organizationId,
+      organization: a.organization.shortName || a.organization.name,
+      archived: a.isArchived,
+    });
+  }
+  const balances = new Map<string, Decimal>();
+  for (const f of flows) {
+    const key = accountKey(f.bankAccountId, f.cashAccountId);
+    if (!key) continue;
+    const amount = new Decimal(f._sum.amount?.toString() ?? 0);
+    balances.set(key, (balances.get(key) ?? new Decimal(0)).plus(f.direction === "INFLOW" ? amount : amount.negated()));
+  }
 
-  const movements: CalendarMovement[] = [];
+  // Forecast slice: one account, one organization or everything.
+  const chosenAccount = parseAccountKey(params.account) && accountInfo.has(params.account!) ? params.account! : null;
+  const chosenOrg = chosenAccount
+    ? accountInfo.get(chosenAccount)!.organizationId
+    : organizations.some((o) => o.id === params.org)
+      ? params.org!
+      : null;
+  const scope: ForecastScope = {
+    organizationId: chosenAccount ? null : chosenOrg,
+    accountKey: chosenAccount,
+    accountOrganizationId: chosenAccount ? chosenOrg : null,
+  };
+  const accountsInScope = [...accountInfo.entries()].filter(([key, info]) =>
+    chosenAccount ? key === chosenAccount : chosenOrg ? info.organizationId === chosenOrg : true,
+  );
+  const currentBalance = accountsInScope.reduce((sum, [key]) => sum.plus(balances.get(key) ?? 0), new Decimal(0));
+
+  // Every planned payment: requests (or their parts) and unpaid documents.
+  const items: Item[] = [];
+  for (const r of requests) {
+    const placement = requestPlacement(r.status, includePending);
+    const statusLabel = PAYMENT_REQUEST_STATUS_LABELS[r.status];
+    const base = {
+      href: `/payment-requests/${r.id}`,
+      direction: "OUTFLOW" as const,
+      title: r.counterparty ? r.counterparty.shortName || r.counterparty.fullName : "Без контрагента",
+      organizationId: r.organizationId,
+      organization: r.organization.shortName || r.organization.name,
+      article: r.cashFlowArticle?.name ?? null,
+      accountKey: accountKey(r.payBankAccountId, r.payCashAccountId),
+    };
+    const look = r.status === "APPROVED" ? "approved" : placement.movable ? "pending" : "done";
+    if (r.parts.length === 0) {
+      const amount = new Decimal(r.amount.toString());
+      items.push({
+        ...base,
+        kind: "request",
+        id: r.id,
+        dueDate: keyOf(r.dueDate),
+        amount: short(amount),
+        amountFull: formatMoney(amount),
+        amountValue: amount,
+        subtitle: `Заявка · ${statusLabel}`,
+        look,
+        counted: placement.counted,
+        movable: placement.movable && planRequests,
+        accountName: null,
+      });
+      continue;
+    }
+    r.parts.forEach((part, i) => {
+      const amount = new Decimal(part.amount.toString());
+      items.push({
+        ...base,
+        kind: "part",
+        id: part.id,
+        dueDate: keyOf(part.dueDate),
+        amount: short(amount),
+        amountFull: formatMoney(amount),
+        amountValue: amount,
+        subtitle: `Часть ${i + 1} из ${r.parts.length} · ${part.paidAt ? "оплачена" : statusLabel}`,
+        look: part.paidAt ? "done" : look,
+        counted: placement.counted && !part.paidAt,
+        movable: placement.movable && planRequests && !part.paidAt,
+        accountName: null,
+      });
+    });
+  }
   for (const doc of unpaidDocuments) {
     const remaining = sumMoney(doc.lines.map((l) => l.amount)).minus(sumMoney(doc.allocations.map((a) => a.amount)));
     if (remaining.lessThanOrEqualTo(0)) continue;
-    movements.push({
-      date: doc.dueDate ?? doc.date,
-      amount: remaining.toString(),
-      direction: doc.direction === "INCOME" ? "INFLOW" : "OUTFLOW",
-      source: "document",
+    const income = doc.direction === "INCOME";
+    items.push({
+      kind: "document",
+      id: doc.id,
+      href: `/accruals/${doc.id}`,
+      dueDate: keyOf(doc.dueDate ?? doc.date),
+      direction: income ? "INFLOW" : "OUTFLOW",
+      amount: short(remaining),
+      amountFull: formatMoney(remaining),
+      amountValue: remaining,
+      title: doc.counterparty.shortName || doc.counterparty.fullName,
+      subtitle: `${ACCRUAL_DOCUMENT_TYPE_LABELS[doc.documentType]} № ${doc.number} · ${income ? "к получению" : "к оплате"}${doc.paymentStatus === "PARTIALLY_PAID" ? " (остаток)" : ""}`,
+      organizationId: doc.organizationId,
+      organization: doc.organization.shortName || doc.organization.name,
+      article: null,
+      look: income ? "doc-in" : "doc-out",
+      counted: true,
+      movable: planDocuments,
+      accountKey: accountKey(doc.plannedBankAccountId, doc.plannedCashAccountId),
+      accountName: null,
     });
   }
-  const pendingRequests = requests.filter((r) => r.status === "PENDING_APPROVAL" || r.status === "DRAFT");
-  for (const req of requests) {
-    if (requestPlacement(req.status, includePending).counted) {
-      movements.push({ date: req.dueDate, amount: req.amount.toString(), direction: "OUTFLOW", source: "request" });
-    }
-  }
+  for (const item of items) item.accountName = item.accountKey ? (accountInfo.get(item.accountKey)?.label ?? null) : null;
+
+  const toMovement = (item: Item): CalendarMovement => ({
+    date: new Date(`${item.dueDate}T00:00:00Z`),
+    amount: item.amountValue.toString(),
+    direction: item.direction,
+    source: item.kind === "document" ? "document" : "request",
+  });
+  const scoped = items.map((item) => ({ item, where: itemScope(item, scope) })).filter((x) => x.where !== "out");
+  const movements = scoped.filter((x) => x.where === "in" && x.item.counted).map((x) => toMovement(x.item));
 
   const calendar = new Map(
-    calendarDays.map((d) => [
-      d.date.toISOString().slice(0, 10),
-      { kind: d.kind === "workday" ? ("workday" as const) : ("holiday" as const), name: d.name },
-    ]),
+    calendarDays.map((d) => [keyOf(d.date), { kind: d.kind === "workday" ? ("workday" as const) : ("holiday" as const), name: d.name }]),
   );
   const weeks = buildMonthGrid({ month, todayKey, startingBalance: currentBalance, movements, calendar });
   const boardWeeks: BoardDay[][] = weeks.map((week) =>
@@ -124,38 +229,76 @@ export default async function PaymentCalendarPage({
 
   const gridFirst = weeks[0][0].date;
   const gridLast = weeks[weeks.length - 1][6].date;
-  const boardRequests: BoardRequest[] = requests
-    .map((r) => {
-      const placement = requestPlacement(r.status, includePending);
-      const dueKey = r.dueDate.toISOString().slice(0, 10);
-      return {
-        id: r.id,
-        dueDate: dueKey,
-        amount: short(new Decimal(r.amount.toString())),
-        amountFull: formatMoney(r.amount),
-        counterparty: r.counterparty ? r.counterparty.shortName || r.counterparty.fullName : "Без контрагента",
-        organization: r.organization.shortName || r.organization.name,
-        article: r.cashFlowArticle?.name ?? null,
-        status: r.status,
-        statusLabel: PAYMENT_REQUEST_STATUS_LABELS[r.status],
-        counted: placement.counted,
-        movable: placement.movable,
-        overdue: placement.movable && dueKey < todayKey,
-      };
-    })
-    // Overdue unpaid requests are always shown (in their own strip); the rest only within the visible weeks.
-    .filter((r) => r.overdue || (r.dueDate >= gridFirst && r.dueDate <= gridLast));
+  const boardItems: BoardItem[] = scoped
+    // Overdue unpaid payments are always shown (in their own strip); the rest only within the visible weeks.
+    .filter(({ item }) => (item.movable && item.dueDate < todayKey) || (item.dueDate >= gridFirst && item.dueDate <= gridLast))
+    .map(({ item, where }) => {
+      const { amountValue, ...rest } = item;
+      void amountValue;
+      return { ...rest, unassigned: where === "unassigned" };
+    });
 
   // Future days only: overdue items fall on today, as in the grid.
+  const todayDate = new Date(`${todayKey}T00:00:00Z`);
   const rows = buildCalendarRows(
     currentBalance.toString(),
-    movements.map((m) => (m.date.toISOString().slice(0, 10) < todayKey ? { ...m, date: new Date(`${todayKey}T00:00:00Z`) } : m)),
+    movements.map((m) => (keyOf(m.date) < todayKey ? { ...m, date: todayDate } : m)),
   );
   const monthDays = weeks.flat().filter((d) => d.inMonth && d.balance);
   const lowest = monthDays.reduce<(typeof monthDays)[number] | null>((low, d) => (!low || d.balance!.lessThan(low.balance!) ? d : low), null);
   const expectedIn = sumMoney(movements.filter((m) => m.direction === "INFLOW").map((m) => m.amount));
   const expectedOut = sumMoney(movements.filter((m) => m.direction === "OUTFLOW").map((m) => m.amount));
-  const toggleHref = (pending: boolean) => `/payment-calendar?month=${month}${pending ? "" : "&pending=0"}`;
+  const pendingCount = requests.filter((r) => r.status === "PENDING_APPROVAL" || r.status === "DRAFT").length;
+
+  // Forecast per account for the visible month: each account with the payments assigned to it.
+  const tableAccounts = [...accountInfo.entries()].filter(
+    ([key, info]) =>
+      (chosenOrg ? info.organizationId === chosenOrg : true) && (!info.archived || !(balances.get(key) ?? new Decimal(0)).isZero()),
+  );
+  const accountRows = tableAccounts.map(([key, info]) => {
+    const own = items.filter((i) => i.accountKey === key && i.counted).map(toMovement);
+    const grid = buildMonthGrid({ month, todayKey, startingBalance: balances.get(key) ?? 0, movements: own, calendar });
+    const days = grid.flat().filter((d) => d.inMonth && d.balance);
+    const low = days.reduce<(typeof days)[number] | null>((l, d) => (!l || d.balance!.lessThan(l.balance!) ? d : l), null);
+    return {
+      key,
+      info,
+      balance: balances.get(key) ?? new Decimal(0),
+      inflow: sumMoney(own.filter((m) => m.direction === "INFLOW").map((m) => m.amount)),
+      outflow: sumMoney(own.filter((m) => m.direction === "OUTFLOW").map((m) => m.amount)),
+      monthEnd: days.at(-1)?.balance ?? null,
+      low,
+    };
+  });
+  const unassignedCounted = items.filter((i) => !i.accountKey && i.counted && (chosenOrg ? i.organizationId === chosenOrg : true));
+  const unassignedIn = sumMoney(unassignedCounted.filter((i) => i.direction === "INFLOW").map((i) => i.amountValue));
+  const unassignedOut = sumMoney(unassignedCounted.filter((i) => i.direction === "OUTFLOW").map((i) => i.amountValue));
+
+  const accountsByOrganization: Record<string, AccountOption[]> = {};
+  for (const [key, info] of accountInfo) {
+    if (info.archived) continue;
+    (accountsByOrganization[info.organizationId] ??= []).push({ key, label: info.label });
+  }
+
+  const href = (overrides: Record<string, string | null>) => {
+    const values: Record<string, string | null> = {
+      month,
+      pending: includePending ? null : "0",
+      org: chosenAccount ? null : chosenOrg,
+      account: chosenAccount,
+      ...overrides,
+    };
+    const query = Object.entries(values)
+      .filter(([, v]) => v)
+      .map(([k, v]) => `${k}=${encodeURIComponent(v!)}`)
+      .join("&");
+    return `/payment-calendar${query ? `?${query}` : ""}`;
+  };
+  const sliceName = chosenAccount
+    ? `${accountInfo.get(chosenAccount)!.organization}: ${accountInfo.get(chosenAccount)!.label}`
+    : chosenOrg
+      ? (organizations.find((o) => o.id === chosenOrg)?.shortName || organizations.find((o) => o.id === chosenOrg)?.name)
+      : "все счета и кассы";
 
   return (
     <div className="page">
@@ -163,15 +306,52 @@ export default async function PaymentCalendarPage({
         <div>
           <h1>Платёжный календарь</h1>
           <p>
-            Прогноз остатка от текущего фактического остатка по всем счетам и кассам: непогашенные начисления по сроку
-            оплаты и заявки на оплату. {canMove ? "Заявку можно перетащить на другой день — срок оплаты перенесётся." : ""}
+            Прогноз остатка от фактического остатка на счетах: непогашенные документы начислений и заявки на оплату (в том числе
+            по частям). Платёж можно перетащить на другой день — срок оплаты перенесётся.
           </p>
         </div>
       </div>
 
+      <form className="filter-bar" method="get" action="/payment-calendar">
+        <input type="hidden" name="month" value={month} />
+        {includePending ? null : <input type="hidden" name="pending" value="0" />}
+        <label className="field">
+          <span>Организация</span>
+          <select name="org" id="pc-org" defaultValue={chosenAccount ? "" : (chosenOrg ?? "")}>
+            <option value="">Все организации</option>
+            {organizations.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.shortName || o.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Счёт или касса</span>
+          <select name="account" id="pc-account-filter" defaultValue={chosenAccount ?? ""}>
+            <option value="">Все счета организации</option>
+            {[...accountInfo.entries()]
+              .filter(([, info]) => !info.archived)
+              .map(([key, info]) => (
+                <option key={key} value={key}>
+                  {info.organization}: {info.label}
+                </option>
+              ))}
+          </select>
+        </label>
+        <button type="submit" className="btn btn-secondary">
+          Показать
+        </button>
+        {chosenOrg || chosenAccount ? (
+          <Link href={href({ org: null, account: null })} className="btn btn-ghost">
+            Сбросить
+          </Link>
+        ) : null}
+      </form>
+
       <div className="stat-grid">
         <div className="stat-card">
-          <div className="stat-label">Текущий остаток (все счета и кассы)</div>
+          <div className="stat-label">Текущий остаток — {sliceName}</div>
           <div className="stat-value">{formatMoney(currentBalance)}</div>
         </div>
         <div className="stat-card">
@@ -187,49 +367,128 @@ export default async function PaymentCalendarPage({
           <div className="stat-value" style={{ color: lowest?.balance?.lessThan(0) ? "var(--color-danger)" : undefined }}>
             {lowest ? formatMoney(lowest.balance!) : "—"}
           </div>
-          {lowest ? <div className="text-muted" style={{ fontSize: 12 }}>{new Date(`${lowest.date}T00:00:00Z`).toLocaleDateString("ru-RU", { timeZone: "UTC" })}</div> : null}
+          {lowest ? (
+            <div className="text-muted" style={{ fontSize: 12 }}>
+              {showDay(lowest.date)}
+            </div>
+          ) : null}
         </div>
       </div>
 
       <div className="pc-toolbar">
         <div className="pc-toolbar__nav">
-          <Link href={`/payment-calendar?month=${prev}${includePending ? "" : "&pending=0"}`} className="btn btn-secondary btn-sm" aria-label="Предыдущий месяц">
+          <Link href={href({ month: prev })} className="btn btn-secondary btn-sm" aria-label="Предыдущий месяц">
             ←
           </Link>
           <strong className="pc-toolbar__month">
             {MONTH_NAMES[monthNumber - 1]} {year}
           </strong>
-          <Link href={`/payment-calendar?month=${next}${includePending ? "" : "&pending=0"}`} className="btn btn-secondary btn-sm" aria-label="Следующий месяц">
+          <Link href={href({ month: next })} className="btn btn-secondary btn-sm" aria-label="Следующий месяц">
             →
           </Link>
           {month !== todayKey.slice(0, 7) ? (
-            <Link href={`/payment-calendar${includePending ? "" : "?pending=0"}`} className="btn btn-ghost btn-sm">
+            <Link href={href({ month: null })} className="btn btn-ghost btn-sm">
               Сегодня
             </Link>
           ) : null}
         </div>
         <div className="pc-toolbar__filter" role="group" aria-label="Какие заявки учитывать в прогнозе">
-          <span className="text-muted">В прогнозе:</span>
-          <Link href={toggleHref(true)} className={includePending ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"} aria-current={includePending}>
+          <span className="text-muted">Заявки в прогнозе:</span>
+          <Link href={href({ pending: null })} className={includePending ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"} aria-current={includePending}>
             согласованные и на согласовании
           </Link>
-          <Link href={toggleHref(false)} className={!includePending ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"} aria-current={!includePending}>
+          <Link href={href({ pending: "0" })} className={!includePending ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"} aria-current={!includePending}>
             только согласованные
           </Link>
         </div>
       </div>
 
       <div className="pc-legend text-muted">
-        <span><i className="pc-swatch pc-swatch--approved" /> согласована</span>
-        <span><i className="pc-swatch pc-swatch--pending" /> на согласовании{pendingRequests.length ? ` (${pendingRequests.length})` : ""}</span>
-        <span><i className="pc-swatch pc-swatch--done" /> оплачена / отклонена — не в прогнозе</span>
-        <span><i className="pc-swatch pc-swatch--off" /> выходной или праздник</span>
+        <span>
+          <i className="pc-swatch pc-swatch--approved" /> заявка согласована
+        </span>
+        <span>
+          <i className="pc-swatch pc-swatch--pending" /> на согласовании{pendingCount ? ` (${pendingCount})` : ""}
+        </span>
+        <span>
+          <i className="pc-swatch pc-swatch--doc-in" /> документ к получению
+        </span>
+        <span>
+          <i className="pc-swatch pc-swatch--doc-out" /> документ к оплате
+        </span>
+        <span>
+          <i className="pc-swatch pc-swatch--done" /> оплачено / отклонено — не в прогнозе
+        </span>
+        <span>
+          <i className="pc-swatch pc-swatch--off" /> выходной или праздник
+        </span>
       </div>
 
-      <PaymentCalendarBoard weeks={boardWeeks} requests={boardRequests} canMove={canMove} todayKey={todayKey} />
+      <PaymentCalendarBoard weeks={boardWeeks} items={boardItems} todayKey={todayKey} accountsByOrganization={accountsByOrganization} />
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
+          Прогноз по счетам — {MONTH_NAMES[monthNumber - 1].toLowerCase()} {year}
+        </h2>
+        <p className="text-muted" style={{ fontSize: 12, marginBottom: 10 }}>
+          У каждого счёта — только платежи, для которых он назначен счётом оплаты. Платежи без счёта — отдельной строкой: назначьте
+          им счёт в календаре, на странице заявки или документа.
+        </p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Счёт или касса</th>
+                <th>Остаток сейчас</th>
+                <th>Поступления</th>
+                <th>Платежи</th>
+                <th>На конец месяца</th>
+                <th>Минимум в месяце</th>
+              </tr>
+            </thead>
+            <tbody>
+              {accountRows.map((row) => (
+                <tr key={row.key} className={row.key === chosenAccount ? "row-selected" : undefined}>
+                  <td>
+                    <Link href={href({ account: row.key, org: null })}>{row.info.label}</Link>
+                    <div className="text-muted" style={{ fontSize: 11 }}>
+                      {row.info.organization}
+                      {row.info.archived ? " · в архиве" : ""}
+                    </div>
+                  </td>
+                  <td className="mono">{formatMoney(row.balance)}</td>
+                  <td className="mono">{row.inflow.greaterThan(0) ? formatMoney(row.inflow) : "—"}</td>
+                  <td className="mono">{row.outflow.greaterThan(0) ? formatMoney(row.outflow) : "—"}</td>
+                  <td className="mono">{row.monthEnd ? formatMoney(row.monthEnd) : "—"}</td>
+                  <td className="mono" style={{ color: row.low?.balance?.lessThan(0) ? "var(--color-danger)" : undefined, fontWeight: row.low?.balance?.lessThan(0) ? 700 : undefined }}>
+                    {row.low ? `${formatMoney(row.low.balance!)} · ${showDay(row.low.date)}` : "—"}
+                  </td>
+                </tr>
+              ))}
+              <tr>
+                <td>
+                  <span className="text-muted">Счёт оплаты не назначен</span>
+                </td>
+                <td className="mono">—</td>
+                <td className="mono">{unassignedIn.greaterThan(0) ? formatMoney(unassignedIn) : "—"}</td>
+                <td className="mono">{unassignedOut.greaterThan(0) ? formatMoney(unassignedOut) : "—"}</td>
+                <td className="mono">—</td>
+                <td className="mono">—</td>
+              </tr>
+              {accountRows.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="empty-state">
+                    Счетов и касс нет — заведите их в справочниках «Банковские счета» и «Кассы».
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <details className="card" style={{ marginTop: 16 }}>
-        <summary style={{ fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Прогноз по дням с движением денег (все месяцы)</summary>
+        <summary style={{ fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Прогноз по дням с движением денег (все месяцы) — {sliceName}</summary>
         <div className="table-wrap" style={{ marginTop: 12 }}>
           <table>
             <thead>
@@ -244,9 +503,7 @@ export default async function PaymentCalendarPage({
               {rows.map((row) => (
                 <tr key={row.date}>
                   <td className="mono">
-                    <Link href={`/payment-calendar?month=${row.date.slice(0, 7)}${includePending ? "" : "&pending=0"}`}>
-                      {new Date(`${row.date}T00:00:00Z`).toLocaleDateString("ru-RU", { timeZone: "UTC" })}
-                    </Link>
+                    <Link href={href({ month: row.date.slice(0, 7) })}>{showDay(row.date)}</Link>
                   </td>
                   <td className="mono">{row.inflow.greaterThan(0) ? formatMoney(row.inflow) : "—"}</td>
                   <td className="mono">{row.outflow.greaterThan(0) ? formatMoney(row.outflow) : "—"}</td>

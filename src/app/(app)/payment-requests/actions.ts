@@ -8,7 +8,17 @@ import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { PaymentRequestStatus } from "@prisma/client";
 import { PAYMENT_REQUEST_STATUS_LABELS } from "@/lib/payment-requests/labels";
-import { localDateKey, parseRescheduleDate, requestPlacement } from "@/lib/payment-calendar";
+import { parseAccountKey } from "@/lib/payment-calendar";
+import { readScheduleRows } from "@/lib/payment-requests/parts";
+import {
+  assignPaymentAccount,
+  markPartPaid,
+  markRemainingPartsPaid,
+  removePaymentSchedule,
+  rescheduleRequest,
+  savePaymentSchedule,
+  type PlanResult,
+} from "@/lib/payment-plan/service";
 import {
   selectApprovalRoute,
   roleForStep,
@@ -47,6 +57,18 @@ export async function createPaymentRequestAction(formData: FormData) {
     redirect(`/payment-requests/new?error=${encodeURIComponent("Заполните организацию, сумму и срок оплаты")}`);
   }
 
+  const payAccountRaw = String(formData.get("payAccount") ?? "");
+  const payAccount = payAccountRaw ? parseAccountKey(payAccountRaw) : { bankAccountId: null, cashAccountId: null };
+  if (!payAccount) redirect(`/payment-requests/new?error=${encodeURIComponent("Выберите счёт или кассу оплаты из списка")}`);
+  const accountOrg = payAccount!.bankAccountId
+    ? (await prisma.bankAccount.findUnique({ where: { id: payAccount!.bankAccountId } }))?.organizationId
+    : payAccount!.cashAccountId
+      ? (await prisma.cashAccount.findUnique({ where: { id: payAccount!.cashAccountId } }))?.organizationId
+      : organizationId;
+  if (accountOrg !== organizationId) {
+    redirect(`/payment-requests/new?error=${encodeURIComponent("Счёт оплаты должен принадлежать организации заявки")}`);
+  }
+
   const routes = await loadActiveRoutes();
   const route = selectApprovalRoute(routes, { amount: amountRaw, organizationId });
 
@@ -62,6 +84,8 @@ export async function createPaymentRequestAction(formData: FormData) {
       status: PaymentRequestStatus.PENDING_APPROVAL,
       routeId: route?.id ?? null,
       currentStep: 1,
+      payBankAccountId: payAccount!.bankAccountId,
+      payCashAccountId: payAccount!.cashAccountId,
     },
   });
 
@@ -93,7 +117,11 @@ async function transition(id: string, status: PaymentRequestStatus, action: stri
   const before = await prisma.paymentRequest.findUniqueOrThrow({ where: { id } });
   // A stale page must not mark a cancelled request as paid or cancel a paid one.
   const allowedFrom = TRANSITION_FROM[status] ?? [];
-  const moved = await prisma.paymentRequest.updateMany({ where: { id, status: { in: allowedFrom } }, data: { status } });
+  const moved = await prisma.$transaction(async (db) => {
+    const result = await db.paymentRequest.updateMany({ where: { id, status: { in: allowedFrom } }, data: { status } });
+    if (result.count > 0 && status === PaymentRequestStatus.PAID) await markRemainingPartsPaid(db, id, session.userId);
+    return result;
+  });
   if (moved.count === 0) {
     const backTo = formData?.get("returnTo") === "detail" ? `/payment-requests/${id}` : "/payment-requests";
     redirect(`${backTo}?error=${encodeURIComponent(`Заявка уже в статусе «${PAYMENT_REQUEST_STATUS_LABELS[before.status]}» — действие не выполнено`)}`);
@@ -245,73 +273,37 @@ export async function cancelPaymentRequestAction(id: string, formData?: FormData
   await transition(id, PaymentRequestStatus.CANCELLED, "cancel", formData);
 }
 
-export type RescheduleResult = { ok: true; dueDate: string } | { ok: false; error: string };
-
-/**
- * Перенос срока оплаты заявки. Право — у тех, кто согласует заявки или ведёт
- * деньги (казначейство). Двигать можно черновик, заявку на согласовании и
- * согласованную; оплаченная, отклонённая и отменённая остаются на своей дате.
- * Статус и шаг согласования не меняются: срок — это решение о времени оплаты,
- * а не о самой заявке.
- */
-async function rescheduleCore(id: string, dateRaw: unknown, reasonRaw: unknown): Promise<RescheduleResult> {
-  const session = await requireSession();
-  const allowed =
-    hasPermission(session, PERMISSIONS.ADMIN_FULL) ||
-    hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE) ||
-    hasPermission(session, PERMISSIONS.CASH_MANAGE);
-  if (!allowed) return { ok: false, error: "Переносить срок оплаты могут согласующие заявки и те, кто ведёт банк и кассу" };
-
-  const parsed = parseRescheduleDate(dateRaw, localDateKey());
-  if ("error" in parsed) return { ok: false, error: parsed.error };
-  const reason = String(reasonRaw ?? "").trim().slice(0, 500) || null;
-
-  const request = await prisma.paymentRequest.findUnique({ where: { id } });
-  if (!request) return { ok: false, error: "Заявка не найдена" };
-  if (!requestPlacement(request.status, true).movable) {
-    return { ok: false, error: `Заявка в статусе «${PAYMENT_REQUEST_STATUS_LABELS[request.status]}» — срок оплаты уже не переносится` };
-  }
-  const fromKey = request.dueDate.toISOString().slice(0, 10);
-  if (fromKey === parsed.key) return { ok: true, dueDate: parsed.key };
-
-  // Conditional on the date and status the user saw, so two people moving the same request don't overwrite silently.
-  const updated = await prisma.$transaction(async (db) => {
-    const moved = await db.paymentRequest.updateMany({
-      where: { id, dueDate: request.dueDate, status: request.status },
-      data: { dueDate: parsed.date },
-    });
-    if (moved.count === 0) return null;
-    await db.paymentRequestReschedule.create({
-      data: { paymentRequestId: id, fromDate: request.dueDate, toDate: parsed.date, changedById: session.userId, reason },
-    });
-    return db.paymentRequest.findUniqueOrThrow({ where: { id } });
-  });
-  if (!updated) return { ok: false, error: "Заявку только что изменили — обновите страницу и повторите" };
-
-  await logAudit({
-    userId: session.userId,
-    entityType: "payment_request",
-    entityId: id,
-    action: "reschedule",
-    before: request as never,
-    after: { ...updated, rescheduleReason: reason } as never,
-  });
-
-  revalidatePath("/payment-requests");
-  revalidatePath(`/payment-requests/${id}`);
-  revalidatePath("/payment-calendar");
-  return { ok: true, dueDate: parsed.key };
-}
-
-/** Перенос со страницы заявки (форма с датой и причиной). */
+/** Перенос срока со страницы заявки (форма с датой и причиной). */
 export async function reschedulePaymentRequestAction(id: string, formData: FormData) {
-  const result = await rescheduleCore(id, formData.get("dueDate"), formData.get("reason"));
-  if (!result.ok) redirect(`/payment-requests/${id}?error=${encodeURIComponent(result.error)}`);
-  const shown = new Date(`${(result as { dueDate: string }).dueDate}T00:00:00Z`).toLocaleDateString("ru-RU", { timeZone: "UTC" });
-  redirect(`/payment-requests/${id}?notice=${encodeURIComponent(`Срок оплаты перенесён на ${shown}`)}`);
+  const session = await requireSession();
+  const result = await rescheduleRequest(session, id, formData.get("dueDate"), formData.get("reason"));
+  backToRequest(id, result);
 }
 
-/** Перенос перетаскиванием в платёжном календаре: без перехода, результат — в интерфейс. */
-export async function movePaymentRequestAction(id: string, dueDate: string): Promise<RescheduleResult> {
-  return rescheduleCore(id, dueDate, null);
+/** График оплаты частями: параллельные поля partId / partDueDate / partAmount. */
+export async function savePaymentScheduleAction(id: string, formData: FormData) {
+  const session = await requireSession();
+  const rows = readScheduleRows(formData.getAll("partId"), formData.getAll("partDueDate"), formData.getAll("partAmount"));
+  const result = await savePaymentSchedule(session, id, rows);
+  backToRequest(id, result);
+}
+
+export async function removePaymentScheduleAction(id: string) {
+  const session = await requireSession();
+  backToRequest(id, await removePaymentSchedule(session, id));
+}
+
+export async function markPaymentPartPaidAction(requestId: string, partId: string) {
+  const session = await requireSession();
+  backToRequest(requestId, await markPartPaid(session, partId));
+}
+
+export async function assignRequestAccountAction(id: string, formData: FormData) {
+  const session = await requireSession();
+  backToRequest(id, await assignPaymentAccount(session, "request", id, formData.get("payAccount")));
+}
+
+function backToRequest(id: string, result: PlanResult): never {
+  const param = result.ok ? `notice=${encodeURIComponent(result.message)}` : `error=${encodeURIComponent((result as { error: string }).error)}`;
+  redirect(`/payment-requests/${id}?${param}`);
 }

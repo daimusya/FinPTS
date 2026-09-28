@@ -29,6 +29,8 @@ model User {
   paymentRequests    PaymentRequest[]         @relation("PaymentRequestCreatedBy")
   approvals          PaymentRequestApproval[]
   paymentRequestReschedules PaymentRequestReschedule[]
+  paidPaymentRequestParts   PaymentRequestPart[]
+  accrualDueDateChanges     AccrualDueDateChange[]
   closedPeriods      AccountingPeriod[]       @relation("PeriodClosedBy")
   reopenedPeriods    AccountingPeriod[]       @relation("PeriodReopenedBy")
   employee           Employee?
@@ -453,6 +455,8 @@ model BankAccount {
   importBatches BankImportBatch[]
   transactions BankTransaction[]
 
+  plannedPaymentRequests PaymentRequest[]  @relation("PaymentRequestBankAccount")
+  plannedAccrualDocuments AccrualDocument[] @relation("AccrualPlannedBankAccount")
   @@map("bank_accounts")
 }
 
@@ -467,6 +471,8 @@ model CashAccount {
   organization Organization      @relation(fields: [organizationId], references: [id])
   transactions BankTransaction[]
 
+  plannedPaymentRequests PaymentRequest[]  @relation("PaymentRequestCashAccount")
+  plannedAccrualDocuments AccrualDocument[] @relation("AccrualPlannedCashAccount")
   @@map("cash_accounts")
 }
 
@@ -535,6 +541,13 @@ model AccrualDocument {
   externalLink IntegrationExternalObject[]
   auditLogs    AuditLog[]
 
+  /// Счёт, через который планируется оплата (для прогноза по счетам в
+  /// платёжном календаре). Не учётное поле — можно менять и у проведённого.
+  plannedBankAccountId String?
+  plannedCashAccountId String?
+  plannedBankAccount   BankAccount?           @relation("AccrualPlannedBankAccount", fields: [plannedBankAccountId], references: [id])
+  plannedCashAccount   CashAccount?           @relation("AccrualPlannedCashAccount", fields: [plannedCashAccountId], references: [id])
+  dueDateChanges       AccrualDueDateChange[]
   @@unique([sourceSystem, externalId])
   @@index([organizationId, date])
   @@index([status, paymentStatus])
@@ -725,6 +738,13 @@ model PaymentRequest {
   approvals       PaymentRequestApproval[]
   reschedules     PaymentRequestReschedule[]
 
+  /// Счёт или касса, с которых планируется оплата (для прогноза по счетам).
+  payBankAccountId String?
+  payCashAccountId String?
+  payBankAccount   BankAccount?         @relation("PaymentRequestBankAccount", fields: [payBankAccountId], references: [id])
+  payCashAccount   CashAccount?         @relation("PaymentRequestCashAccount", fields: [payCashAccountId], references: [id])
+  /// График оплаты частями. Пусто — заявка оплачивается одним платежом.
+  parts            PaymentRequestPart[]
   @@index([dueDate])
   @@index([status])
   @@map("payment_requests")
@@ -761,8 +781,50 @@ model PaymentRequestReschedule {
   paymentRequest PaymentRequest @relation(fields: [paymentRequestId], references: [id], onDelete: Cascade)
   changedBy      User           @relation(fields: [changedById], references: [id])
 
+  /// Перенесена часть графика оплаты (null — вся заявка).
+  partId String?
+  part   PaymentRequestPart? @relation(fields: [partId], references: [id], onDelete: SetNull)
   @@index([paymentRequestId])
   @@map("payment_request_reschedules")
+}
+
+/// Часть графика оплаты заявки: своя дата и сумма. Сумма частей равна сумме
+/// заявки; когда оплачена последняя часть, заявка становится оплаченной.
+model PaymentRequestPart {
+  id               String    @id @default(cuid())
+  paymentRequestId String
+  sortOrder        Int
+  dueDate          DateTime
+  amount           Decimal   @db.Decimal(18, 2)
+  paidAt           DateTime?
+  paidById         String?
+  createdAt        DateTime  @default(now())
+
+  paymentRequest PaymentRequest             @relation(fields: [paymentRequestId], references: [id], onDelete: Cascade)
+  paidBy         User?                      @relation(fields: [paidById], references: [id])
+  reschedules    PaymentRequestReschedule[]
+
+  @@index([paymentRequestId])
+  @@index([dueDate])
+  @@map("payment_request_parts")
+}
+
+/// Перенос срока оплаты документа начисления (со страницы документа или в
+/// платёжном календаре). Сам документ и его суммы не меняются.
+model AccrualDueDateChange {
+  id          String    @id @default(cuid())
+  documentId  String
+  fromDate    DateTime?
+  toDate      DateTime
+  changedById String
+  reason      String?
+  changedAt   DateTime  @default(now())
+
+  document  AccrualDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  changedBy User            @relation(fields: [changedById], references: [id])
+
+  @@index([documentId])
+  @@map("accrual_due_date_changes")
 }
 
 /**

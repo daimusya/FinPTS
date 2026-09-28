@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
-import { movePaymentRequestAction } from "@/app/(app)/payment-requests/actions";
+import { assignCalendarAccountAction, moveCalendarItemAction } from "@/app/(app)/payment-calendar/actions";
 
 export interface BoardDay {
   date: string;
@@ -21,112 +21,138 @@ export interface BoardDay {
   balanceNegative: boolean;
 }
 
-export interface BoardRequest {
+export type BoardItemKind = "request" | "part" | "document";
+
+export interface BoardItem {
+  kind: BoardItemKind;
   id: string;
+  href: string;
   dueDate: string;
+  direction: "INFLOW" | "OUTFLOW";
   amount: string;
   amountFull: string;
-  counterparty: string;
+  /** Контрагент. */
+  title: string;
+  /** «Заявка · Согласована», «Часть 2 из 3 · Согласована», «Счёт № 15 · к получению». */
+  subtitle: string;
+  organizationId: string;
   organization: string;
   article: string | null;
-  status: string;
-  statusLabel: string;
+  look: "approved" | "pending" | "done" | "doc-in" | "doc-out";
   counted: boolean;
   movable: boolean;
-  overdue: boolean;
+  /** В выбранном срезе по счёту: платёж этой организации без счёта оплаты. */
+  unassigned: boolean;
+  accountKey: string | null;
+  accountName: string | null;
+}
+
+export interface AccountOption {
+  key: string;
+  label: string;
 }
 
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+const OVERDUE_SHOWN = 40;
 
 const showDate = (key: string) => new Date(`${key}T00:00:00Z`).toLocaleDateString("ru-RU", { timeZone: "UTC" });
+const itemKey = (item: BoardItem) => `${item.kind}:${item.id}`;
 
 /**
- * Сетка платёжного календаря: заявки на оплату можно перетаскивать на другой
- * день (мышью) или выбрать заявку и указать дату (клавиатура, телефон).
- * Перенос сохраняется сразу; остатки пересчитывает сервер после обновления.
+ * Сетка платёжного календаря: заявки, их части и документы начислений можно
+ * перетаскивать на другой день (мышью) или выбрать платёж и указать дату и
+ * счёт оплаты (клавиатура, телефон). Изменение сохраняется сразу; остатки
+ * пересчитывает сервер после обновления страницы.
  */
 export function PaymentCalendarBoard({
   weeks,
-  requests,
-  canMove,
+  items,
   todayKey,
+  accountsByOrganization,
 }: {
   weeks: BoardDay[][];
-  requests: BoardRequest[];
-  canMove: boolean;
+  items: BoardItem[];
   todayKey: string;
+  accountsByOrganization: Record<string, AccountOption[]>;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  // Optimistic positions until the server data arrives; cleared on every fresh set of props.
+  // Optimistic positions until the server data arrives.
   const [moved, setMoved] = useState<Record<string, string>>({});
-  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overDate, setOverDate] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [pickedDate, setPickedDate] = useState("");
+  const [pickedAccount, setPickedAccount] = useState("");
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
   // Fresh server data (after router.refresh) replaces the optimistic positions.
-  const [seenRequests, setSeenRequests] = useState(requests);
-  if (seenRequests !== requests) {
-    setSeenRequests(requests);
+  const [seenItems, setSeenItems] = useState(items);
+  if (seenItems !== items) {
+    setSeenItems(items);
     setMoved({});
   }
 
-  const dateOf = (r: BoardRequest) => moved[r.id] ?? r.dueDate;
-  const isOverdue = (r: BoardRequest) => r.movable && dateOf(r) < todayKey;
-  const overdue = requests.filter(isOverdue);
-  const byDate = new Map<string, BoardRequest[]>();
-  for (const r of requests) {
-    if (isOverdue(r)) continue;
-    const list = byDate.get(dateOf(r)) ?? [];
-    list.push(r);
-    byDate.set(dateOf(r), list);
+  const dateOf = (item: BoardItem) => moved[itemKey(item)] ?? item.dueDate;
+  const isOverdue = (item: BoardItem) => item.movable && dateOf(item) < todayKey;
+  const overdue = items.filter((i) => isOverdue(i) && !i.unassigned);
+  const unassigned = items.filter((i) => i.unassigned);
+  const byDate = new Map<string, BoardItem[]>();
+  for (const item of items) {
+    if (isOverdue(item) || item.unassigned) continue;
+    const list = byDate.get(dateOf(item)) ?? [];
+    list.push(item);
+    byDate.set(dateOf(item), list);
   }
-  const selected = requests.find((r) => r.id === selectedId) ?? null;
+  const selected = items.find((i) => itemKey(i) === selectedKey) ?? null;
 
-  function move(request: BoardRequest, date: string) {
-    if (!canMove || !request.movable || date === dateOf(request)) return;
-    if (date < todayKey) {
-      setMessage({ kind: "error", text: "Срок оплаты нельзя перенести в прошлое" });
-      return;
-    }
-    const previous = dateOf(request);
-    setMoved((m) => ({ ...m, [request.id]: date }));
+  function run(action: () => Promise<{ ok: boolean; message?: string; error?: string }>, onError?: () => void) {
     setMessage(null);
     startTransition(async () => {
-      const result = await movePaymentRequestAction(request.id, date);
+      const result = await action();
       if (!result.ok) {
-        setMoved((m) => {
-          const rest = { ...m };
-          delete rest[request.id];
-          return rest;
-        });
-        setMessage({ kind: "error", text: result.error });
+        onError?.();
+        setMessage({ kind: "error", text: result.error ?? "Не удалось сохранить" });
         return;
       }
-      setMessage({
-        kind: "ok",
-        text: `Заявка ${request.counterparty} на ${request.amountFull} перенесена: ${showDate(previous)} → ${showDate(date)}`,
-      });
+      setMessage({ kind: "ok", text: result.message ?? "Сохранено" });
       router.refresh();
     });
   }
 
-  const onDragStart = (r: BoardRequest) => (e: DragEvent) => {
-    e.dataTransfer.setData("text/plain", r.id);
+  function move(item: BoardItem, date: string) {
+    if (!item.movable || date === dateOf(item)) return;
+    if (date < todayKey) {
+      setMessage({ kind: "error", text: "Срок оплаты нельзя перенести в прошлое" });
+      return;
+    }
+    const key = itemKey(item);
+    setMoved((m) => ({ ...m, [key]: date }));
+    run(
+      () => moveCalendarItemAction(item.kind, item.id, date),
+      () =>
+        setMoved((m) => {
+          const rest = { ...m };
+          delete rest[key];
+          return rest;
+        }),
+    );
+  }
+
+  const onDragStart = (item: BoardItem) => (e: DragEvent) => {
+    e.dataTransfer.setData("text/plain", itemKey(item));
     e.dataTransfer.effectAllowed = "move";
-    setDraggingId(r.id);
+    setDraggingKey(itemKey(item));
   };
   const onDragEnd = () => {
-    setDraggingId(null);
+    setDraggingKey(null);
     setOverDate(null);
   };
   const dropProps = (day: BoardDay) =>
-    canMove && !day.isPast
+    !day.isPast
       ? {
           onDragOver: (e: DragEvent) => {
-            if (!draggingId) return;
+            if (!draggingKey) return;
             e.preventDefault();
             e.dataTransfer.dropEffect = "move";
             if (overDate !== day.date) setOverDate(day.date);
@@ -134,47 +160,53 @@ export function PaymentCalendarBoard({
           onDragLeave: () => setOverDate((d) => (d === day.date ? null : d)),
           onDrop: (e: DragEvent) => {
             e.preventDefault();
-            const id = e.dataTransfer.getData("text/plain") || draggingId;
-            const request = requests.find((r) => r.id === id);
+            const key = e.dataTransfer.getData("text/plain") || draggingKey;
+            const item = items.find((i) => itemKey(i) === key);
             onDragEnd();
-            if (request) move(request, day.date);
+            if (item) move(item, day.date);
           },
         }
       : {};
 
-  const card = (r: BoardRequest) => {
-    const draggable = canMove && r.movable;
+  const card = (item: BoardItem) => {
+    const key = itemKey(item);
     return (
       <button
-        key={r.id}
+        key={key}
         type="button"
         className={[
           "pc-request",
-          `pc-request--${r.status.toLowerCase()}`,
-          r.counted ? "" : "pc-request--uncounted",
-          draggable ? "pc-request--movable" : "",
-          draggingId === r.id ? "pc-request--dragging" : "",
-          selectedId === r.id ? "pc-request--selected" : "",
-          moved[r.id] ? "pc-request--saving" : "",
+          `pc-request--${item.look}`,
+          item.counted ? "" : "pc-request--uncounted",
+          item.movable ? "pc-request--movable" : "",
+          draggingKey === key ? "pc-request--dragging" : "",
+          selectedKey === key ? "pc-request--selected" : "",
+          moved[key] ? "pc-request--saving" : "",
         ]
           .filter(Boolean)
           .join(" ")}
-        draggable={draggable}
-        onDragStart={draggable ? onDragStart(r) : undefined}
-        onDragEnd={draggable ? onDragEnd : undefined}
+        draggable={item.movable}
+        onDragStart={item.movable ? onDragStart(item) : undefined}
+        onDragEnd={item.movable ? onDragEnd : undefined}
         onClick={() => {
-          setSelectedId(r.id === selectedId ? null : r.id);
-          setPickedDate(dateOf(r) < todayKey ? todayKey : dateOf(r));
+          setSelectedKey(key === selectedKey ? null : key);
+          setPickedDate(dateOf(item) < todayKey ? todayKey : dateOf(item));
+          setPickedAccount(item.accountKey ?? "");
         }}
-        title={`${r.counterparty} · ${r.amountFull} · ${r.statusLabel}${r.counted ? "" : " · не входит в прогноз"}`}
-        aria-pressed={selectedId === r.id}
+        title={`${item.title} · ${item.amountFull} · ${item.subtitle}${item.counted ? "" : " · не входит в прогноз"}`}
+        aria-pressed={selectedKey === key}
       >
-        <span className="pc-request__amount">−{r.amount}</span>
-        <span className="pc-request__who">{r.counterparty}</span>
-        <span className="pc-request__status">{r.statusLabel}</span>
+        <span className="pc-request__amount">
+          {item.direction === "INFLOW" ? "+" : "−"}
+          {item.amount}
+        </span>
+        <span className="pc-request__who">{item.title}</span>
+        <span className="pc-request__status">{item.subtitle}</span>
       </button>
     );
   };
+
+  const selectedAccounts = selected ? (accountsByOrganization[selected.organizationId] ?? []) : [];
 
   return (
     <div className="pc-board">
@@ -183,21 +215,26 @@ export function PaymentCalendarBoard({
           {message.text}
         </p>
       ) : null}
-      {isPending ? <p className="text-muted" role="status">Сохраняю перенос…</p> : null}
+      {isPending ? (
+        <p className="text-muted" role="status">
+          Сохраняю…
+        </p>
+      ) : null}
 
       {selected ? (
         <div className="card pc-selected">
           <div className="pc-selected__head">
             <strong>
-              {selected.counterparty} · {selected.amountFull}
+              {selected.title} · {selected.direction === "INFLOW" ? "поступление" : "платёж"} {selected.amountFull}
             </strong>
             <span className="text-muted">
-              {selected.organization}
-              {selected.article ? ` · ${selected.article}` : ""} · {selected.statusLabel} · срок {showDate(dateOf(selected))}
+              {selected.subtitle} · {selected.organization}
+              {selected.article ? ` · ${selected.article}` : ""} · срок {showDate(dateOf(selected))} · счёт оплаты:{" "}
+              {selected.accountName ?? "не назначен"}
             </span>
           </div>
           <div className="pc-selected__actions">
-            {canMove && selected.movable ? (
+            {selected.movable ? (
               <>
                 <label className="field">
                   <span>Перенести на</span>
@@ -206,14 +243,31 @@ export function PaymentCalendarBoard({
                 <button type="button" className="btn btn-primary" disabled={!pickedDate || isPending} onClick={() => move(selected, pickedDate)}>
                   Перенести
                 </button>
+                <label className="field">
+                  <span>Счёт оплаты</span>
+                  <select id="pc-account" value={pickedAccount} onChange={(e) => setPickedAccount(e.target.value)}>
+                    <option value="">— не назначен —</option>
+                    {selectedAccounts.map((a) => (
+                      <option key={a.key} value={a.key}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={isPending || pickedAccount === (selected.accountKey ?? "")}
+                  onClick={() => run(() => assignCalendarAccountAction(selected.kind, selected.id, pickedAccount))}
+                >
+                  Сохранить счёт
+                </button>
               </>
             ) : (
-              <span className="text-muted">
-                {selected.movable ? "Переносить срок могут согласующие и казначейство." : "Срок этой заявки уже не переносится."}
-              </span>
+              <span className="text-muted">Срок и счёт этого платежа здесь не меняются (оплачен, отклонён или нет прав).</span>
             )}
-            <Link href={`/payment-requests/${selected.id}`} className="btn btn-ghost">
-              Открыть заявку
+            <Link href={selected.href} className="btn btn-ghost">
+              Открыть
             </Link>
           </div>
         </div>
@@ -221,11 +275,22 @@ export function PaymentCalendarBoard({
 
       {overdue.length > 0 ? (
         <div className="card pc-overdue">
-          <strong>Просроченные заявки — срок прошёл, а оплаты нет.</strong>{" "}
+          <strong>Просрочено — срок прошёл, а оплаты нет ({overdue.length}).</strong>{" "}
+          <span className="text-muted">В прогнозе они считаются на сегодня. Перетащите платёж на день, когда он реально пройдёт.</span>
+          <div className="pc-overdue__list">{overdue.slice(0, OVERDUE_SHOWN).map(card)}</div>
+          {overdue.length > OVERDUE_SHOWN ? (
+            <p className="text-muted">…и ещё {overdue.length - OVERDUE_SHOWN}; полный список — в отчёте о задолженности.</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {unassigned.length > 0 ? (
+        <div className="card pc-unassigned">
+          <strong>Счёт оплаты не назначен ({unassigned.length}).</strong>{" "}
           <span className="text-muted">
-            В прогнозе они считаются к оплате сегодня. {canMove ? "Перетащите заявку на день, когда её оплатите." : ""}
+            Платежи организации этого счёта без счёта оплаты в его прогноз не входят. Выберите платёж и назначьте счёт.
           </span>
-          <div className="pc-overdue__list">{overdue.map(card)}</div>
+          <div className="pc-overdue__list">{unassigned.map(card)}</div>
         </div>
       ) : null}
 
@@ -261,11 +326,22 @@ export function PaymentCalendarBoard({
                 </span>
               ) : null}
             </div>
-            {day.inflow ? <div className="pc-day__in">+{day.inflow}</div> : null}
-            {day.outflow ? <div className="pc-day__out">−{day.outflow}</div> : null}
+            {day.inflow ? (
+              <div className="pc-day__in" title="Поступления за день по прогнозу">
+                +{day.inflow}
+              </div>
+            ) : null}
+            {day.outflow ? (
+              <div className="pc-day__out" title="Платежи за день по прогнозу">
+                −{day.outflow}
+              </div>
+            ) : null}
             <div className="pc-day__requests">{(byDate.get(day.date) ?? []).map(card)}</div>
             {day.balance ? (
-              <div className={day.balanceNegative ? "pc-day__balance pc-day__balance--negative" : "pc-day__balance"} title={`Остаток на конец дня: ${day.balanceFull}`}>
+              <div
+                className={day.balanceNegative ? "pc-day__balance pc-day__balance--negative" : "pc-day__balance"}
+                title={`Остаток на конец дня: ${day.balanceFull}`}
+              >
                 ост. {day.balance}
               </div>
             ) : null}

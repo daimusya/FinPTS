@@ -601,6 +601,71 @@ tbody tr:hover {
   overflow-wrap: anywhere;
 }
 
+.row-selected td {
+  background: var(--color-orange-soft);
+}
+
+.plan-details {
+  margin-top: 10px;
+}
+
+.plan-details > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-orange-dark);
+}
+
+.schedule-editor {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.schedule-editor__rows {
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-editor__row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.schedule-editor__n {
+  font-weight: 700;
+  color: var(--color-graphite-500);
+  padding-bottom: 10px;
+}
+
+.schedule-editor__footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-editor__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+@media (max-width: 560px) {
+  .schedule-editor__row {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+  .schedule-editor__row > .field:last-of-type,
+  .schedule-editor__row > button {
+    grid-column: 2;
+  }
+}
+
 .reschedule-list {
   list-style: none;
   margin: 0 0 4px;
@@ -666,6 +731,17 @@ tbody tr:hover {
   border: 1px dashed var(--color-warning);
 }
 
+.pc-swatch--doc-in {
+  background: var(--color-white);
+  border: 1px solid var(--color-success);
+  border-left-width: 3px;
+}
+
+.pc-swatch--doc-out {
+  background: var(--color-white);
+  border-left: 3px solid var(--color-graphite-700);
+}
+
 .pc-swatch--done {
   background: var(--color-graphite-100);
 }
@@ -695,6 +771,11 @@ tbody tr:hover {
 
 .pc-overdue {
   border: 1px solid var(--color-danger-soft);
+  font-size: 13px;
+}
+
+.pc-unassigned {
+  border: 1px dashed var(--color-graphite-300);
   font-size: 13px;
 }
 
@@ -854,24 +935,35 @@ tbody tr:hover {
   cursor: grab;
 }
 
-.pc-request--pending_approval,
-.pc-request--draft {
+.pc-request--pending {
   background: var(--color-warning-soft);
   border: 1px dashed var(--color-warning);
 }
 
-.pc-request--paid,
-.pc-request--rejected {
+.pc-request--done {
   background: var(--color-graphite-100);
   border-color: var(--color-graphite-150);
   color: var(--color-graphite-500);
 }
 
-.pc-request--rejected .pc-request__amount {
-  text-decoration: line-through;
+/* Accrual documents: money to receive / to pay by the document's payment term. */
+.pc-request--doc-in {
+  background: var(--color-white);
+  border: 1px solid var(--color-success);
+  border-left-width: 3px;
 }
 
-.pc-request--uncounted.pc-request--pending_approval {
+.pc-request--doc-in .pc-request__amount {
+  color: var(--color-success);
+}
+
+.pc-request--doc-out {
+  background: var(--color-white);
+  border: 1px solid var(--color-graphite-300);
+  border-left: 3px solid var(--color-graphite-700);
+}
+
+.pc-request--uncounted.pc-request--pending {
   opacity: 0.75;
 }
 

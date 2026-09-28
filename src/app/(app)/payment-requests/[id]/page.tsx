@@ -1,3 +1,4 @@
+import Decimal from "decimal.js";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
@@ -16,8 +17,16 @@ import {
   markPaymentRequestPaidAction,
   rejectPaymentRequestAction,
   reschedulePaymentRequestAction,
+  savePaymentScheduleAction,
+  removePaymentScheduleAction,
+  markPaymentPartPaidAction,
+  assignRequestAccountAction,
 } from "../actions";
-import { localDateKey, requestPlacement } from "@/lib/payment-calendar";
+import { accountKey, localDateKey, requestPlacement } from "@/lib/payment-calendar";
+import { scheduleSummary, suggestSplit } from "@/lib/payment-requests/parts";
+import { canPlanRequests } from "@/lib/payment-plan/service";
+import { PaymentScheduleEditor } from "@/components/payment-schedule-editor";
+import { PaymentAccountOptions } from "@/components/payment-account-options";
 
 const STATE_LABELS: Record<TimelineState, string> = {
   approved: "Согласовано",
@@ -63,6 +72,9 @@ export default async function PaymentRequestPage({
       route: { include: { steps: { include: { role: true } } } },
       approvals: { include: { approver: true } },
       reschedules: { include: { changedBy: true }, orderBy: { changedAt: "asc" } },
+      parts: { include: { paidBy: true }, orderBy: [{ dueDate: "asc" }, { sortOrder: "asc" }] },
+      payBankAccount: true,
+      payCashAccount: true,
     },
   });
   if (!request) notFound();
@@ -70,8 +82,23 @@ export default async function PaymentRequestPage({
   const isAdmin = hasPermission(session, PERMISSIONS.ADMIN_FULL);
   const canApprove = hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE);
   const canPay = hasPermission(session, PERMISSIONS.CASH_MANAGE);
-  const canReschedule = (isAdmin || canApprove || canPay) && requestPlacement(request.status, true).movable;
+  const movable = requestPlacement(request.status, true).movable;
+  const canReschedule = canPlanRequests(session) && movable;
   const todayKey = localDateKey();
+  const hasParts = request.parts.length > 0;
+  const summary = scheduleSummary(request.parts);
+  const unpaidParts = request.parts.filter((part) => !part.paidAt);
+  const partNumber = new Map(request.parts.map((part, i) => [part.id, i + 1]));
+  const [orgBankAccounts, orgCashAccounts] = canReschedule
+    ? await Promise.all([
+        prisma.bankAccount.findMany({ where: { organizationId: request.organizationId, isArchived: false }, orderBy: { bankName: "asc" } }),
+        prisma.cashAccount.findMany({ where: { organizationId: request.organizationId, isArchived: false }, orderBy: { name: "asc" } }),
+      ])
+    : [[], []];
+  const payAccountName = request.payBankAccount
+    ? `${request.payBankAccount.bankName} · ${request.payBankAccount.accountNumber}`
+    : (request.payCashAccount?.name ?? null);
+  const firstDueKey = request.dueDate.toISOString().slice(0, 10);
 
   const steps = request.route?.steps ?? [];
   const currentStepRow = steps.find((s) => s.stepOrder === request.currentStep);
@@ -145,20 +172,136 @@ export default async function PaymentRequestPage({
         </dl>
       </div>
 
-      {canReschedule || request.reschedules.length > 0 ? (
-        <div className="card" id="due-date">
-          <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-            Срок оплаты: {dueDay(request.dueDate)}
-            {request.dueDate.toISOString().slice(0, 10) < todayKey && requestPlacement(request.status, true).movable ? (
-              <span className="badge badge-danger" style={{ marginLeft: 8 }}>
-                Просрочен
-              </span>
+      <div className="card" id="due-date">
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+          План оплаты: {hasParts ? `частями, ${summary.total} ч.` : `одним платежом ${dueDay(request.dueDate)}`}
+          {!hasParts && firstDueKey < todayKey && movable ? (
+            <span className="badge badge-danger" style={{ marginLeft: 8 }}>
+              Просрочен
+            </span>
+          ) : null}
+        </h2>
+        <p className="text-muted" style={{ fontSize: 13, marginBottom: 10 }}>
+          Счёт оплаты: {payAccountName ?? "не назначен"}
+          {hasParts
+            ? ` · оплачено ${formatMoney(summary.paidAmount)} из ${formatMoney(request.amount)}, осталось ${formatMoney(summary.remainingAmount)}`
+            : ""}
+        </p>
+
+        {hasParts ? (
+          <div className="table-wrap" style={{ marginBottom: 10 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Часть</th>
+                  <th>Срок</th>
+                  <th>Сумма</th>
+                  <th>Оплата</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {request.parts.map((part, i) => (
+                  <tr key={part.id}>
+                    <td>{i + 1}</td>
+                    <td className="mono">
+                      {dueDay(part.dueDate)}
+                      {!part.paidAt && part.dueDate.toISOString().slice(0, 10) < todayKey ? (
+                        <span className="badge badge-danger" style={{ marginLeft: 6 }}>
+                          просрочена
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="mono">{formatMoney(part.amount)}</td>
+                    <td>
+                      {part.paidAt ? (
+                        <span>
+                          <span className="badge badge-active">Оплачена</span>{" "}
+                          <span className="text-muted" style={{ fontSize: 12 }}>
+                            {part.paidBy?.fullName}, {dateTime(part.paidAt)}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-muted">ждёт оплаты</span>
+                      )}
+                    </td>
+                    <td>
+                      {!part.paidAt && canPay && request.status === "APPROVED" ? (
+                        <form action={markPaymentPartPaidAction.bind(null, request.id, part.id)}>
+                          <button type="submit" className="btn btn-secondary btn-sm">
+                            Оплачено
+                          </button>
+                        </form>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        {canReschedule && !hasParts ? (
+          <form action={reschedulePaymentRequestAction.bind(null, request.id)} className="form-grid" style={{ alignItems: "flex-end" }}>
+            <label className="field">
+              <span>Новый срок оплаты</span>
+              <input type="date" name="dueDate" min={todayKey} defaultValue={firstDueKey} required />
+            </label>
+            <label className="field" style={{ gridColumn: "span 2" }}>
+              <span>Причина переноса (необязательно)</span>
+              <input type="text" name="reason" maxLength={500} placeholder="Например: ждём поступления от заказчика" />
+            </label>
+            <button type="submit" className="btn btn-secondary">
+              Перенести срок
+            </button>
+          </form>
+        ) : null}
+
+        {canReschedule && (!hasParts || unpaidParts.length > 0) ? (
+          <details className="plan-details">
+            <summary>{hasParts ? "Изменить неоплаченные части" : "Разбить оплату на части"}</summary>
+            <PaymentScheduleEditor
+              action={savePaymentScheduleAction.bind(null, request.id)}
+              toSchedule={(hasParts ? summary.remainingAmount : new Decimal(request.amount.toString())).toFixed(2)}
+              initialRows={
+                hasParts
+                  ? unpaidParts.map((part) => ({ id: part.id, dueDate: part.dueDate.toISOString().slice(0, 10), amount: part.amount.toFixed(2) }))
+                  : suggestSplit(request.amount.toString(), firstDueKey < todayKey ? todayKey : firstDueKey, 2)
+              }
+              todayKey={todayKey}
+              submitLabel={hasParts ? "Сохранить части" : "Сохранить график"}
+            />
+            {hasParts && summary.paidCount === 0 ? (
+              <form action={removePaymentScheduleAction.bind(null, request.id)} style={{ marginTop: 8 }}>
+                <button type="submit" className="btn btn-ghost btn-sm">
+                  Объединить в один платёж
+                </button>
+              </form>
             ) : null}
-          </h2>
-          {request.reschedules.length > 0 ? (
+          </details>
+        ) : null}
+
+        {canReschedule ? (
+          <form action={assignRequestAccountAction.bind(null, request.id)} className="form-grid" style={{ alignItems: "flex-end", marginTop: 10 }}>
+            <label className="field" style={{ gridColumn: "span 2" }}>
+              <span>Счёт или касса оплаты (для прогноза по счетам)</span>
+              <select name="payAccount" defaultValue={accountKey(request.payBankAccountId, request.payCashAccountId) ?? ""}>
+                <PaymentAccountOptions bankAccounts={orgBankAccounts} cashAccounts={orgCashAccounts} />
+              </select>
+            </label>
+            <button type="submit" className="btn btn-secondary">
+              Сохранить счёт
+            </button>
+          </form>
+        ) : null}
+
+        {request.reschedules.length > 0 ? (
+          <>
+            <h3 style={{ fontSize: 13, fontWeight: 700, margin: "14px 0 6px" }}>История переносов</h3>
             <ul className="reschedule-list">
               {request.reschedules.map((r) => (
                 <li key={r.id}>
+                  {r.partId ? <span className="text-muted">часть {partNumber.get(r.partId) ?? "(удалена)"}: </span> : null}
                   <span className="mono">
                     {dueDay(r.fromDate)} → {dueDay(r.toDate)}
                   </span>{" "}
@@ -169,29 +312,16 @@ export default async function PaymentRequestPage({
                 </li>
               ))}
             </ul>
-          ) : null}
-          {canReschedule ? (
-            <form action={reschedulePaymentRequestAction.bind(null, request.id)} className="form-grid" style={{ alignItems: "flex-end", marginTop: 10 }}>
-              <label className="field">
-                <span>Новый срок оплаты</span>
-                <input type="date" name="dueDate" min={todayKey} defaultValue={request.dueDate.toISOString().slice(0, 10)} required />
-              </label>
-              <label className="field" style={{ gridColumn: "span 2" }}>
-                <span>Причина переноса (необязательно)</span>
-                <input type="text" name="reason" maxLength={500} placeholder="Например: ждём поступления от заказчика" />
-              </label>
-              <button type="submit" className="btn btn-secondary">
-                Перенести срок
-              </button>
-            </form>
-          ) : null}
-          {canReschedule ? (
-            <p className="text-muted" style={{ marginTop: 8, fontSize: 12 }}>
-              Срок можно передвинуть и в <Link href={`/payment-calendar?month=${request.dueDate.toISOString().slice(0, 7)}`}>платёжном календаре</Link> — перетащив заявку на другой день. Статус и согласование при переносе не меняются.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
+          </>
+        ) : null}
+
+        {canReschedule ? (
+          <p className="text-muted" style={{ marginTop: 8, fontSize: 12 }}>
+            Сроки можно двигать и в <Link href={`/payment-calendar?month=${firstDueKey.slice(0, 7)}`}>платёжном календаре</Link> — перетаскивая заявку
+            или её части. Статус и согласование при этом не меняются.
+          </p>
+        ) : null}
+      </div>
 
       <div className="card">
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>История согласования</h2>

@@ -31,6 +31,7 @@ export default async function PaymentRequestsPage({
         route: { include: { steps: { include: { role: true } } } },
         approvals: { orderBy: { decidedAt: "desc" }, take: 1 },
         _count: { select: { reschedules: true } },
+        parts: { select: { paidAt: true } },
       },
     }),
     prisma.userRole.findMany({ where: { userId: session.userId }, select: { roleId: true } }),
@@ -118,7 +119,14 @@ export default async function PaymentRequestsPage({
                   <td>{req.organization.shortName || req.organization.name}</td>
                   <td>{req.counterparty ? req.counterparty.shortName || req.counterparty.fullName : "—"}</td>
                   <td>{req.cashFlowArticle?.name ?? "—"}</td>
-                  <td className="mono">{formatMoney(req.amount)}</td>
+                  <td className="mono">
+                    {formatMoney(req.amount)}
+                    {req.parts.length > 0 ? (
+                      <div className="text-muted" style={{ fontSize: 11 }}>
+                        частями: оплачено {req.parts.filter((p) => p.paidAt).length} из {req.parts.length}
+                      </div>
+                    ) : null}
+                  </td>
                   <td>{req.createdBy.fullName}</td>
                   <td>
                     {routeCandidate ? (

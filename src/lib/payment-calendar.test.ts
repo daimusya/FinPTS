@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  accountKey,
   adjacentMonths,
   buildCalendarRows,
   buildMonthGrid,
+  itemScope,
   localDateKey,
+  parseAccountKey,
   parseRescheduleDate,
   requestPlacement,
   type CalendarMovement,
@@ -126,5 +129,31 @@ describe("buildMonthGrid", () => {
     expect(day("2026-11-04")).toMatchObject({ isWorking: false, holidayName: "День народного единства" });
     expect(day("2026-11-04").balance!.toNumber()).toBe(500);
     expect(day("2026-11-07").isWorking).toBe(false);
+  });
+});
+
+describe("account keys and forecast scope", () => {
+  it("round-trips account keys and rejects junk", () => {
+    expect(accountKey("b1", null)).toBe("bank:b1");
+    expect(accountKey(null, "c1")).toBe("cash:c1");
+    expect(accountKey(null, null)).toBeNull();
+    expect(parseAccountKey("bank:b1")).toEqual({ bankAccountId: "b1", cashAccountId: null });
+    expect(parseAccountKey("cash:c1")).toEqual({ bankAccountId: null, cashAccountId: "c1" });
+    expect(parseAccountKey("card:x")).toBeNull();
+    expect(parseAccountKey("")).toBeNull();
+  });
+
+  it("filters by organization or by account, keeping the organization's unassigned payments apart", () => {
+    const all = { organizationId: null, accountKey: null, accountOrganizationId: null };
+    const org = { organizationId: "o1", accountKey: null, accountOrganizationId: null };
+    const acc = { organizationId: null, accountKey: "bank:b1", accountOrganizationId: "o1" };
+    const item = (organizationId: string, key: string | null) => ({ organizationId, accountKey: key });
+    expect(itemScope(item("o2", null), all)).toBe("in");
+    expect(itemScope(item("o1", "bank:b2"), org)).toBe("in");
+    expect(itemScope(item("o2", null), org)).toBe("out");
+    expect(itemScope(item("o1", "bank:b1"), acc)).toBe("in");
+    expect(itemScope(item("o1", null), acc)).toBe("unassigned");
+    expect(itemScope(item("o1", "cash:c1"), acc)).toBe("out");
+    expect(itemScope(item("o2", null), acc)).toBe("out");
   });
 });

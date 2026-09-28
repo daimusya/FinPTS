@@ -12,17 +12,20 @@ import {
   PAYMENT_STATUS_LABELS,
 } from "@/lib/accruals/labels";
 import { cancelAllocationAction } from "../../cash/actions";
-import { postAccrualDocumentAction, cancelAccrualDocumentAction } from "../actions";
+import { postAccrualDocumentAction, cancelAccrualDocumentAction, rescheduleDocumentAction, assignDocumentAccountAction } from "../actions";
+import { PaymentAccountOptions } from "@/components/payment-account-options";
+import { accountKey, localDateKey } from "@/lib/payment-calendar";
+import { canPlanDocuments } from "@/lib/payment-plan/service";
 
 export default async function AccrualDocumentPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; notice?: string }>;
 }) {
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error, notice } = await searchParams;
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.ACCRUALS_VIEW)) {
     return (
@@ -45,9 +48,20 @@ export default async function AccrualDocumentPage({
         where: { cancelledAt: null },
         include: { bankTransaction: { include: { bankAccount: true, cashAccount: true } } },
       },
+      dueDateChanges: { include: { changedBy: true }, orderBy: { changedAt: "asc" } },
     },
   });
   if (!doc) notFound();
+
+  const canPlan = canPlanDocuments(session) && doc.status !== "CANCELLED" && doc.paymentStatus !== "PAID" && doc.paymentStatus !== "OVERPAID";
+  const [orgBankAccounts, orgCashAccounts] = canPlan
+    ? await Promise.all([
+        prisma.bankAccount.findMany({ where: { organizationId: doc.organizationId, isArchived: false }, orderBy: { bankName: "asc" } }),
+        prisma.cashAccount.findMany({ where: { organizationId: doc.organizationId, isArchived: false }, orderBy: { name: "asc" } }),
+      ])
+    : [[], []];
+  const todayKey = localDateKey();
+  const showDay = (d: Date) => d.toLocaleDateString("ru-RU", { timeZone: "UTC" });
 
   const total = doc.lines.reduce((acc, l) => acc + Number(l.amount), 0);
   const allocated = doc.allocations.reduce((acc, a) => acc + Number(a.amount), 0);
@@ -91,6 +105,7 @@ export default async function AccrualDocumentPage({
       </div>
 
       {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
+      {notice ? <p className="form-success" style={{ marginBottom: 14 }}>{notice}</p> : null}
 
       <div className="stat-grid">
         <div className="stat-card">
@@ -116,6 +131,62 @@ export default async function AccrualDocumentPage({
           </div>
         </div>
       </div>
+
+      {canPlan || doc.dueDateChanges.length > 0 ? (
+        <div className="card" id="payment-plan">
+          <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+            Срок оплаты: {doc.dueDate ? showDay(doc.dueDate) : "не указан"}
+          </h2>
+          {doc.dueDateChanges.length > 0 ? (
+            <ul className="reschedule-list">
+              {doc.dueDateChanges.map((c) => (
+                <li key={c.id}>
+                  <span className="mono">
+                    {c.fromDate ? showDay(c.fromDate) : "без срока"} → {showDay(c.toDate)}
+                  </span>{" "}
+                  <span className="text-muted">
+                    {c.changedBy.fullName}, {c.changedAt.toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}
+                  </span>
+                  {c.reason ? <div className="approval-comment" style={{ marginTop: 4 }}>{c.reason}</div> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {canPlan ? (
+            <>
+              <form action={rescheduleDocumentAction.bind(null, doc.id)} className="form-grid" style={{ alignItems: "flex-end", marginTop: 10 }}>
+                <label className="field">
+                  <span>Новый срок оплаты</span>
+                  <input type="date" name="dueDate" min={todayKey} defaultValue={doc.dueDate?.toISOString().slice(0, 10) ?? ""} required />
+                </label>
+                <label className="field" style={{ gridColumn: "span 2" }}>
+                  <span>Причина (необязательно)</span>
+                  <input type="text" name="reason" maxLength={500} placeholder="Например: заказчик просит отсрочку до конца месяца" />
+                </label>
+                <button type="submit" className="btn btn-secondary">
+                  Перенести срок
+                </button>
+              </form>
+              <form action={assignDocumentAccountAction.bind(null, doc.id)} className="form-grid" style={{ alignItems: "flex-end", marginTop: 10 }}>
+                <label className="field" style={{ gridColumn: "span 2" }}>
+                  <span>Плановый счёт оплаты (для прогноза по счетам)</span>
+                  <select name="payAccount" defaultValue={accountKey(doc.plannedBankAccountId, doc.plannedCashAccountId) ?? ""}>
+                    <PaymentAccountOptions bankAccounts={orgBankAccounts} cashAccounts={orgCashAccounts} />
+                  </select>
+                </label>
+                <button type="submit" className="btn btn-secondary">
+                  Сохранить счёт
+                </button>
+              </form>
+              <p className="text-muted" style={{ marginTop: 8, fontSize: 12 }}>
+                Меняется только срок оплаты — суммы и проводки документа остаются прежними, поэтому срок можно перенести и у
+                проведённого документа, и в закрытом периоде. Срок можно передвинуть и в{" "}
+                <Link href={`/payment-calendar?month=${(doc.dueDate ?? doc.date).toISOString().slice(0, 7)}`}>платёжном календаре</Link>.
+              </p>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="card">
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Строки документа</h2>

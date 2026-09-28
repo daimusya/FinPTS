@@ -19,11 +19,14 @@ export default async function NewPaymentRequestPage({
     );
   }
 
-  const [organizations, counterparties, cashFlowArticles] = await Promise.all([
+  const [organizations, counterparties, cashFlowArticles, bankAccounts, cashAccounts] = await Promise.all([
     prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
     prisma.cashFlowArticle.findMany({ where: { isArchived: false, direction: "OUTFLOW" }, orderBy: { name: "asc" } }),
+    prisma.bankAccount.findMany({ where: { isArchived: false }, include: { organization: true }, orderBy: { bankName: "asc" } }),
+    prisma.cashAccount.findMany({ where: { isArchived: false }, include: { organization: true }, orderBy: { name: "asc" } }),
   ]);
+  const orgName = (o: { name: string; shortName: string | null }) => o.shortName || o.name;
 
   return (
     <div className="page">
@@ -78,6 +81,22 @@ export default async function NewPaymentRequestPage({
             <label className="field">
               <span>Срок оплаты *</span>
               <input type="date" name="dueDate" required />
+            </label>
+            <label className="field" style={{ gridColumn: "1 / -1" }}>
+              <span>Счёт или касса оплаты (необязательно, для прогноза по счетам)</span>
+              <select name="payAccount" defaultValue="">
+                <option value="">— не назначен —</option>
+                {bankAccounts.map((a) => (
+                  <option key={a.id} value={`bank:${a.id}`}>
+                    {orgName(a.organization)}: {a.bankName} · {a.accountNumber}
+                  </option>
+                ))}
+                {cashAccounts.map((a) => (
+                  <option key={a.id} value={`cash:${a.id}`}>
+                    {orgName(a.organization)}: касса «{a.name}»
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
           <label className="field" style={{ marginTop: 14 }}>

@@ -53,7 +53,7 @@ export default async function DashboardPage() {
     prisma.bankTransaction.count({ where: { matchStatus: "UNMATCHED", ...bankScope } }),
     prisma.paymentRequest.findMany({
       where: { status: "APPROVED", ...paymentRequestScopeWhere(scope) },
-      include: { organization: true },
+      include: { organization: true, parts: { where: { paidAt: { not: null } }, select: { amount: true } } },
     }),
     computePnlReport(currentPeriod, {}, scope),
   ]);
@@ -76,7 +76,8 @@ export default async function DashboardPage() {
     if (doc.dueDate && doc.dueDate < now) overdueTotal = overdueTotal.plus(remaining);
   }
 
-  const upcomingPaymentsTotal = sumMoney(upcomingRequests.map((r) => r.amount));
+  // Requests paid in parts count only what is still to be paid.
+  const upcomingPaymentsTotal = sumMoney(upcomingRequests.map((r) => sumMoney([r.amount]).minus(sumMoney(r.parts.map((p) => p.amount)))));
 
   return (
     <div className="page">

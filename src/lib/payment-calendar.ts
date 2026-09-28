@@ -188,3 +188,44 @@ export function adjacentMonths(month: string): { prev: string; next: string } {
   const fmt = (ms: number) => new Date(ms).toISOString().slice(0, 7);
   return { prev: fmt(Date.UTC(y, m - 2, 1)), next: fmt(Date.UTC(y, m, 1)) };
 }
+
+/** Счёт оплаты одной строкой для форм и фильтров: «bank:ID» или «cash:ID». */
+export function accountKey(bankAccountId: string | null | undefined, cashAccountId: string | null | undefined): string | null {
+  if (bankAccountId) return `bank:${bankAccountId}`;
+  if (cashAccountId) return `cash:${cashAccountId}`;
+  return null;
+}
+
+export function parseAccountKey(key: unknown): { bankAccountId: string | null; cashAccountId: string | null } | null {
+  const raw = String(key ?? "");
+  const match = /^(bank|cash):([A-Za-z0-9_-]{1,64})$/.exec(raw);
+  if (!match) return null;
+  return match[1] === "bank" ? { bankAccountId: match[2], cashAccountId: null } : { bankAccountId: null, cashAccountId: match[2] };
+}
+
+export interface ScopedItem {
+  organizationId: string;
+  accountKey: string | null;
+}
+
+export interface ForecastScope {
+  organizationId: string | null;
+  accountKey: string | null;
+  /** Организация выбранного счёта — её платежи без счёта показываются как «счёт не назначен». */
+  accountOrganizationId: string | null;
+}
+
+/**
+ * Попадает ли платёж в прогноз выбранного среза. По счёту — только платежи с
+ * этим счётом оплаты; платежи той же организации без счёта — «unassigned»
+ * (видны отдельно, в прогноз счёта не входят). По организации — все её платежи.
+ */
+export function itemScope(item: ScopedItem, scope: ForecastScope): "in" | "unassigned" | "out" {
+  if (scope.accountKey) {
+    if (item.accountKey === scope.accountKey) return "in";
+    if (!item.accountKey && item.organizationId === scope.accountOrganizationId) return "unassigned";
+    return "out";
+  }
+  if (scope.organizationId) return item.organizationId === scope.organizationId ? "in" : "out";
+  return "in";
+}

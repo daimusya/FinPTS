@@ -3,7 +3,8 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { requirePermission } from "@/lib/session";
+import { requirePermission, requireSession } from "@/lib/session";
+import { assignPaymentAccount, rescheduleDocument } from "@/lib/payment-plan/service";
 import { logAudit } from "@/lib/audit";
 import { assertPeriodOpenForDate } from "@/lib/period";
 import { recomputeAccrualDocumentStatus } from "@/lib/matching";
@@ -238,4 +239,20 @@ export async function cancelAccrualDocumentAction(id: string) {
 
   revalidatePath("/accruals");
   revalidatePath(`/accruals/${id}`);
+}
+
+/** Срок оплаты документа (в т. ч. проведённого): меняется только срок, с причиной и историей. */
+export async function rescheduleDocumentAction(id: string, formData: FormData) {
+  const session = await requireSession();
+  const result = await rescheduleDocument(session, id, formData.get("dueDate"), formData.get("reason"));
+  const param = result.ok ? `notice=${encodeURIComponent(result.message)}` : `error=${encodeURIComponent((result as { error: string }).error)}`;
+  redirect(`/accruals/${id}?${param}`);
+}
+
+/** Плановый счёт оплаты документа — для прогноза по счетам в платёжном календаре. */
+export async function assignDocumentAccountAction(id: string, formData: FormData) {
+  const session = await requireSession();
+  const result = await assignPaymentAccount(session, "document", id, formData.get("payAccount"));
+  const param = result.ok ? `notice=${encodeURIComponent(result.message)}` : `error=${encodeURIComponent((result as { error: string }).error)}`;
+  redirect(`/accruals/${id}?${param}`);
 }
