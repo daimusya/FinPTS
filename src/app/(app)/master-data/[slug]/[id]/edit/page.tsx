@@ -12,10 +12,19 @@ export default async function EditDictionaryItemPage({
   searchParams,
 }: {
   params: Promise<{ slug: string; id: string }>;
-  searchParams: Promise<{ error?: string; notice?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    notice?: string;
+    editBank?: string;
+    editContact?: string;
+    bankError?: string;
+    bankNotice?: string;
+    contactError?: string;
+    contactNotice?: string;
+  }>;
 }) {
   const { slug, id } = await params;
-  const { error, notice } = await searchParams;
+  const { error, notice, ...detailsState } = await searchParams;
   if (!DICTIONARY_REGISTRY[slug]) notFound();
   const config = getDictionaryConfig(slug);
 
@@ -70,7 +79,17 @@ export default async function EditDictionaryItemPage({
       </div>
 
       {slug === "counterparties" ? <CounterpartyInnCard counterpartyId={id} /> : null}
-      {slug === "counterparties" ? <CounterpartyDetails counterpartyId={id} /> : null}
+      {slug === "counterparties" ? <CounterpartyDetails
+          counterpartyId={id}
+          state={{
+            editBankId: detailsState.editBank,
+            editContactId: detailsState.editContact,
+            bankError: detailsState.bankError,
+            bankNotice: detailsState.bankNotice,
+            contactError: detailsState.contactError,
+            contactNotice: detailsState.contactNotice,
+          }}
+        /> : null}
     </div>
   );
 }

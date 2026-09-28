@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateBankDetail, validateContact } from "./validation";
+import { nextPrimaryAfterRemoval, validateBankDetail, validateContact } from "./validation";
 
 const validBank = { bankName: "Сбербанк", account: "40702810100000000001", bik: "044525225", corrAccount: "30101810400000000225" };
 
@@ -50,5 +50,21 @@ describe("validateContact", () => {
     expect(validateContact({ name: "Иван", phone: "", email: "ivan@example.com", position: "Бухгалтер" })).toEqual({
       value: { name: "Иван", phone: null, email: "ivan@example.com", position: "Бухгалтер" },
     });
+  });
+});
+
+describe("nextPrimaryAfterRemoval", () => {
+  const d = (id: string, isPrimary: boolean, day: number) => ({ id, isPrimary, createdAt: new Date(2026, 8, day) });
+
+  it("keeps the primary when another account is removed", () => {
+    expect(nextPrimaryAfterRemoval([d("a", true, 1), d("b", false, 2)], "b")).toBeNull();
+  });
+
+  it("passes the primary to the oldest remaining account", () => {
+    expect(nextPrimaryAfterRemoval([d("c", false, 3), d("a", true, 1), d("b", false, 2)], "a")).toBe("b");
+  });
+
+  it("returns null when the last account is removed", () => {
+    expect(nextPrimaryAfterRemoval([d("a", true, 1)], "a")).toBeNull();
   });
 });

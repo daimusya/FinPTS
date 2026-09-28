@@ -297,6 +297,10 @@ model CounterpartyBankDetail {
   account        String
   bik            String?
   corrAccount    String?
+  /// Основной счёт контрагента — по нему платим по умолчанию. У контрагента
+  /// с реквизитами основной ровно один (следит код при добавлении, смене и удалении).
+  isPrimary      Boolean  @default(false)
+  createdAt      DateTime @default(now())
 
   counterparty Counterparty @relation(fields: [counterpartyId], references: [id], onDelete: Cascade)
 

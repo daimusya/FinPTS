@@ -66,7 +66,7 @@ export default async function PaymentRequestPage({
     where: { id },
     include: {
       organization: true,
-      counterparty: true,
+      counterparty: { include: { bankDetails: { where: { isPrimary: true }, take: 1 } } },
       cashFlowArticle: true,
       createdBy: true,
       route: { include: { steps: { include: { role: true } } } },
@@ -126,6 +126,7 @@ export default async function PaymentRequestPage({
   });
 
   const counterpartyName = request.counterparty ? request.counterparty.shortName || request.counterparty.fullName : "—";
+  const primaryAccount = request.counterparty?.bankDetails[0] ?? null;
 
   return (
     <div className="page">
@@ -155,6 +156,22 @@ export default async function PaymentRequestPage({
           <dd>{request.organization.shortName || request.organization.name}</dd>
           <dt>Контрагент</dt>
           <dd>{counterpartyName}</dd>
+          <dt>Реквизиты для оплаты</dt>
+          <dd>
+            {primaryAccount ? (
+              <span className="mono">
+                {primaryAccount.bankName} · р/с {primaryAccount.account}
+                {primaryAccount.bik ? ` · БИК ${primaryAccount.bik}` : ""}
+              </span>
+            ) : request.counterparty ? (
+              <span className="text-muted">
+                основной счёт контрагента не указан —{" "}
+                <Link href={`/master-data/counterparties/${request.counterparty.id}/edit#bank-details`}>добавить</Link>
+              </span>
+            ) : (
+              "—"
+            )}
+          </dd>
           <dt>Статья ДДС</dt>
           <dd>{request.cashFlowArticle?.name ?? "—"}</dd>
           <dt>Сумма</dt>

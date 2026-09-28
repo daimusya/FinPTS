@@ -61,3 +61,21 @@ export function validateContact(input: ContactInput): { error: string } | { valu
 
   return { value: { name, phone: phone || null, email: email || null, position: position || null } };
 }
+
+export interface BankDetailOrder {
+  id: string;
+  isPrimary: boolean;
+  createdAt: Date;
+}
+
+/**
+ * Какой счёт станет основным после удаления: если удаляют не основной —
+ * основной не меняется (null); если основной — самый ранний из оставшихся
+ * (null, если счетов не осталось).
+ */
+export function nextPrimaryAfterRemoval(details: BankDetailOrder[], removedId: string): string | null {
+  const removed = details.find((d) => d.id === removedId);
+  if (!removed?.isPrimary) return null;
+  const rest = details.filter((d) => d.id !== removedId).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
+  return rest[0]?.id ?? null;
+}

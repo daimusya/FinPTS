@@ -601,6 +601,17 @@ tbody tr:hover {
   overflow-wrap: anywhere;
 }
 
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.row-editing td {
+  background: var(--color-orange-soft);
+}
+
 .row-selected td {
   background: var(--color-orange-soft);
 }
