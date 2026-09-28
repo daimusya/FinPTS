@@ -5,17 +5,23 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney } from "@/lib/money";
 import { ACCRUAL_DOCUMENT_TYPE_LABELS } from "@/lib/accruals/labels";
-import { allocatePaymentAction, updateTransactionClassificationAction, cancelAllocationAction } from "../../actions";
+import {
+  allocatePaymentAction,
+  updateTransactionClassificationAction,
+  cancelAllocationAction,
+  updateBankTransactionAction,
+  deleteBankTransactionAction,
+} from "../../actions";
 
 export default async function CashTransactionDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; notice?: string }>;
 }) {
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error, notice } = await searchParams;
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.CASH_VIEW)) {
     return (
@@ -52,7 +58,9 @@ export default async function CashTransactionDetailPage({
       })
     : null;
 
-  const [counterparties, cashFlowArticles, departments, costCenters, projects, productsServices] = await Promise.all([
+  const [bankAccounts, cashAccounts, counterparties, cashFlowArticles, departments, costCenters, projects, productsServices] = await Promise.all([
+    prisma.bankAccount.findMany({ where: { OR: [{ isArchived: false }, { id: tx.bankAccountId ?? "" }] }, orderBy: { bankName: "asc" } }),
+    prisma.cashAccount.findMany({ where: { OR: [{ isArchived: false }, { id: tx.cashAccountId ?? "" }] }, orderBy: { name: "asc" } }),
     prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
     prisma.cashFlowArticle.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     prisma.department.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
@@ -92,6 +100,7 @@ export default async function CashTransactionDetailPage({
       </div>
 
       {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
+      {notice ? <p className="form-success" style={{ marginBottom: 14 }}>{notice}</p> : null}
 
       <div className="card">
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Классификация операции</h2>
@@ -164,10 +173,16 @@ export default async function CashTransactionDetailPage({
               </select>
             </label>
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, fontSize: 13 }}>
-            <input type="checkbox" name="isTransfer" defaultChecked={tx.isTransfer} />
-            Перевод между собственными счетами
-          </label>
+          {linkedTransfer ? (
+            <p className="text-muted" style={{ marginTop: 14 }}>
+              Перевод между собственными счетами — классификация сохраняется сразу у обеих операций перевода.
+            </p>
+          ) : (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, fontSize: 13 }}>
+              <input type="checkbox" name="isTransfer" defaultChecked={tx.isTransfer} />
+              Перевод между собственными счетами
+            </label>
+          )}
           {tx.purpose ? (
             <p className="text-muted" style={{ marginTop: 10 }}>
               Назначение платежа: {tx.purpose}
@@ -273,6 +288,96 @@ export default async function CashTransactionDetailPage({
           </p>
         ) : null}
       </div>
+
+      {canManage && !tx.batchId ? (
+        <details className="card">
+          <summary style={{ fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+            Исправить дату, сумму, направление или счёт
+          </summary>
+          <form action={updateBankTransactionAction.bind(null, tx.id)} style={{ marginTop: 12 }}>
+            <div className="form-grid">
+              <label className="field">
+                <span>Дата операции</span>
+                <input type="date" name="operationDate" defaultValue={tx.operationDate.toISOString().slice(0, 10)} required />
+              </label>
+              <label className="field">
+                <span>Направление</span>
+                <select name="direction" defaultValue={tx.direction}>
+                  <option value="INFLOW">Поступление</option>
+                  <option value="OUTFLOW">Списание</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Сумма</span>
+                <input type="number" step="0.01" min="0.01" name="amount" defaultValue={tx.amount.toFixed(2)} required />
+              </label>
+              <label className="field">
+                <span>Банковский счёт</span>
+                <select name="bankAccountId" defaultValue={tx.bankAccountId ?? ""}>
+                  <option value="">—</option>
+                  {bankAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.bankName} · {a.accountNumber}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Касса</span>
+                <select name="cashAccountId" defaultValue={tx.cashAccountId ?? ""}>
+                  <option value="">—</option>
+                  {cashAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field" style={{ gridColumn: "1 / -1" }}>
+                <span>Назначение платежа</span>
+                <input type="text" name="purpose" defaultValue={tx.purpose ?? ""} />
+              </label>
+            </div>
+            <p className="text-muted" style={{ marginTop: 10 }}>
+              {linkedTransfer
+                ? "Дата, сумма и назначение изменятся и у встречной операции перевода; её направление останется противоположным, счёт — прежним."
+                : "Выберите либо банковский счёт, либо кассу."}{" "}
+              Если операция сопоставлена с начислениями, сумму нельзя сделать меньше сопоставленной, а направление — поменять.
+            </p>
+            <div className="form-actions">
+              <button type="submit" className="btn btn-primary">
+                Сохранить исправление
+              </button>
+            </div>
+          </form>
+        </details>
+      ) : null}
+
+      {canManage ? (
+        <details className="card">
+          <summary style={{ fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+            {linkedTransfer ? "Удалить перевод (обе операции)" : "Удалить операцию"}
+          </summary>
+          <form action={deleteBankTransactionAction.bind(null, tx.id)} style={{ marginTop: 12 }}>
+            <p className="text-muted">
+              {tx.allocations.length > 0
+                ? "Сначала отмените сопоставления с начислениями ниже — иначе у документов незаметно пропала бы оплата."
+                : tx.batchId
+                  ? "Операция загружена из выписки. После удаления повторная загрузка той же выписки добавит её снова — так исправляют выписку, загруженную не на тот счёт."
+                  : "Удаление нельзя отменить; сведения об операции останутся в журнале аудита."}
+            </p>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 13 }}>
+              <input type="checkbox" name="confirm" required />
+              Да, удалить {linkedTransfer ? "обе операции перевода" : "операцию"}
+            </label>
+            <div className="form-actions">
+              <button type="submit" className="btn btn-danger" disabled={tx.allocations.length > 0}>
+                Удалить
+              </button>
+            </div>
+          </form>
+        </details>
+      ) : null}
     </div>
   );
 }

@@ -146,6 +146,14 @@ textarea {
   width: 100%;
 }
 
+/* Checkboxes and radios keep their natural size next to their label text. */
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  padding: 0;
+  flex: none;
+}
+
 input:focus,
 select:focus,
 textarea:focus {

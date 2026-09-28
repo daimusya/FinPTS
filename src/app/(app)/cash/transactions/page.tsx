@@ -27,6 +27,7 @@ export default async function CashTransactionsPage({
     cashFlowArticleId?: string;
     from?: string;
     to?: string;
+    notice?: string;
   }>;
 }) {
   const session = await getSession();
@@ -38,7 +39,7 @@ export default async function CashTransactionsPage({
     );
   }
   const canManage = hasPermission(session, PERMISSIONS.CASH_MANAGE);
-  const { matchStatus, direction, cashFlowArticleId, from, to } = await searchParams;
+  const { matchStatus, direction, cashFlowArticleId, from, to, notice } = await searchParams;
 
   const scope = await getAccessScope(session);
   const scopeWhere = bankTransactionScopeWhere(scope);
@@ -91,6 +92,8 @@ export default async function CashTransactionsPage({
           </div>
         ) : null}
       </div>
+
+      {notice ? <p className="form-success" style={{ marginBottom: 14 }}>{notice}</p> : null}
 
       <form className="filter-bar">
         <label className="field">
