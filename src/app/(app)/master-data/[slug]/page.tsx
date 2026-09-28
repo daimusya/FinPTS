@@ -55,10 +55,10 @@ export default async function DictionaryListPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ imported?: string; innError?: string }>;
+  searchParams: Promise<{ imported?: string; importResult?: string; innError?: string }>;
 }) {
   const { slug } = await params;
-  const { imported, innError } = await searchParams;
+  const { imported, importResult, innError } = await searchParams;
   if (!DICTIONARY_REGISTRY[slug]) notFound();
   const config = getDictionaryConfig(slug);
 
@@ -105,9 +105,9 @@ export default async function DictionaryListPage({
 
       {slug === "counterparties" && canManage ? <CounterpartyCreateByInn error={innError} /> : null}
 
-      {imported ? (
+      {importResult || imported ? (
         <div className="card" style={{ marginBottom: 16 }}>
-          <p className="form-success">Загружено записей: {imported}.</p>
+          <p className="form-success">{importResult ?? `Загружено записей: ${imported}.`}</p>
         </div>
       ) : null}
 

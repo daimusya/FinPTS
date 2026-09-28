@@ -36,3 +36,11 @@ export function emptyFieldValue(
   if (mode === "create") return undefined;
   return column?.nullable ? null : undefined;
 }
+
+/** Имя делегата модели справочника (prisma.<имя>) — чтобы работать с ней внутри транзакции. */
+export function dictionaryModelKey(config: DictionaryConfig): string {
+  const client = prisma as unknown as Record<string, unknown>;
+  const model = Prisma.dmmf.datamodel.models.find((m) => client[m.name[0].toLowerCase() + m.name.slice(1)] === config.delegate);
+  if (!model) throw new Error(`Модель справочника «${config.slug}» не найдена в схеме`);
+  return model.name[0].toLowerCase() + model.name.slice(1);
+}

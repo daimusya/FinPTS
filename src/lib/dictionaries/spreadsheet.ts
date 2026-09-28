@@ -7,9 +7,16 @@ export interface SheetField {
   required?: boolean;
   options?: FieldOption[];
   defaultValue?: string;
+  /** Та же проверка непустого значения, что и в форме (например, контрольная цифра ИНН). */
+  validate?: (value: string) => string | null;
 }
 
 export const ARCHIVE_COLUMN_LABEL = "Статус записи";
+/** Колонка выгрузки с ID записи: по ней загрузка обновляет именно эту запись. */
+export const ID_COLUMN_LABEL = "ID записи";
+
+const ARCHIVED_VALUES = new Set(["в архиве", "архив", "архивная"]);
+const ACTIVE_VALUES = new Set(["активна", "активная", "активен", "активный"]);
 
 type Cell = string | number | null;
 
@@ -37,10 +44,11 @@ function formatExportCell(field: SheetField, value: unknown): string | number {
  * файл можно было отредактировать и загрузить обратно через импорт.
  */
 export function buildExportRows(fields: SheetField[], items: Array<Record<string, unknown>>): Array<Array<string | number>> {
-  const header = [...fields.map((f) => f.label), ARCHIVE_COLUMN_LABEL];
+  const header = [...fields.map((f) => f.label), ARCHIVE_COLUMN_LABEL, ID_COLUMN_LABEL];
   const rows = items.map((item) => [
     ...fields.map((f) => formatExportCell(f, item[f.name])),
     item.isArchived ? "В архиве" : "Активна",
+    String(item.id ?? ""),
   ]);
   return [header, ...rows];
 }
@@ -64,8 +72,25 @@ function parseDate(value: string): Date | null {
 const TRUE_VALUES = new Set(["да", "true", "1", "yes"]);
 const FALSE_VALUES = new Set(["нет", "false", "0", "no"]);
 
+/** Строка файла: данные для создания и то, что нужно для обновления существующей записи. */
+export interface ImportRow {
+  /** Номер строки в файле (заголовок — строка 1). */
+  line: number;
+  /** ID из колонки «ID записи» — обновить именно эту запись. */
+  id: string | null;
+  /** Значения заполненных ячеек (пустые необязательные — как при создании: значение по умолчанию или ничего). */
+  data: Record<string, unknown>;
+  /** Необязательные поля, колонка которых есть в файле, а ячейка пустая: при обновлении их очищают. */
+  cleared: string[];
+  /** Поля, колонки которых есть в файле, — только их трогает обновление. */
+  present: string[];
+  /** «В архиве» / «Активна» из колонки «Статус записи»; null — колонки нет или ячейка пустая. */
+  archived: boolean | null;
+}
+
 export interface ImportParseResult {
   records: Array<Record<string, unknown>>;
+  rows: ImportRow[];
   errors: string[];
 }
 
@@ -86,15 +111,19 @@ export function parseImportRows(fields: SheetField[], headers: string[], rows: C
   for (const { field, index } of fieldColumns) {
     if (field.required && index === undefined) errors.push(`В файле нет колонки «${field.label}»`);
   }
-  if (errors.length > 0) return { records: [], errors };
+  if (errors.length > 0) return { records: [], rows: [], errors };
+  const idIndex = columnIndex.get(normalizeHeader(ID_COLUMN_LABEL));
+  const archiveIndex = columnIndex.get(normalizeHeader(ARCHIVE_COLUMN_LABEL));
 
   const records: Array<Record<string, unknown>> = [];
+  const parsedRows: ImportRow[] = [];
   rows.forEach((row, rowIdx) => {
     const lineNo = rowIdx + 2;
     const isEmpty = fieldColumns.every(({ index }) => index === undefined || String(row[index] ?? "").trim() === "");
     if (isEmpty) return;
 
     const data: Record<string, unknown> = {};
+    const cleared: string[] = [];
     for (const { field, index } of fieldColumns) {
       const raw = index === undefined ? "" : String(row[index] ?? "").trim();
 
@@ -108,7 +137,10 @@ export function parseImportRows(fields: SheetField[], headers: string[], rows: C
 
       if (raw === "") {
         if (field.required) errors.push(`Строка ${lineNo}: поле «${field.label}» обязательно`);
-        else data[field.name] = field.defaultValue;
+        else {
+          data[field.name] = field.defaultValue;
+          if (index !== undefined) cleared.push(field.name);
+        }
         continue;
       }
 
@@ -131,12 +163,29 @@ export function parseImportRows(fields: SheetField[], headers: string[], rows: C
         if (date) data[field.name] = date;
         else errors.push(`Строка ${lineNo}: «${raw}» в поле «${field.label}» — дата должна быть в виде ГГГГ-ММ-ДД или ДД.ММ.ГГГГ`);
       } else {
-        data[field.name] = raw;
+        const invalid = field.validate?.(raw);
+        if (invalid) errors.push(`Строка ${lineNo}: поле «${field.label}»: ${invalid}`);
+        else data[field.name] = raw;
       }
     }
+
+    const archiveRaw = archiveIndex === undefined ? "" : String(row[archiveIndex] ?? "").trim().toLowerCase();
+    let archived: boolean | null = null;
+    if (ARCHIVED_VALUES.has(archiveRaw)) archived = true;
+    else if (ACTIVE_VALUES.has(archiveRaw)) archived = false;
+    else if (archiveRaw) errors.push(`Строка ${lineNo}: «${archiveRaw}» в колонке «${ARCHIVE_COLUMN_LABEL}» — ожидается «Активна» или «В архиве»`);
+
     records.push(data);
+    parsedRows.push({
+      line: lineNo,
+      id: idIndex === undefined ? null : String(row[idIndex] ?? "").trim() || null,
+      data,
+      cleared,
+      present: fieldColumns.filter(({ index }) => index !== undefined).map(({ field }) => field.name),
+      archived,
+    });
   });
 
   if (records.length === 0 && errors.length === 0) errors.push("В файле нет строк с данными");
-  return { records: errors.length > 0 ? [] : records, errors };
+  return errors.length > 0 ? { records: [], rows: [], errors } : { records, rows: parsedRows, errors };
 }

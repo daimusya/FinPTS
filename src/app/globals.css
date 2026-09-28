@@ -1107,3 +1107,25 @@ tbody tr:hover {
     padding: 18px;
   }
 }
+
+/* Dictionary import: what to do with existing records. */
+.import-mode {
+  border: 1px solid var(--color-graphite-150);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px 10px;
+  margin-top: 14px;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.import-mode legend {
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+.import-mode label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

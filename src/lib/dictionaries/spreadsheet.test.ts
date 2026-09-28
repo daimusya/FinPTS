@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ARCHIVE_COLUMN_LABEL, buildExportRows, parseImportRows, type SheetField } from "./spreadsheet";
+import { ARCHIVE_COLUMN_LABEL, buildExportRows, ID_COLUMN_LABEL, parseImportRows, type SheetField } from "./spreadsheet";
 
 const fields: SheetField[] = [
   { name: "name", label: "Название", type: "text", required: true },
@@ -21,9 +21,9 @@ const fields: SheetField[] = [
 ];
 
 describe("buildExportRows", () => {
-  it("uses field labels as headers plus an archive-status column", () => {
+  it("uses field labels as headers plus archive-status and record-ID columns", () => {
     const [header] = buildExportRows(fields, []);
-    expect(header).toEqual(["Название", "Тип", "ИНН", "Статус", "Посредник", "Сумма", "Дата начала", ARCHIVE_COLUMN_LABEL]);
+    expect(header).toEqual(["Название", "Тип", "ИНН", "Статус", "Посредник", "Сумма", "Дата начала", ARCHIVE_COLUMN_LABEL, ID_COLUMN_LABEL]);
   });
 
   it("renders select values as labels, booleans as да/нет, dates as ISO, empty as blank", () => {
@@ -37,9 +37,10 @@ describe("buildExportRows", () => {
         amount: "1500.50",
         startDate: new Date(Date.UTC(2026, 8, 1)),
         isArchived: false,
+        id: "rec-1",
       },
     ]);
-    expect(row).toEqual(["ООО Ромашка", "Юридическое лицо", "", "Активный", "да", 1500.5, "2026-09-01", "Активна"]);
+    expect(row).toEqual(["ООО Ромашка", "Юридическое лицо", "", "Активный", "да", 1500.5, "2026-09-01", "Активна", "rec-1"]);
   });
 });
 
@@ -116,5 +117,26 @@ describe("parseImportRows", () => {
 
   it("reports a file with a header but no data", () => {
     expect(parseImportRows(fields, headers, []).errors).toEqual(["В файле нет строк с данными"]);
+  });
+});
+
+describe("parseImportRows — data for updating existing records", () => {
+  it("reads the record ID and archive status, and lists present and emptied columns", () => {
+    const result = parseImportRows(fields, ["Название", "Тип", "ИНН", ARCHIVE_COLUMN_LABEL, ID_COLUMN_LABEL], [
+      ["ООО Ромашка", "ИП", "", "В архиве", "rec-1"],
+      ["ООО Лютик", "ИП", "7707083893", "", ""],
+    ]);
+    expect(result.errors).toEqual([]);
+    expect(result.rows[0]).toMatchObject({ line: 2, id: "rec-1", archived: true, cleared: ["inn"], present: ["name", "type", "inn"] });
+    expect(result.rows[1]).toMatchObject({ line: 3, id: null, archived: null, cleared: [] });
+  });
+
+  it("rejects an unknown archive status and applies the field's own check", () => {
+    const withInnCheck = fields.map((f) => (f.name === "inn" ? { ...f, validate: (v: string) => (v === "7707083894" ? "не сходится контрольная цифра" : null) } : f));
+    const result = parseImportRows(withInnCheck, ["Название", "Тип", "ИНН", ARCHIVE_COLUMN_LABEL], [["А", "ИП", "7707083894", "удалена"]]);
+    expect(result.errors).toEqual([
+      "Строка 2: поле «ИНН»: не сходится контрольная цифра",
+      `Строка 2: «удалена» в колонке «${ARCHIVE_COLUMN_LABEL}» — ожидается «Активна» или «В архиве»`,
+    ]);
   });
 });

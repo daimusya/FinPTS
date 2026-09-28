@@ -10,6 +10,7 @@ export async function resolveSheetFields(config: DictionaryConfig): Promise<Shee
       type: field.type,
       required: field.required,
       defaultValue: field.defaultValue,
+      validate: field.validate,
       options: field.options ?? (field.loadOptions ? await field.loadOptions() : undefined),
     })),
   );

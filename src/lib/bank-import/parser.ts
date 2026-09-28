@@ -46,10 +46,17 @@ function parseTxt(buffer: Buffer): ParsedSheet {
 }
 
 export function parseSpreadsheet(buffer: Buffer, fileName: string): ParsedSheet {
-  const lower = fileName.toLowerCase();
-  if (lower.endsWith(".txt")) {
+  if (fileName.toLowerCase().endsWith(".txt")) {
     return parseTxt(buffer);
   }
+  const [first] = parseWorkbookSheets(buffer, fileName);
+  return first ? first.sheet : { headers: [], rows: [] };
+}
+
+/** Все листы книги по порядку (у CSV и TXT — один лист). */
+export function parseWorkbookSheets(buffer: Buffer, fileName: string): Array<{ name: string; sheet: ParsedSheet }> {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".txt")) return [{ name: "", sheet: parseTxt(buffer) }];
 
   // SheetJS reads a CSV buffer as Latin-1, garbling Cyrillic — hand it already-decoded text instead.
   // raw: CSV cells stay text — otherwise 01.09.2026 is guessed as a US date (9 January) and an INN
@@ -57,9 +64,10 @@ export function parseSpreadsheet(buffer: Buffer, fileName: string): ParsedSheet 
   const workbook = lower.endsWith(".csv")
     ? XLSX.read(decodeText(buffer), { type: "string", raw: true })
     : XLSX.read(buffer, { type: "buffer", cellNF: true });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) return { headers: [], rows: [] };
-  const sheet = workbook.Sheets[sheetName];
+  return workbook.SheetNames.map((name) => ({ name, sheet: sheetToParsed(workbook.Sheets[name]) }));
+}
+
+function sheetToParsed(sheet: XLSX.WorkSheet): ParsedSheet {
   convertDateCells(sheet);
   const table = XLSX.utils.sheet_to_json<Array<string | number | null>>(sheet, {
     header: 1,
