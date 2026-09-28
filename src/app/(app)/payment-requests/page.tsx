@@ -4,30 +4,8 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney } from "@/lib/money";
 import { roleForStep, totalSteps, type ApprovalRouteCandidate } from "@/lib/payment-requests/approval";
-import {
-  approvePaymentRequestAction,
-  cancelPaymentRequestAction,
-  markPaymentRequestPaidAction,
-  rejectPaymentRequestAction,
-} from "./actions";
-
-const STATUS_LABELS: Record<string, string> = {
-  DRAFT: "Черновик",
-  PENDING_APPROVAL: "На согласовании",
-  APPROVED: "Согласована",
-  REJECTED: "Отклонена",
-  PAID: "Оплачена",
-  CANCELLED: "Отменена",
-};
-
-const STATUS_BADGE: Record<string, string> = {
-  DRAFT: "badge-archived",
-  PENDING_APPROVAL: "badge-warning",
-  APPROVED: "badge-active",
-  REJECTED: "badge-danger",
-  PAID: "badge-orange",
-  CANCELLED: "badge-archived",
-};
+import { approvePaymentRequestAction, cancelPaymentRequestAction, markPaymentRequestPaidAction } from "./actions";
+import { PAYMENT_REQUEST_STATUS_BADGE as STATUS_BADGE, PAYMENT_REQUEST_STATUS_LABELS as STATUS_LABELS } from "@/lib/payment-requests/labels";
 
 export default async function PaymentRequestsPage({
   searchParams,
@@ -51,6 +29,7 @@ export default async function PaymentRequestsPage({
         cashFlowArticle: true,
         createdBy: true,
         route: { include: { steps: { include: { role: true } } } },
+        approvals: { orderBy: { decidedAt: "desc" }, take: 1 },
       },
     }),
     prisma.userRole.findMany({ where: { userId: session.userId }, select: { roleId: true } }),
@@ -127,7 +106,9 @@ export default async function PaymentRequestsPage({
 
               return (
                 <tr key={req.id}>
-                  <td className="mono">{req.dueDate.toLocaleDateString("ru-RU")}</td>
+                  <td className="mono">
+                    <Link href={`/payment-requests/${req.id}`}>{req.dueDate.toLocaleDateString("ru-RU")}</Link>
+                  </td>
                   <td>{req.organization.shortName || req.organization.name}</td>
                   <td>{req.counterparty ? req.counterparty.shortName || req.counterparty.fullName : "—"}</td>
                   <td>{req.cashFlowArticle?.name ?? "—"}</td>
@@ -145,21 +126,26 @@ export default async function PaymentRequestsPage({
                   </td>
                   <td>
                     <span className={`badge ${STATUS_BADGE[req.status]}`}>{STATUS_LABELS[req.status]}</span>
+                    {req.approvals[0]?.comment ? (
+                      <div className="text-muted" style={{ fontSize: 12, marginTop: 4, maxWidth: 220 }} title={req.approvals[0].comment}>
+                        «{req.approvals[0].comment.length > 60 ? `${req.approvals[0].comment.slice(0, 60)}…` : req.approvals[0].comment}»
+                      </div>
+                    ) : null}
                   </td>
                   <td>
                     <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
                       {canActOnStep ? (
                         <>
                           <form action={approvePaymentRequestAction.bind(null, req.id)}>
+                            <input type="hidden" name="expectedStep" value={req.currentStep} />
                             <button type="submit" className="btn btn-primary btn-sm">
                               Согласовать
                             </button>
                           </form>
-                          <form action={rejectPaymentRequestAction.bind(null, req.id)}>
-                            <button type="submit" className="btn btn-danger btn-sm">
-                              Отклонить
-                            </button>
-                          </form>
+                          {/* Rejection needs a reason, so it is done on the request page. */}
+                          <Link href={`/payment-requests/${req.id}#decision`} className="btn btn-danger btn-sm">
+                            Отклонить…
+                          </Link>
                         </>
                       ) : null}
                       {canPay && req.status === "APPROVED" ? (
@@ -176,6 +162,9 @@ export default async function PaymentRequestsPage({
                           </button>
                         </form>
                       ) : null}
+                      <Link href={`/payment-requests/${req.id}`} className="btn btn-ghost btn-sm">
+                        История
+                      </Link>
                     </div>
                   </td>
                 </tr>

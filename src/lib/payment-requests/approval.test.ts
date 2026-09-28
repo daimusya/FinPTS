@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { isFinalStep, roleForStep, selectApprovalRoute, totalSteps, type ApprovalRouteCandidate } from "./approval";
+import {
+  buildApprovalTimeline,
+  isFinalStep,
+  parseDecisionComment,
+  roleForStep,
+  selectApprovalRoute,
+  totalSteps,
+  type ApprovalRouteCandidate,
+} from "./approval";
 
 function route(overrides: Partial<ApprovalRouteCandidate> = {}): ApprovalRouteCandidate {
   return {
@@ -70,5 +78,73 @@ describe("step helpers", () => {
   it("isFinalStep is true only at or past the last step", () => {
     expect(isFinalStep(r, 1)).toBe(false);
     expect(isFinalStep(r, 2)).toBe(true);
+  });
+});
+
+describe("parseDecisionComment", () => {
+  it("makes the comment optional on approval and required on rejection", () => {
+    expect(parseDecisionComment("approved", "  ")).toEqual({ comment: null });
+    expect(parseDecisionComment("approved", " Согласовано, оплатить до пятницы ")).toEqual({ comment: "Согласовано, оплатить до пятницы" });
+    expect(parseDecisionComment("rejected", "")).toHaveProperty("error", expect.stringContaining("причину"));
+    expect(parseDecisionComment("rejected", "Нет договора")).toEqual({ comment: "Нет договора" });
+  });
+
+  it("limits the length", () => {
+    expect(parseDecisionComment("approved", "а".repeat(1001))).toHaveProperty("error");
+    expect(parseDecisionComment("approved", "а".repeat(1000))).toHaveProperty("comment");
+  });
+});
+
+describe("buildApprovalTimeline", () => {
+  const steps = [
+    { stepOrder: 2, roleName: "Финансовый директор" },
+    { stepOrder: 1, roleName: "Руководитель подразделения" },
+    { stepOrder: 3, roleName: "Генеральный директор" },
+  ];
+  const decision = (stepOrder: number | null, value: string, minute: number, comment: string | null = null) => ({
+    stepOrder,
+    decision: value,
+    approverName: `Согласующий ${minute}`,
+    decidedAt: new Date(2026, 8, 28, 10, minute),
+    comment,
+  });
+
+  it("shows decided, current and upcoming steps of a request in progress", () => {
+    const t = buildApprovalTimeline({ steps, decisions: [decision(1, "approved", 5, "ок")], currentStep: 2, status: "PENDING_APPROVAL" });
+    expect(t.map((e) => [e.stepOrder, e.state])).toEqual([
+      [1, "approved"],
+      [2, "current"],
+      [3, "waiting"],
+    ]);
+    expect(t[0].decisions[0]).toMatchObject({ approverName: "Согласующий 5", comment: "ок" });
+  });
+
+  it("marks the steps after a rejection as not reached", () => {
+    const t = buildApprovalTimeline({
+      steps,
+      decisions: [decision(2, "rejected", 9, "Нет договора"), decision(1, "approved", 5)],
+      currentStep: 2,
+      status: "REJECTED",
+    });
+    expect(t.map((e) => e.state)).toEqual(["approved", "rejected", "not_reached"]);
+  });
+
+  it("keeps decisions on steps that were later removed from the route", () => {
+    const t = buildApprovalTimeline({
+      steps: steps.slice(0, 2),
+      decisions: [decision(1, "approved", 1), decision(2, "approved", 2), decision(3, "approved", 3)],
+      currentStep: 3,
+      status: "APPROVED",
+    });
+    expect(t.at(-1)).toMatchObject({ stepOrder: 3, state: "approved", removedFromRoute: true, roleName: null });
+  });
+
+  it("handles single-step approval without a route", () => {
+    expect(buildApprovalTimeline({ steps: [], decisions: [], currentStep: 1, status: "PENDING_APPROVAL" })).toEqual([
+      { stepOrder: null, roleName: null, state: "current", decisions: [], removedFromRoute: false },
+    ]);
+    const t = buildApprovalTimeline({ steps: [], decisions: [decision(null, "approved", 1, "Да")], currentStep: 1, status: "PAID" });
+    expect(t[0]).toMatchObject({ state: "approved", decisions: [{ comment: "Да" }] });
+    expect(buildApprovalTimeline({ steps: [], decisions: [], currentStep: 1, status: "CANCELLED" })[0].state).toBe("not_reached");
   });
 });

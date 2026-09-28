@@ -7,7 +7,15 @@ import { requirePermission, requireSession, hasPermission } from "@/lib/session"
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { PaymentRequestStatus } from "@prisma/client";
-import { selectApprovalRoute, roleForStep, isFinalStep, type ApprovalRouteCandidate } from "@/lib/payment-requests/approval";
+import { PAYMENT_REQUEST_STATUS_LABELS } from "@/lib/payment-requests/labels";
+import {
+  selectApprovalRoute,
+  roleForStep,
+  isFinalStep,
+  parseDecisionComment,
+  type ApprovalDecision,
+  type ApprovalRouteCandidate,
+} from "@/lib/payment-requests/approval";
 
 async function loadActiveRoutes(): Promise<ApprovalRouteCandidate[]> {
   const routes = await prisma.paymentApprovalRoute.findMany({
@@ -73,11 +81,23 @@ const TRANSITION_PERMISSION: Record<string, (typeof PERMISSIONS)[keyof typeof PE
   [PaymentRequestStatus.PAID]: PERMISSIONS.CASH_MANAGE,
 };
 
-async function transition(id: string, status: PaymentRequestStatus, action: string) {
+const TRANSITION_FROM: Partial<Record<PaymentRequestStatus, PaymentRequestStatus[]>> = {
+  [PaymentRequestStatus.CANCELLED]: [PaymentRequestStatus.PENDING_APPROVAL, PaymentRequestStatus.APPROVED],
+  [PaymentRequestStatus.PAID]: [PaymentRequestStatus.APPROVED],
+};
+
+async function transition(id: string, status: PaymentRequestStatus, action: string, formData?: FormData) {
   const session = await requirePermission(TRANSITION_PERMISSION[status]);
 
   const before = await prisma.paymentRequest.findUniqueOrThrow({ where: { id } });
-  const updated = await prisma.paymentRequest.update({ where: { id }, data: { status } });
+  // A stale page must not mark a cancelled request as paid or cancel a paid one.
+  const allowedFrom = TRANSITION_FROM[status] ?? [];
+  const moved = await prisma.paymentRequest.updateMany({ where: { id, status: { in: allowedFrom } }, data: { status } });
+  if (moved.count === 0) {
+    const backTo = formData?.get("returnTo") === "detail" ? `/payment-requests/${id}` : "/payment-requests";
+    redirect(`${backTo}?error=${encodeURIComponent(`Заявка уже в статусе «${PAYMENT_REQUEST_STATUS_LABELS[before.status]}» — действие не выполнено`)}`);
+  }
+  const updated = await prisma.paymentRequest.findUniqueOrThrow({ where: { id } });
 
   await logAudit({
     userId: session.userId,
@@ -89,7 +109,9 @@ async function transition(id: string, status: PaymentRequestStatus, action: stri
   });
 
   revalidatePath("/payment-requests");
+  revalidatePath(`/payment-requests/${id}`);
   revalidatePath("/payment-calendar");
+  if (formData?.get("returnTo") === "detail") redirect(`/payment-requests/${id}`);
 }
 
 /**
@@ -100,8 +122,15 @@ async function transition(id: string, status: PaymentRequestStatus, action: stri
  * подразделения» может согласовать свой шаг, даже не имея этого общего
  * права.
  */
-async function decideStep(id: string, decision: "approved" | "rejected") {
+async function decideStep(id: string, decision: ApprovalDecision, formData: FormData) {
   const session = await requireSession();
+  // Decisions come from the request page or from the list; errors go back to the same place.
+  const backTo = formData.get("returnTo") === "detail" ? `/payment-requests/${id}` : "/payment-requests";
+  const fail = (message: string): never => redirect(`${backTo}?error=${encodeURIComponent(message)}`);
+
+  const parsedComment = parseDecisionComment(decision, formData.get("comment"));
+  if ("error" in parsedComment) fail(parsedComment.error);
+  const comment = (parsedComment as { comment: string | null }).comment;
 
   const request = await prisma.paymentRequest.findUniqueOrThrow({
     where: { id },
@@ -109,7 +138,12 @@ async function decideStep(id: string, decision: "approved" | "rejected") {
   });
 
   if (request.status !== PaymentRequestStatus.PENDING_APPROVAL) {
-    redirect(`/payment-requests?error=${encodeURIComponent("Заявка уже не на согласовании")}`);
+    fail("Заявка уже не на согласовании");
+  }
+  // The page may be stale: someone else could have decided this step meanwhile.
+  const expectedStep = Number(formData.get("expectedStep") ?? request.currentStep);
+  if (expectedStep !== request.currentStep) {
+    fail("По этой заявке уже принято решение на шаге " + expectedStep + " — проверьте историю согласования");
   }
 
   const isAdmin = hasPermission(session, PERMISSIONS.ADMIN_FULL);
@@ -117,7 +151,7 @@ async function decideStep(id: string, decision: "approved" | "rejected") {
 
   if (!request.route) {
     if (!isAdmin && !hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE)) {
-      redirect(`/payment-requests?error=${encodeURIComponent("Недостаточно прав для согласования этой заявки")}`);
+      fail("Недостаточно прав для согласования этой заявки");
     }
   } else {
     stepOrder = request.currentStep;
@@ -137,7 +171,7 @@ async function decideStep(id: string, decision: "approved" | "rejected") {
         ? await prisma.userRole.findFirst({ where: { userId: session.userId, roleId: requiredRoleId } })
         : null;
       if (!hasRole) {
-        redirect(`/payment-requests?error=${encodeURIComponent("Вы не назначены согласующим на этом шаге маршрута")}`);
+        fail("Вы не назначены согласующим на этом шаге маршрута");
       }
     }
   }
@@ -160,17 +194,24 @@ async function decideStep(id: string, decision: "approved" | "rejected") {
   const nextStatus =
     decision === "rejected" ? PaymentRequestStatus.REJECTED : isFinal ? PaymentRequestStatus.APPROVED : PaymentRequestStatus.PENDING_APPROVAL;
 
-  const updated = await prisma.paymentRequest.update({
-    where: { id },
-    data: {
-      status: nextStatus,
-      currentStep: decision === "approved" && !isFinal ? request.currentStep + 1 : request.currentStep,
-    },
+  // Conditional update: only if the request is still on this step, so two approvers
+  // pressing the button at once cannot both decide it. The decision is written in the same transaction.
+  const decided = await prisma.$transaction(async (db) => {
+    const moved = await db.paymentRequest.updateMany({
+      where: { id, status: PaymentRequestStatus.PENDING_APPROVAL, currentStep: request.currentStep },
+      data: {
+        status: nextStatus,
+        currentStep: decision === "approved" && !isFinal ? request.currentStep + 1 : request.currentStep,
+      },
+    });
+    if (moved.count === 0) return null;
+    await db.paymentRequestApproval.create({
+      data: { paymentRequestId: id, approverId: session.userId, decision, stepOrder, comment },
+    });
+    return db.paymentRequest.findUniqueOrThrow({ where: { id } });
   });
-
-  await prisma.paymentRequestApproval.create({
-    data: { paymentRequestId: id, approverId: session.userId, decision, stepOrder },
-  });
+  if (!decided) fail("По этой заявке только что принято другое решение — проверьте историю согласования");
+  const updated = decided!;
 
   await logAudit({
     userId: session.userId,
@@ -178,25 +219,27 @@ async function decideStep(id: string, decision: "approved" | "rejected") {
     entityId: id,
     action: decision === "approved" ? "approve_step" : "reject_step",
     before: before as never,
-    after: updated as never,
+    after: { ...updated, decisionComment: comment, decidedStep: stepOrder } as never,
   });
 
   revalidatePath("/payment-requests");
+  revalidatePath(`/payment-requests/${id}`);
   revalidatePath("/payment-calendar");
+  if (backTo !== "/payment-requests") redirect(backTo);
 }
 
-export async function approvePaymentRequestAction(id: string) {
-  await decideStep(id, "approved");
+export async function approvePaymentRequestAction(id: string, formData: FormData) {
+  await decideStep(id, "approved", formData);
 }
 
-export async function rejectPaymentRequestAction(id: string) {
-  await decideStep(id, "rejected");
+export async function rejectPaymentRequestAction(id: string, formData: FormData) {
+  await decideStep(id, "rejected", formData);
 }
 
-export async function markPaymentRequestPaidAction(id: string) {
-  await transition(id, PaymentRequestStatus.PAID, "mark_paid");
+export async function markPaymentRequestPaidAction(id: string, formData?: FormData) {
+  await transition(id, PaymentRequestStatus.PAID, "mark_paid", formData);
 }
 
-export async function cancelPaymentRequestAction(id: string) {
-  await transition(id, PaymentRequestStatus.CANCELLED, "cancel");
+export async function cancelPaymentRequestAction(id: string, formData?: FormData) {
+  await transition(id, PaymentRequestStatus.CANCELLED, "cancel", formData);
 }

@@ -521,6 +521,86 @@ tbody tr:hover {
   color: var(--color-orange-dark);
 }
 
+/* Label/value pairs on a record page. */
+.detail-list {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr;
+  gap: 8px 20px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.detail-list dt {
+  color: var(--color-graphite-500);
+}
+
+.detail-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .detail-list {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  .detail-list dd {
+    margin-bottom: 8px;
+  }
+}
+
+/* Approval route: one entry per step, a rail on the left coloured by the step's state. */
+.approval-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.approval-step {
+  border-left: 3px solid var(--color-graphite-150);
+  padding: 4px 0 4px 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.approval-step--approved {
+  border-left-color: var(--color-success);
+}
+
+.approval-step--rejected {
+  border-left-color: var(--color-danger);
+}
+
+.approval-step--current {
+  border-left-color: var(--color-warning);
+}
+
+.approval-step__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.approval-step__decision {
+  display: grid;
+  gap: 4px;
+}
+
+.approval-comment {
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--color-graphite-50);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .filter-bar {
   display: flex;
   flex-wrap: wrap;
