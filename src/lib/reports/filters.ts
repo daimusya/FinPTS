@@ -10,6 +10,9 @@ export interface ReportFilters {
 export interface ReportSearchParams {
   year?: string;
   month?: string;
+  /** Длина периода: month (по умолчанию), quarter, year. */
+  span?: string;
+  quarter?: string;
   organizationId?: string;
   departmentId?: string;
   costCenterId?: string;

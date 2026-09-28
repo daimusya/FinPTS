@@ -12,35 +12,56 @@ export interface PlanItem {
   amount: Decimal;
 }
 
-export type PlanAvailability =
-  | { available: true; /** null — все записи плана, включая план по компании в целом. */ organizationIds: string[] | null }
-  | { available: false; reason: string };
+/** Разрез плана: подразделение, ЦФО или проект (у записи плана — не больше одного). */
+export type PlanDimensionField = "departmentId" | "costCenterId" | "projectId";
+
+/** Какие записи плана брать для отчёта. */
+export interface PlanSlice {
+  /** null — все записи плана, включая план по компании в целом. */
+  organizationIds: string[] | null;
+  /** Фильтр отчёта по разрезу — тогда только план этого подразделения / ЦФО / проекта. */
+  dimension: { field: PlanDimensionField; id: string } | null;
+}
+
+export type PlanAvailability = { available: true; slice: PlanSlice } | { available: false; reason: string };
 
 /**
  * Можно ли честно сравнить факт отчёта с планом. План задаётся по статьям —
- * по компании в целом или по организации, — поэтому при фильтре по
- * подразделению, ЦФО, проекту, продукту или контрагенту (и при доступе,
- * ограниченном подразделениями или проектами) факт — лишь часть статьи, и
- * сравнение с планом всей статьи вводило бы в заблуждение.
+ * по компании, организации и, при желании, по одному разрезу (подразделение,
+ * ЦФО или проект). Отчёт по подразделению сравнивается с планом этого
+ * подразделения, и т. д. При фильтре по продукту или контрагенту, по двум
+ * разрезам сразу и при доступе, ограниченном подразделениями или проектами
+ * (если отчёт не отфильтрован именно по доступному подразделению/проекту),
+ * факт — лишь часть статьи, и сравнение с планом вводило бы в заблуждение.
  */
 export function resolvePlanAvailability(filters: ReportFilters, scope: AccessScope): PlanAvailability {
-  if (filters.departmentId || filters.costCenterId || filters.projectId || filters.productServiceId || filters.counterpartyId) {
+  if (filters.productServiceId || filters.counterpartyId) {
     return {
       available: false,
-      reason:
-        "План задаётся по статьям для компании в целом или для организации, поэтому при фильтре по подразделению, ЦФО, проекту, продукту или контрагенту сравнение с планом не показывается.",
+      reason: "План задаётся по статьям (и при желании по подразделению, ЦФО или проекту), а не по продуктам и контрагентам, поэтому при таком фильтре сравнение с планом не показывается.",
     };
   }
-  if (scope.departmentIds !== null || scope.projectIds !== null) {
+  const dims = ([
+    ["departmentId", filters.departmentId],
+    ["costCenterId", filters.costCenterId],
+    ["projectId", filters.projectId],
+  ] as const).filter(([, id]) => id);
+  if (dims.length > 1) {
+    return { available: false, reason: "План задаётся по одному разрезу — выберите в фильтре что-то одно: подразделение, ЦФО или проект." };
+  }
+  const dimension = dims[0] ? { field: dims[0][0], id: dims[0][1]! } : null;
+  const coveredByScope =
+    (scope.departmentIds === null || (dimension?.field === "departmentId" && scope.departmentIds.includes(dimension.id))) &&
+    (scope.projectIds === null || (dimension?.field === "projectId" && scope.projectIds.includes(dimension.id)));
+  if (!coveredByScope) {
     return {
       available: false,
-      reason:
-        "Ваш доступ ограничен подразделениями или проектами — факт в отчёте неполный, поэтому сравнение с планом не показывается.",
+      reason: "Ваш доступ ограничен подразделениями или проектами — выберите в фильтре своё подразделение или проект, чтобы сравнить с его планом.",
     };
   }
-  if (filters.organizationId) return { available: true, organizationIds: [filters.organizationId] };
   // Restricted to some organizations: the company-wide plan can't be split between them, so only their own plans count.
-  return { available: true, organizationIds: scope.organizationIds };
+  const organizationIds = filters.organizationId ? [filters.organizationId] : scope.organizationIds;
+  return { available: true, slice: { organizationIds, dimension } };
 }
 
 export interface PlanFactMetrics {

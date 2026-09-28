@@ -1,8 +1,9 @@
 import Link from "next/link";
+import { budgetDim, planSliceNote } from "@/lib/budget/report-links";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney } from "@/lib/money";
-import { resolveReportPeriod } from "@/lib/reports/period";
+import { periodMonths, periodQuery, resolveReportPeriod } from "@/lib/reports/period";
 import { extractFilters, type ReportSearchParams } from "@/lib/reports/filters";
 import { computeCashFlowReport, type CashFlowArticleRow } from "@/lib/reports/cashflow";
 import { ReportFilterBar } from "@/components/report-filter-bar";
@@ -43,7 +44,7 @@ export default async function CashFlowReportPage({
 
   const availability = resolvePlanAvailability(filters, scope);
   const planItems = availability.available
-    ? await loadPlanItems("CASH_FLOW", period.year, period.month, availability.organizationIds)
+    ? await loadPlanItems("CASH_FLOW", periodMonths(period), availability.slice)
     : [];
   const showPlan = planItems.length > 0;
   const emptyRow = (item: { articleId: string; articleName: string }): CashFlowArticleRow => ({
@@ -56,11 +57,11 @@ export default async function CashFlowReportPage({
   const outflowRows = mergePlanIntoRows(report.outflowRows, planItems.filter((p) => p.group === "OUTFLOW"), emptyRow);
   const planInflow = planTotal(planItems, "INFLOW");
   const planOutflow = planTotal(planItems, "OUTFLOW");
-  const budgetHref = `/budget?kind=cash-flow&year=${period.year}${filters.organizationId ? `&org=${filters.organizationId}` : ""}`;
+  const budgetHref = `/budget?kind=cash-flow&year=${period.year}${filters.organizationId ? `&org=${filters.organizationId}` : ""}${budgetDim(filters)}`;
 
   const fromStr = period.from.toISOString().slice(0, 10);
   const toStr = period.to.toISOString().slice(0, 10);
-  const exportHref = `/api/reports/export?type=cash-flow&year=${period.year}&month=${period.month}${
+  const exportHref = `/api/reports/export?type=cash-flow&${periodQuery(period)}${
     filters.organizationId ? `&organizationId=${filters.organizationId}` : ""
   }${filters.departmentId ? `&departmentId=${filters.departmentId}` : ""}${
     filters.costCenterId ? `&costCenterId=${filters.costCenterId}` : ""
@@ -87,6 +88,7 @@ export default async function CashFlowReportPage({
         values={{
           year: period.year,
           month: period.month,
+          span: period.span,
           ...filters,
         }}
       />
@@ -118,7 +120,8 @@ export default async function CashFlowReportPage({
         ) : showPlan ? (
           <p className="text-muted">
             План-факт: план из раздела <Link href={budgetHref}>«Бюджет»</Link>
-            {filters.organizationId ? " по выбранной организации" : " (компания в целом и все организации)"}.
+            {planSliceNote(filters)}
+            {period.span && period.span !== "month" ? ` — сумма помесячного плана за ${period.label}` : ""}.
             Отклонение = факт − план; зелёным — в пользу компании (больше поступлений, меньше выплат), красным — нет.
           </p>
         ) : (

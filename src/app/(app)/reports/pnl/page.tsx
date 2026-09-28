@@ -1,9 +1,10 @@
 import Link from "next/link";
+import { budgetDim, planSliceNote } from "@/lib/budget/report-links";
 import { Fragment } from "react";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney, formatNumber } from "@/lib/money";
-import { resolveReportPeriod, previousPeriod } from "@/lib/reports/period";
+import { resolveReportPeriod, previousPeriod, periodMonths, periodQuery } from "@/lib/reports/period";
 import { extractFilters, type ReportSearchParams } from "@/lib/reports/filters";
 import {
   computePnlReport,
@@ -62,10 +63,10 @@ export default async function PnlReportPage({
   const availability = resolvePlanAvailability(filters, scope);
   const planItems =
     compareRequested === "plan" && availability.available
-      ? await loadPlanItems("PNL", period.year, period.month, availability.organizationIds)
+      ? await loadPlanItems("PNL", periodMonths(period), availability.slice)
       : [];
   const showPlan = planItems.length > 0;
-  const budgetHref = `/budget?kind=pnl&year=${period.year}${filters.organizationId ? `&org=${filters.organizationId}` : ""}`;
+  const budgetHref = `/budget?kind=pnl&year=${period.year}${filters.organizationId ? `&org=${filters.organizationId}` : ""}${budgetDim(filters)}`;
 
   const planByType = Object.fromEntries(PNL_TYPE_ORDER.map((type) => [type, planTotal(planItems, type)])) as Record<
     PnlType,
@@ -95,7 +96,7 @@ export default async function PnlReportPage({
 
   const fromStr = period.from.toISOString().slice(0, 10);
   const toStr = period.to.toISOString().slice(0, 10);
-  const exportHref = `/api/reports/export?type=pnl&year=${period.year}&month=${period.month}${
+  const exportHref = `/api/reports/export?type=pnl&${periodQuery(period)}${
     filters.organizationId ? `&organizationId=${filters.organizationId}` : ""
   }${filters.departmentId ? `&departmentId=${filters.departmentId}` : ""}${
     filters.costCenterId ? `&costCenterId=${filters.costCenterId}` : ""
@@ -115,11 +116,11 @@ export default async function PnlReportPage({
         </a>
       </div>
 
-      <ReportFilterBar values={{ year: period.year, month: period.month, ...filters }}>
+      <ReportFilterBar values={{ year: period.year, month: period.month, span: period.span, ...filters }}>
         <label className="field">
           <span>Сравнить с</span>
           <select name="compare" defaultValue={compareRequested}>
-            <option value="prior">Предыдущим месяцем</option>
+            <option value="prior">Предыдущим периодом</option>
             <option value="plan">Планом (бюджетом)</option>
           </select>
         </label>
@@ -128,17 +129,18 @@ export default async function PnlReportPage({
       {compareRequested === "plan" ? (
         <div className="card" style={{ marginBottom: 16 }}>
           {!availability.available ? (
-            <p className="text-muted">{availability.reason} Показано сравнение с предыдущим месяцем.</p>
+            <p className="text-muted">{availability.reason} Показано сравнение с предыдущим периодом.</p>
           ) : showPlan ? (
             <p className="text-muted">
               План из раздела <Link href={budgetHref}>«Бюджет»</Link>
-              {filters.organizationId ? " по выбранной организации" : " (компания в целом и все организации)"}.
+              {planSliceNote(filters)}
+              {period.span && period.span !== "month" ? ` — сумма помесячного плана за ${period.label}` : ""}.
               Отклонение = факт − план; зелёным — в пользу компании (больше доходов, меньше расходов), красным — нет.
             </p>
           ) : (
             <p className="text-muted">
               План на {period.label} не задан — заполните его в разделе <Link href={budgetHref}>«Бюджет»</Link>. Пока
-              показано сравнение с предыдущим месяцем.
+              показано сравнение с предыдущим периодом.
             </p>
           )}
         </div>

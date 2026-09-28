@@ -75,26 +75,39 @@ describe("planTotal", () => {
 
 describe("resolvePlanAvailability", () => {
   it("uses all plan entries for an unfiltered, unrestricted report", () => {
-    expect(resolvePlanAvailability({}, UNRESTRICTED_SCOPE)).toEqual({ available: true, organizationIds: null });
+    expect(resolvePlanAvailability({}, UNRESTRICTED_SCOPE)).toEqual({ available: true, slice: { organizationIds: null, dimension: null } });
   });
 
   it("uses only the selected organization's plan", () => {
     expect(resolvePlanAvailability({ organizationId: "org-1" }, UNRESTRICTED_SCOPE)).toEqual({
       available: true,
-      organizationIds: ["org-1"],
+      slice: { organizationIds: ["org-1"], dimension: null },
     });
   });
 
   it("limits the plan to the organizations a restricted user can see", () => {
     const scope = { organizationIds: ["org-2"], departmentIds: null, projectIds: null };
-    expect(resolvePlanAvailability({}, scope)).toEqual({ available: true, organizationIds: ["org-2"] });
+    expect(resolvePlanAvailability({}, scope)).toEqual({ available: true, slice: { organizationIds: ["org-2"], dimension: null } });
   });
 
-  it("hides the plan when the fact is only a slice of an article", () => {
-    expect(resolvePlanAvailability({ projectId: "p" }, UNRESTRICTED_SCOPE).available).toBe(false);
+  it("compares a department, cost center or project report with that dimension's plan", () => {
+    expect(resolvePlanAvailability({ projectId: "p" }, UNRESTRICTED_SCOPE)).toEqual({
+      available: true,
+      slice: { organizationIds: null, dimension: { field: "projectId", id: "p" } },
+    });
+    expect(resolvePlanAvailability({ organizationId: "o", costCenterId: "cc" }, UNRESTRICTED_SCOPE)).toEqual({
+      available: true,
+      slice: { organizationIds: ["o"], dimension: { field: "costCenterId", id: "cc" } },
+    });
+  });
+
+  it("hides the plan when the fact is only a part of what the plan covers", () => {
     expect(resolvePlanAvailability({ counterpartyId: "c" }, UNRESTRICTED_SCOPE).available).toBe(false);
+    expect(resolvePlanAvailability({ departmentId: "d", projectId: "p" }, UNRESTRICTED_SCOPE).available).toBe(false);
     const deptScope = { organizationIds: null, departmentIds: ["d"], projectIds: null };
     expect(resolvePlanAvailability({}, deptScope).available).toBe(false);
+    expect(resolvePlanAvailability({ departmentId: "other" }, deptScope).available).toBe(false);
+    expect(resolvePlanAvailability({ departmentId: "d" }, deptScope)).toMatchObject({ available: true, slice: { dimension: { id: "d" } } });
   });
 });
 

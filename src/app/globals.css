@@ -1129,3 +1129,18 @@ tbody tr:hover {
   align-items: center;
   gap: 8px;
 }
+
+/* Budget: plan levels that already exist and the Excel / copy tools. */
+.budget-levels {
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.budget-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}

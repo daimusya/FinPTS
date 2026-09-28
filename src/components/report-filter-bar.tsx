@@ -9,6 +9,7 @@ const MONTH_NAMES = [
 export interface ReportFilterValues {
   year: number;
   month: number;
+  span?: "month" | "quarter" | "year";
   organizationId?: string;
   departmentId?: string;
   costCenterId?: string;
@@ -41,6 +42,24 @@ export async function ReportFilterBar({
       <label className="field">
         <span>Год</span>
         <input type="number" name="year" defaultValue={values.year} style={{ width: 90 }} />
+      </label>
+      <label className="field">
+        <span>Период</span>
+        <select name="span" defaultValue={values.span ?? "month"}>
+          <option value="month">Месяц</option>
+          <option value="quarter">Квартал</option>
+          <option value="year">Год</option>
+        </select>
+      </label>
+      <label className="field">
+        <span>Квартал</span>
+        <select name="quarter" defaultValue={Math.floor((values.month - 1) / 3) + 1}>
+          {[1, 2, 3, 4].map((q) => (
+            <option key={q} value={q}>
+              {q} квартал
+            </option>
+          ))}
+        </select>
       </label>
       <label className="field">
         <span>Месяц</span>

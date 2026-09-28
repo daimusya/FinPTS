@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { requirePermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
-import { resolveReportPeriod } from "@/lib/reports/period";
+import { periodMonths, resolveReportPeriod, type ReportPeriod } from "@/lib/reports/period";
 import { extractFilters } from "@/lib/reports/filters";
 import { computeCashFlowReport } from "@/lib/reports/cashflow";
 import { computePnlReport, derivePnlTotals, PNL_TYPE_LABELS as TYPE_LABELS, PNL_TYPE_ORDER } from "@/lib/reports/pnl";
@@ -43,16 +43,13 @@ function planCells(m: PlanFactMetrics): Array<string | number> {
 }
 
 /** План для выгрузки — по тем же правилам, что и на экране; пусто, если с этими фильтрами план не сравним. */
-async function loadAvailablePlan(
-  kind: BudgetKind,
-  year: number,
-  month: number,
-  filters: ReportFilters,
-  scope: AccessScope,
-): Promise<PlanItem[]> {
+async function loadAvailablePlan(kind: BudgetKind, period: ReportPeriod, filters: ReportFilters, scope: AccessScope): Promise<PlanItem[]> {
   const availability = resolvePlanAvailability(filters, scope);
-  return availability.available ? loadPlanItems(kind, year, month, availability.organizationIds) : [];
+  return availability.available ? loadPlanItems(kind, periodMonths(period), availability.slice) : [];
 }
+
+const periodFileSuffix = (period: ReportPeriod) =>
+  period.span === "year" ? `${period.year}` : period.span === "quarter" ? `${period.year}_q${Math.floor((period.month - 1) / 3) + 1}` : `${period.year}_${period.month}`;
 
 const SCENARIO_HORIZON_MONTHS = 12;
 
@@ -80,7 +77,7 @@ export async function GET(request: NextRequest) {
   if (type === "cash-flow") {
     const period = resolveReportPeriod(sp);
     const report = await computeCashFlowReport(period, filters, scope);
-    const planItems = await loadAvailablePlan("CASH_FLOW", period.year, period.month, filters, scope);
+    const planItems = await loadAvailablePlan("CASH_FLOW", period, filters, scope);
     const withPlan = planItems.length > 0;
     const header = withPlan ? ["Статья", "Факт", ...PLAN_HEADERS] : ["Статья", "Сумма"];
     const articleRows = (rows: typeof report.inflowRows, group: string) =>
@@ -114,11 +111,11 @@ export async function GET(request: NextRequest) {
       ["Остаток на конец периода", toNum(report.closingBalance)],
     ];
     sheets = [{ name: "ДДС", rows }];
-    fileName = `dds_${period.year}_${period.month}.xlsx`;
+    fileName = `dds_${periodFileSuffix(period)}.xlsx`;
   } else if (type === "pnl") {
     const period = resolveReportPeriod(sp);
     const report = await computePnlReport(period, filters, scope);
-    const planItems = await loadAvailablePlan("PNL", period.year, period.month, filters, scope);
+    const planItems = await loadAvailablePlan("PNL", period, filters, scope);
     const withPlan = planItems.length > 0;
     const plan = (fact: Decimal, planned: Decimal | null) => (withPlan ? planCells(planFactMetrics(fact, planned)) : []);
     const rows: Array<Array<string | number>> = [["ОПиУ", period.label], []];
@@ -153,7 +150,7 @@ export async function GET(request: NextRequest) {
       ["Чистая прибыль", toNum(report.netProfit), ...plan(report.netProfit, planTotals.netProfit)],
     );
     sheets = [{ name: "ОПиУ", rows }];
-    fileName = `opiu_${period.year}_${period.month}.xlsx`;
+    fileName = `opiu_${periodFileSuffix(period)}.xlsx`;
   } else if (type === "debts") {
     const report = await computeDebtsReport(filters, scope);
     const receivableRows: Array<Array<string | number>> = [

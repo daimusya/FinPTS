@@ -49,7 +49,7 @@ export default async function MarginReportPage({
         </div>
       </div>
 
-      <ReportFilterBar values={{ year: period.year, month: period.month, ...filters }}>
+      <ReportFilterBar values={{ year: period.year, month: period.month, span: period.span, ...filters }}>
         <label className="field">
           <span>Драйвер косвенных расходов</span>
           <select name="driver" defaultValue={driver}>
