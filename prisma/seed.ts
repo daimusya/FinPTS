@@ -73,6 +73,9 @@ const INITIAL_PAYROLL_ACCRUAL_TYPES: Array<{
   { name: "Материальная помощь", code: "financial_aid", subjectToNdfl: false, subjectToInsurance: false, affectsAvgEarnings: false, paymentMethod: "BANK" },
   { name: "Разовая выплата", code: "one_off_payment", subjectToNdfl: true, subjectToInsurance: true, affectsAvgEarnings: false, paymentMethod: "BANK" },
   { name: "Удержание", code: "deduction", subjectToNdfl: false, subjectToInsurance: false, affectsAvgEarnings: false, paymentMethod: "BANK" },
+  { name: "Сверхурочные", code: "overtime_pay", subjectToNdfl: true, subjectToInsurance: true, affectsAvgEarnings: true, paymentMethod: "BANK" },
+  { name: "Работа в выходные и праздники", code: "weekend_pay", subjectToNdfl: true, subjectToInsurance: true, affectsAvgEarnings: true, paymentMethod: "BANK" },
+  { name: "Командировка (средний заработок)", code: "business_trip_pay", subjectToNdfl: true, subjectToInsurance: true, affectsAvgEarnings: false, paymentMethod: "BANK" },
 ];
 
 // systemCode marks lines the management balance derives from operations (see BalanceArticle in the schema).

@@ -899,6 +899,14 @@ model WorkSchedule {
   id         String  @id @default(cuid())
   name       String
   isArchived Boolean @default(false)
+  /// five_day — пятидневка по производственному календарю; shift — сменный «N через M».
+  kind       String   @default("five_day")
+  /// Часов в рабочем дне / смене.
+  hoursPerDay Decimal @default(8) @db.Decimal(4, 2)
+  /// Сменный график: смен подряд, выходных подряд и дата первой смены цикла.
+  cycleOn    Int?
+  cycleOff   Int?
+  anchorDate DateTime?
 
   employees Employee[]
 

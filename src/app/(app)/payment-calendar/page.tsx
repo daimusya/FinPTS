@@ -206,7 +206,8 @@ export default async function PaymentCalendarPage({
   const movements = scoped.filter((x) => x.where === "in" && x.item.counted).map((x) => toMovement(x.item));
 
   const calendar = new Map(
-    calendarDays.map((d) => [keyOf(d.date), { kind: d.kind === "workday" ? ("workday" as const) : ("holiday" as const), name: d.name }]),
+    // A shortened pre-holiday day is still a working day.
+    calendarDays.map((d) => [keyOf(d.date), { kind: d.kind === "holiday" ? ("holiday" as const) : ("workday" as const), name: d.name }]),
   );
   const weeks = buildMonthGrid({ month, todayKey, startingBalance: currentBalance, movements, calendar });
   const boardWeeks: BoardDay[][] = weeks.map((week) =>

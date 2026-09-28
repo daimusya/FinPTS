@@ -127,7 +127,11 @@ export default async function DictionaryListPage({
             {[...active, ...archived].map((item) => (
               <tr key={String(item.id)}>
                 {config.listColumns.map((col) => (
-                  <td key={col}>{LABELS[String(item[col])] ?? formatCell(item[col])}</td>
+                  <td key={col}>
+                    {config.fields.find((f) => f.name === col)?.options?.find((o) => o.value === String(item[col]))?.label ??
+                      LABELS[String(item[col])] ??
+                      formatCell(item[col])}
+                  </td>
                 ))}
                 <td>
                   <span className={`badge ${item.isArchived ? "badge-archived" : "badge-active"}`}>

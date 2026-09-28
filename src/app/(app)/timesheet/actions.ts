@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
-import { isWorkingDay, type CalendarOverrides } from "@/lib/payroll/work-calendar";
+import { isWorkingDay, type CalendarOverrides, toCalendarOverrides } from "@/lib/payroll/work-calendar";
 
 export async function bulkFillTimesheetAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
@@ -30,9 +30,7 @@ export async function bulkFillTimesheetAction(formData: FormData) {
   const calendarRows = skipWeekends
     ? await prisma.productionCalendarDay.findMany({ where: { isArchived: false, date: { gte: dateFrom, lte: dateTo } } })
     : [];
-  const calendar: CalendarOverrides = new Map(
-    calendarRows.map((r) => [r.date.toISOString().slice(0, 10), r.kind === "workday" ? "workday" : "holiday"]),
-  );
+  const calendar: CalendarOverrides = toCalendarOverrides(calendarRows);
   const dates: Date[] = [];
   for (let d = new Date(dateFrom); d <= dateTo; d.setUTCDate(d.getUTCDate() + 1)) {
     if (skipWeekends && !isWorkingDay(d, calendar)) continue;

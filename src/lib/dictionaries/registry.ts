@@ -127,7 +127,18 @@ export const PAYROLL_PARAMETER_OPTIONS: FieldOption[] = [
 const CALENDAR_DAY_KIND_OPTIONS: FieldOption[] = [
   { value: "holiday", label: "Нерабочий будний день (праздник, перенос)" },
   { value: "workday", label: "Рабочий выходной день (перенос)" },
+  { value: "short", label: "Сокращённый предпраздничный рабочий день (−1 час)" },
 ];
+
+const WORK_SCHEDULE_KIND_OPTIONS: FieldOption[] = [
+  { value: "five_day", label: "Пятидневка по производственному календарю" },
+  { value: "shift", label: "Сменный: N смен через M выходных" },
+];
+
+const intBetween = (min: number, max: number, label: string) => (value: string) => {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= min && n <= max ? null : `${label} — целое число от ${min} до ${max}`;
+};
 
 const BALANCE_ARTICLE_CATEGORY_OPTIONS: FieldOption[] = [
   { value: "ASSET", label: "Актив" },
@@ -397,8 +408,24 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
     permissionView: PERMISSIONS.MASTERDATA_VIEW,
     permissionManage: PERMISSIONS.MASTERDATA_MANAGE,
     orderBy: { name: "asc" },
-    listColumns: ["name"],
-    fields: [{ name: "name", label: "Название", type: "text", required: true }],
+    listColumns: ["name", "kind", "hoursPerDay"],
+    fields: [
+      { name: "name", label: "Название", type: "text", required: true },
+      { name: "kind", label: "Вид графика", type: "select", required: true, options: WORK_SCHEDULE_KIND_OPTIONS, defaultValue: "five_day" },
+      {
+        name: "hoursPerDay",
+        label: "Часов в рабочем дне / смене",
+        type: "number",
+        defaultValue: "8",
+        validate: (value) => {
+          const n = Number(value.replace(",", "."));
+          return n > 0 && n <= 24 ? null : "от 0 до 24 часов";
+        },
+      },
+      { name: "cycleOn", label: "Сменный: смен подряд", type: "number", validate: intBetween(1, 14, "Смен подряд") },
+      { name: "cycleOff", label: "Сменный: выходных подряд", type: "number", validate: intBetween(1, 14, "Выходных подряд") },
+      { name: "anchorDate", label: "Сменный: дата первой смены цикла", type: "date" },
+    ],
   },
   "payroll-accrual-types": {
     slug: "payroll-accrual-types",

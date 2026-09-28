@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { toDecimal } from "@/lib/money";
-import { computeProratedSalary, workingDays, type CalendarOverrides } from "./work-calendar";
+import Decimal from "decimal.js";
+import { computeExtraPay, computeProratedSalary, computeTripPay, isScheduledDay, monthWorkNorm, scheduledDays, toCalendarOverrides, workingDays, type CalendarOverrides, type WorkScheduleRule } from "./work-calendar";
 
 // Same rows as the production_calendar_and_line_comment migration.
 const HOLIDAYS = [
@@ -80,5 +81,114 @@ describe("computeProratedSalary", () => {
 
   it("refuses a year without a production calendar", () => {
     expect(() => computeProratedSalary({ ...base, year: 2027 })).toThrow("2027");
+  });
+});
+
+// Shortened pre-holiday days (ст. 95 ТК РФ) — the same rows as the work_schedules_and_extra_pay migration.
+const SHORT = ["2025-03-07", "2025-04-30", "2025-06-11", "2025-11-01", "2026-04-30", "2026-05-08", "2026-06-11", "2026-11-03"];
+const withShort: CalendarOverrides = new Map([...calendar, ...SHORT.map((d) => [d, "short"] as const)]);
+const five = { kind: "five_day", hoursPerDay: new Decimal(8) } as WorkScheduleRule;
+
+describe("working-time norms with shortened days", () => {
+  it("gives the official hour norms: 1972 in 2025 and in 2026", () => {
+    const yearHours = (y: number) =>
+      Array.from({ length: 12 }, (_, i) => monthWorkNorm(y, i + 1, five, withShort).hours).reduce((a, b) => a.plus(b), new Decimal(0));
+    expect(yearHours(2025).toNumber()).toBe(1972);
+    expect(yearHours(2026).toNumber()).toBe(1972);
+    expect(monthWorkNorm(2026, 4, five, withShort)).toEqual({ days: 22, hours: new Decimal(175) });
+    // A shortened working Saturday is still a working day.
+    expect(monthWorkNorm(2025, 11, five, withShort).days).toBe(19);
+  });
+
+  it("maps calendar rows, keeping short days as working ones", () => {
+    const overrides = toCalendarOverrides([
+      { date: utc(2026, 4, 30), kind: "short" },
+      { date: utc(2026, 5, 1), kind: "holiday" },
+      { date: utc(2025, 11, 1), kind: "workday" },
+    ]);
+    expect([...overrides.values()]).toEqual(["short", "holiday", "workday"]);
+  });
+});
+
+describe("shift schedule", () => {
+  const shift: WorkScheduleRule = { kind: "shift", hoursPerDay: new Decimal(12), cycleOn: 2, cycleOff: 2, anchorDate: utc(2026, 9, 1) };
+
+  it("plans shifts by the 2-on/2-off cycle regardless of weekends and holidays", () => {
+    const sep = scheduledDays(utc(2026, 9, 1), utc(2026, 9, 30), shift, calendar);
+    expect(sep).toHaveLength(16);
+    expect(sep.slice(0, 4)).toEqual(["2026-09-01", "2026-09-02", "2026-09-05", "2026-09-06"]);
+    expect(isScheduledDay(utc(2026, 8, 31), shift, calendar)).toBe(false);
+    expect(isScheduledDay(utc(2026, 8, 30), shift, calendar)).toBe(false);
+    expect(isScheduledDay(utc(2026, 8, 29), shift, calendar)).toBe(true);
+    expect(monthWorkNorm(2026, 9, shift, calendar).hours.toNumber()).toBe(192);
+  });
+
+  it("pays the salary by worked shifts", () => {
+    const r = computeProratedSalary({ ...base, salary: toDecimal(96000), schedule: shift, timesheet: new Map([["2026-09-05", new Set(["vacation"])]]) });
+    expect(r).toMatchObject({ normDays: 16, workedDays: 15 });
+    expect(r.amount.toNumber()).toBe(90000);
+    expect(r.comment).toBe("Отработано 15 из 16 смен месяца (отпуск 1)");
+  });
+});
+
+describe("computeExtraPay", () => {
+  const hours = (entries: Array<[string, string, number]>) => {
+    const map = new Map<string, Map<string, Decimal>>();
+    for (const [day, type, h] of entries) map.set(day, (map.get(day) ?? new Map()).set(type, new Decimal(h)));
+    return map;
+  };
+  const sep = { salary: toDecimal(176000), year: 2026, month: 9, schedule: five, calendar: withShort, hireDate: utc(2020, 1, 1), terminationDate: null };
+
+  it("pays overtime: the first 2 hours of a day at 1.5, the rest at 2", () => {
+    const r = computeExtraPay({ ...sep, hours: hours([["2026-09-10", "overtime", 3], ["2026-09-11", "overtime", 1]]), workedRegularHours: new Decimal(176) });
+    expect(r.hourlyRate.toNumber()).toBe(1000);
+    expect(r.overtime).toEqual({ days: 2, hours: new Decimal(4), amount: new Decimal(6500) });
+    expect(r.weekend.amount.toNumber()).toBe(0);
+  });
+
+  it("pays weekend work single within the monthly norm and double beyond it", () => {
+    const saturday = hours([["2026-09-12", "work", 0]]);
+    const full = computeExtraPay({ ...sep, hours: saturday, workedRegularHours: new Decimal(176) });
+    expect(full.weekend).toMatchObject({ days: 1, hours: new Decimal(8), withinNormHours: new Decimal(0), beyondNormHours: new Decimal(8) });
+    expect(full.weekend.amount.toNumber()).toBe(16000);
+    const afterVacationDay = computeExtraPay({ ...sep, hours: saturday, workedRegularHours: new Decimal(168) });
+    expect(afterVacationDay.weekend.amount.toNumber()).toBe(8000);
+  });
+
+  it("pays a shift worker's scheduled holiday shift at least single on top of the salary", () => {
+    const shift: WorkScheduleRule = { kind: "shift", hoursPerDay: new Decimal(12), cycleOn: 2, cycleOff: 2, anchorDate: utc(2026, 11, 3) };
+    const r = computeExtraPay({
+      salary: toDecimal(180000),
+      year: 2026,
+      month: 11,
+      schedule: shift,
+      calendar: withShort,
+      hireDate: utc(2020, 1, 1),
+      terminationDate: null,
+      hours: new Map(),
+      workedRegularHours: new Decimal(168),
+    });
+    expect(r.normHours.toNumber()).toBe(168);
+    expect(r.weekend).toMatchObject({ days: 1, withinNormHours: new Decimal(12), beyondNormHours: new Decimal(0) });
+    expect(r.weekend.amount.toNumber()).toBe(12857.14);
+  });
+});
+
+describe("computeTripPay", () => {
+  it("divides 12 months' earnings by the days actually worked", () => {
+    expect(computeTripPay({ tripDays: 3, totalEarnings: toDecimal(1200000), workedDays: 240, salary: null, monthNormDays: 22 })).toEqual({
+      avgDaily: new Decimal(5000),
+      amount: new Decimal(15000),
+      method: "average",
+    });
+  });
+
+  it("falls back to the salary for a day of the trip month", () => {
+    expect(computeTripPay({ tripDays: 2, totalEarnings: toDecimal(0), workedDays: 0, salary: toDecimal(110000), monthNormDays: 22 })).toMatchObject({
+      avgDaily: new Decimal(5000),
+      amount: new Decimal(10000),
+      method: "salary",
+    });
+    expect(() => computeTripPay({ tripDays: 1, totalEarnings: toDecimal(0), workedDays: 0, salary: null, monthNormDays: 22 })).toThrow();
   });
 });
