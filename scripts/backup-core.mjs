@@ -41,9 +41,9 @@ function escapeRegExp(value) {
  * свежих. Трогает только файлы ровно этого формата для этой базы — любые
  * другие файлы в папке (ручные копии, журнал) не удаляются никогда.
  */
-export function selectFilesToDelete(fileNames, database, keep) {
+export function selectFilesToDelete(fileNames, database, keep, suffix = ".dump") {
   if (!Number.isInteger(keep) || keep < 1) throw new Error("Число хранимых копий должно быть целым и не меньше 1");
-  const pattern = new RegExp(`^${escapeRegExp(database)}_\\d{4}-\\d{2}-\\d{2}_\\d{6}\\.dump$`);
+  const pattern = new RegExp(`^${escapeRegExp(database)}_\\d{4}-\\d{2}-\\d{2}_\\d{6}${escapeRegExp(suffix)}$`);
   const ours = fileNames.filter((name) => pattern.test(name)).sort();
   return ours.slice(0, Math.max(0, ours.length - keep));
 }
@@ -59,4 +59,35 @@ export function compareRowCounts(source, restored) {
     else if (restored[table] !== count) mismatches.push(`${table}: ${count} в базе, ${restored[table]} в копии`);
   }
   return mismatches;
+}
+
+/**
+ * Папка второй копии (BACKUP_MIRROR_DIR): другой диск, сетевая папка или
+ * папка облачного диска. null — не настроена. Совпадать с основной папкой
+ * нельзя — тогда это не вторая копия.
+ */
+export function resolveMirrorDir(raw, localDir, resolvePath, platform = process.platform) {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+  const dir = resolvePath(value);
+  const norm = (p) => (platform === "win32" ? p.toLowerCase() : p).replace(/[\\/]+$/, "");
+  if (norm(dir) === norm(localDir)) {
+    return { error: "BACKUP_MIRROR_DIR совпадает с основной папкой копий — укажите другой диск, сетевую или облачную папку" };
+  }
+  return { dir };
+}
+
+/**
+ * Предупреждение, если вторая копия на том же диске, что и основная: от ошибок
+ * в данных она спасёт, от потери диска — нет. Сетевые пути (\\сервер\папка)
+ * и другие диски — без предупреждения. Облачная папка на том же диске
+ * защищает, только пока клиент облака её синхронизирует.
+ */
+export function mirrorWarning(localDir, mirrorDir, platform = process.platform) {
+  if (platform !== "win32") return null;
+  const drive = (p) => (/^[A-Za-z]:/.test(p) ? p.slice(0, 2).toUpperCase() : null);
+  const a = drive(localDir);
+  const b = drive(mirrorDir);
+  if (!a || !b || a !== b) return null;
+  return `вторая копия на том же диске ${b} — от потери диска защищает, только если это облачная папка, которая синхронизируется`;
 }

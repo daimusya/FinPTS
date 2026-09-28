@@ -5,8 +5,8 @@ import { loadBackupFreshness } from "@/lib/backup/status";
  * Проверка работоспособности для внешнего мониторинга (аптайм-чекер,
  * оркестратор контейнеров и т.п.). Не требует аутентификации — не отдаёт
  * никаких данных приложения, только факт доступности БД и свежесть
- * резервной копии (ok / stale / never), чтобы монитор мог предупредить о
- * пропущенном бэкапе. Устаревший бэкап не делает ответ ошибкой — само
+ * резервной копии (ok / stale / never) и её второй копии в другом месте
+ * (ok / failed / off), чтобы монитор мог предупредить о пропущенном бэкапе. Устаревший бэкап не делает ответ ошибкой — само
  * приложение при этом работает.
  */
 export async function GET() {
@@ -19,7 +19,9 @@ export async function GET() {
   return Response.json({
     status: "ok",
     database: "connected",
-    backup: backup ? { state: backup.state, ageHours: backup.ageHours } : { state: "unknown", ageHours: null },
+    backup: backup
+      ? { state: backup.state, ageHours: backup.ageHours, mirror: backup.mirror }
+      : { state: "unknown", ageHours: null, mirror: "unknown" },
     time: new Date().toISOString(),
   });
 }

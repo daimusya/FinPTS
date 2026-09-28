@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backupFreshness } from "./status";
+import { backupFreshness, mirrorState } from "./status";
 
 const now = new Date("2026-09-24T12:00:00Z");
 
@@ -12,5 +12,14 @@ describe("backupFreshness", () => {
 
   it("reports never when there is no successful backup", () => {
     expect(backupFreshness(null, now)).toEqual({ state: "never", ageHours: null });
+  });
+});
+
+describe("mirrorState", () => {
+  it("reads the second copy status of the last successful run", () => {
+    expect(mirrorState("ok")).toBe("ok");
+    expect(mirrorState("failed")).toBe("failed");
+    expect(mirrorState(null)).toBe("off");
+    expect(mirrorState(undefined)).toBe("off");
   });
 });

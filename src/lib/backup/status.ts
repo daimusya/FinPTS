@@ -15,12 +15,21 @@ export function backupFreshness(lastSuccessAt: Date | null, now: Date): BackupFr
   return { state: ageHours > BACKUP_MAX_AGE_HOURS ? "stale" : "ok", ageHours: Math.round(ageHours * 10) / 10 };
 }
 
-export async function loadBackupFreshness(now = new Date()): Promise<BackupFreshness & { lastSuccessAt: Date | null }> {
+/** Состояние второй копии по последнему успешному запуску: off — не настроена. */
+export type MirrorState = "ok" | "failed" | "off";
+
+export function mirrorState(mirrorStatus: string | null | undefined): MirrorState {
+  return mirrorStatus === "ok" ? "ok" : mirrorStatus === "failed" ? "failed" : "off";
+}
+
+export async function loadBackupFreshness(
+  now = new Date(),
+): Promise<BackupFreshness & { lastSuccessAt: Date | null; mirror: MirrorState; mirrorDetails: string | null }> {
   const last = await prisma.backupRun.findFirst({
     where: { status: "success" },
     orderBy: { finishedAt: "desc" },
-    select: { finishedAt: true },
+    select: { finishedAt: true, mirrorStatus: true, mirrorDetails: true },
   });
   const lastSuccessAt = last?.finishedAt ?? null;
-  return { ...backupFreshness(lastSuccessAt, now), lastSuccessAt };
+  return { ...backupFreshness(lastSuccessAt, now), lastSuccessAt, mirror: mirrorState(last?.mirrorStatus), mirrorDetails: last?.mirrorDetails ?? null };
 }

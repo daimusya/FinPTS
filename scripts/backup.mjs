@@ -7,18 +7,26 @@
 // 3. С --verify-restore (или BACKUP_VERIFY_RESTORE=1): восстановление во временную
 //    базу <имя>_restore_check, сверка числа строк по всем таблицам, удаление базы.
 // 4. Ротация: хранятся BACKUP_KEEP (по умолчанию 14) последних копий.
-// 5. Запись результата в таблицу backup_runs (страница «Резервные копии», /api/health)
+// 5. Вторая копия (если задан BACKUP_MIRROR_DIR): другой диск, сетевая или облачная
+//    папка. Копируется во временный файл и переименовывается после сверки SHA-256;
+//    с BACKUP_MIRROR_PASSWORD — шифруется (AES-256-GCM, файл .dump.enc) и сразу
+//    пробно расшифровывается для сверки. Своя ротация: BACKUP_MIRROR_KEEP (по
+//    умолчанию как BACKUP_KEEP). Если вторая копия не удалась, основная остаётся,
+//    но код выхода 2 — Планировщик покажет ошибку.
+// 6. Запись результата в таблицу backup_runs (страница «Резервные копии», /api/health)
 //    и строка в backups/backup.log — даже если сама база недоступна.
 //
 // Пароль передаётся pg_dump/pg_restore через PGPASSWORD, не в командной строке.
-// Настройки: DATABASE_URL, BACKUP_DIR, BACKUP_KEEP, PG_BIN_DIR (папка с pg_dump).
+// Настройки: DATABASE_URL, BACKUP_DIR, BACKUP_KEEP, PG_BIN_DIR (папка с pg_dump),
+// BACKUP_MIRROR_DIR, BACKUP_MIRROR_KEEP, BACKUP_MIRROR_PASSWORD.
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { backupFileName, compareRowCounts, parseDatabaseUrl, selectFilesToDelete } from "./backup-core.mjs";
+import { backupFileName, compareRowCounts, mirrorWarning, parseDatabaseUrl, resolveMirrorDir, selectFilesToDelete } from "./backup-core.mjs";
+import { decryptFile, encryptFile, sha256File } from "./backup-crypto.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -94,6 +102,45 @@ async function countRows(client) {
     counts[table] = count;
   }
   return counts;
+}
+
+/**
+ * Вторая копия файла target в папку mirrorDir (с шифрованием, если задан пароль).
+ * Возвращает подробности для журнала; при ошибке бросает исключение.
+ */
+async function mirrorCopy(target, fileName, mirrorDir, database, keep, password, localDir) {
+  fs.mkdirSync(mirrorDir, { recursive: true });
+  const encrypted = Boolean(password);
+  const suffix = encrypted ? ".dump.enc" : ".dump";
+  const destName = encrypted ? `${fileName}.enc` : fileName;
+  const dest = path.join(mirrorDir, destName);
+  const partial = `${dest}.partial`;
+  try {
+    const originalHash = await sha256File(target);
+    if (encrypted) {
+      await encryptFile(target, partial, password);
+      // Decrypt the copy right away: a mirror nobody can restore is no backup at all.
+      const restoredHash = await decryptFile(partial, null, password);
+      if (restoredHash !== originalHash) throw new Error("расшифрованная копия не совпадает с оригиналом по SHA-256");
+    } else {
+      fs.copyFileSync(target, partial);
+      const copyHash = await sha256File(partial);
+      if (copyHash !== originalHash) throw new Error("копия не совпадает с оригиналом по SHA-256");
+    }
+    fs.renameSync(partial, dest);
+  } catch (error) {
+    fs.rmSync(partial, { force: true });
+    throw error;
+  }
+  const toDelete = selectFilesToDelete(fs.readdirSync(mirrorDir), database, keep, suffix);
+  for (const name of toDelete) fs.rmSync(path.join(mirrorDir, name));
+  const warning = mirrorWarning(localDir, mirrorDir);
+  return [
+    `${destName} → ${mirrorDir}`,
+    encrypted ? "зашифрована, пробная расшифровка совпала по SHA-256" : "совпадает с оригиналом по SHA-256",
+    `удалено старых ${toDelete.length}`,
+    ...(warning ? [`внимание: ${warning}`] : []),
+  ].join("; ");
 }
 
 async function main() {
@@ -180,6 +227,32 @@ async function main() {
     const toDelete = selectFilesToDelete(fs.readdirSync(dir), conn.database, keep);
     for (const name of toDelete) fs.rmSync(path.join(dir, name));
 
+    // The second copy: the main one is already safe, so a failure here is reported but does not undo it.
+    let mirrorStatus = null;
+    let mirrorDetails = null;
+    const mirror = resolveMirrorDir(process.env.BACKUP_MIRROR_DIR, dir, (value) => path.resolve(ROOT, value));
+    if (mirror && "error" in mirror) {
+      mirrorStatus = "failed";
+      mirrorDetails = mirror.error;
+    } else if (mirror) {
+      try {
+        mirrorDetails = await mirrorCopy(
+          target,
+          fileName,
+          mirror.dir,
+          conn.database,
+          Number(process.env.BACKUP_MIRROR_KEEP || keep),
+          process.env.BACKUP_MIRROR_PASSWORD || "",
+          dir,
+        );
+        mirrorStatus = "ok";
+      } catch (error) {
+        mirrorStatus = "failed";
+        mirrorDetails = `${mirror.dir}: ${error.message}`;
+      }
+    }
+    if (mirrorStatus === "failed") process.exitCode = 2;
+
     await finish({
       status: "success",
       fileName,
@@ -188,6 +261,8 @@ async function main() {
       restoreCheck,
       restoreDetails,
       deletedOld: toDelete.length,
+      mirrorStatus,
+      mirrorDetails,
     });
     const summary = `OK ${fileName} ${(sizeBytes / 1024).toFixed(0)} КБ, таблиц ${tableCount}, удалено старых ${toDelete.length}${
       restoreCheck ? `, проверка восстановления: ${restoreCheck}` : ""
@@ -195,6 +270,11 @@ async function main() {
     appendLog(dir, summary);
     console.log(summary);
     if (restoreDetails) console.log(restoreDetails);
+    if (mirrorStatus) {
+      const line = `${mirrorStatus === "ok" ? "MIRROR OK" : "MIRROR FAILED"} ${mirrorDetails}`;
+      appendLog(dir, line);
+      (mirrorStatus === "ok" ? console.log : console.error)(line);
+    }
   } catch (error) {
     await finish({ status: "failed", error: error.message });
     appendLog(dir, `FAILED ${error.message}`);

@@ -1412,6 +1412,9 @@ model BackupRun {
   deletedOld      Int?
   error           String?
   host            String?
+  // Вторая копия (BACKUP_MIRROR_DIR): null — не настроена; ok / failed — результат, подробности — куда и сверка
+  mirrorStatus    String?
+  mirrorDetails   String?
 
   @@index([startedAt])
   @@map("backup_runs")

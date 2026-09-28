@@ -55,6 +55,21 @@ export default async function BackupsPage() {
         ) : (
           <p className="form-error">Ни одной успешной резервной копии ещё не сделано. Настройте расписание (см. ниже).</p>
         )}
+        {freshness.mirror === "failed" ? (
+          <p className="form-error" style={{ marginTop: 8 }}>
+            Вторая копия в последнем запуске не сделана: {freshness.mirrorDetails}. Основная копия есть, но от потери диска
+            сервера она не защищает — проверьте папку <code>BACKUP_MIRROR_DIR</code>.
+          </p>
+        ) : freshness.mirror === "ok" ? (
+          <p className="text-muted" style={{ marginTop: 8 }}>
+            Вторая копия: {freshness.mirrorDetails}.
+          </p>
+        ) : freshness.state !== "never" ? (
+          <p className="text-muted" style={{ marginTop: 8 }}>
+            Вторая копия в другом месте не настроена — копии лежат только на диске сервера. Задайте{" "}
+            <code>BACKUP_MIRROR_DIR</code> (другой диск, сетевая или облачная папка), см. ниже.
+          </p>
+        ) : null}
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
@@ -70,6 +85,7 @@ export default async function BackupsPage() {
                 <th>Таблиц</th>
                 <th>Проверка восстановления</th>
                 <th>Удалено старых</th>
+                <th>Вторая копия</th>
                 <th>Сервер</th>
                 <th>Ошибка / подробности</th>
               </tr>
@@ -96,6 +112,15 @@ export default async function BackupsPage() {
                       )}
                     </td>
                     <td>{run.deletedOld ?? "—"}</td>
+                    <td title={run.mirrorDetails ?? undefined}>
+                      {run.mirrorStatus === "ok" ? (
+                        <span className="text-good">сделана</span>
+                      ) : run.mirrorStatus === "failed" ? (
+                        <span className="text-bad">ошибка: {run.mirrorDetails}</span>
+                      ) : (
+                        <span className="text-muted">не настроена</span>
+                      )}
+                    </td>
                     <td>{run.host ?? "—"}</td>
                     <td style={{ maxWidth: 420, whiteSpace: "normal" }}>
                       {run.error ? <span className="text-bad">{run.error}</span> : (run.restoreDetails ?? "")}
@@ -105,7 +130,7 @@ export default async function BackupsPage() {
               })}
               {runs.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="empty-state">
+                  <td colSpan={10} className="empty-state">
                     Запусков ещё не было.
                   </td>
                 </tr>
@@ -118,6 +143,14 @@ export default async function BackupsPage() {
       <div className="card">
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Как устроено</h2>
         <ul style={{ paddingLeft: 18, display: "grid", gap: 6 }}>
+          <li>
+            <b>Вторая копия в другом месте</b>: <code>BACKUP_MIRROR_DIR</code> в <code>.env</code> — другой диск, сетевая папка
+            (<code>\\сервер\папка</code>) или папка облачного диска (OneDrive, Яндекс Диск). Каждая новая копия копируется туда
+            и сверяется по SHA-256; <code>BACKUP_MIRROR_KEEP</code> — сколько хранить там. С <code>BACKUP_MIRROR_PASSWORD</code>{" "}
+            (не короче 12 символов) копия шифруется (AES-256-GCM, файл <code>.dump.enc</code>) и сразу пробно
+            расшифровывается; расшифровать для восстановления — <code>npm run db:backup:decrypt -- файл.dump.enc</code>.
+            Пароль храните отдельно от сервера: без него зашифрованную копию не восстановить.
+          </li>
           <li>
             <code>npm run db:backup</code> — копия в формате pg_dump (custom, сжатая), проверка, что архив читается, и
             удаление старых копий сверх <code>BACKUP_KEEP</code> (по умолчанию 14). <code>npm run db:backup:verify</code> —
