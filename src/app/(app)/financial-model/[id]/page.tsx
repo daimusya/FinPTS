@@ -20,7 +20,8 @@ import {
   saveScenarioValuesAction,
 } from "../actions";
 import { loadScenarioDepartments } from "@/lib/financial-model/scenario-departments";
-import { loadLoans, loadOpeningBalances, MAX_LOAN_TERM_MONTHS, scenarioTax } from "@/lib/financial-model/loans";
+import { loadLoans, loadOpeningBalances, loadScenarioTax, MAX_LOAN_TERM_MONTHS } from "@/lib/financial-model/loans";
+import { organizationScopeWhere } from "@/lib/access-scope";
 import { DEFAULT_TAX_RATES, TAX_REGIME_LABELS, TAX_REGIMES } from "@/lib/financial-model/taxes";
 import { LOAN_REPAYMENT_LABELS, type LoanRepayment } from "@/lib/financial-model/cash-timing";
 import { loadNewServices, MAX_PAYMENT_DAYS, MAX_RAMP_UP_MONTHS } from "@/lib/financial-model/new-services";
@@ -100,7 +101,10 @@ export default async function ScenarioDetailPage({
     }),
     loadOpeningBalances(scope),
   ]);
-  const tax = scenarioTax(scenario)!;
+  const [tax, taxOrganizations] = await Promise.all([
+    loadScenarioTax(scenario, startYear),
+    prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(scope) }, orderBy: { name: "asc" } }),
+  ]);
   const taxOn = tax.regime !== "none";
   const projection = projectScenario(startYear, startMonth, HORIZON_MONTHS, rows, startingCash, newServiceInputs, {
     ...opening,
@@ -646,17 +650,21 @@ export default async function ScenarioDetailPage({
       <div className="card" style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Налог</h2>
         <p className="text-muted" style={{ marginBottom: 12 }}>
-          УСН «доходы» — ставка × деньги от клиентов; УСН «доходы минус расходы» — ставка × (полученное − оплаченные
-          расходы), за год не меньше 1% доходов; налог на прибыль — ставка × прибыль после процентов. Налог считается
-          нарастающим итогом с начала года в пределах прогноза (убыток уменьшает налог года), уплата — в апреле, июле и
-          октябре за квартал и в марте за год. Налог уменьшает чистую прибыль и деньги. Ставка не указана — стандартная:
-          УСН 6% и 15%, налог на прибыль 25%. НДС и налоги прошлых периодов не считаются.
+          «Как у организации» — система налогообложения и ставки из карточки организации (справочник «Организации и
+          ИП», блок «Налоги и ставки»; ставка каждого года — действующая на 1 января). УСН и АУСН «доходы» — ставка ×
+          деньги от клиентов; «доходы минус расходы» и ЕСХН — ставка × (полученное − оплаченные расходы), за год не
+          меньше 1% (УСН) или 3% (АУСН) доходов; налог на прибыль — ставка × прибыль после процентов. Налог считается
+          нарастающим итогом с начала года в пределах прогноза (убыток уменьшает налог года). Уплата: УСН и налог на
+          прибыль — в апреле, июле и октябре за квартал и в марте за год; ЕСХН — в июле и марте; АУСН — каждый месяц
+          за предыдущий. Налог уменьшает чистую прибыль и деньги. Своя ставка не указана — стандартная. НДС, патент
+          и налоги прошлых периодов не считаются.
         </p>
         <form action={saveScenarioTaxAction.bind(null, id)} className="form-grid" style={{ alignItems: "flex-end" }}>
           {keepStart}
           <label className="field">
             <span>Режим</span>
-            <select name="taxRegime" defaultValue={tax.regime} disabled={!canManage}>
+            <select name="taxRegime" defaultValue={scenario.taxRegime} disabled={!canManage}>
+              <option value="organization">Как у организации</option>
               {TAX_REGIMES.map((r) => (
                 <option key={r} value={r}>
                   {TAX_REGIME_LABELS[r]}
@@ -665,13 +673,24 @@ export default async function ScenarioDetailPage({
             </select>
           </label>
           <label className="field">
-            <span>Ставка, %</span>
+            <span>Организация (для «как у организации»)</span>
+            <select name="taxOrganizationId" defaultValue={scenario.taxOrganizationId ?? ""} disabled={!canManage}>
+              <option value="">—</option>
+              {taxOrganizations.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.shortName || o.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Своя ставка, %</span>
             <input
               type="text"
               inputMode="decimal"
               name="taxRatePct"
               defaultValue={scenario.taxRatePct?.toString() ?? ""}
-              placeholder={taxOn ? `стандартная ${DEFAULT_TAX_RATES[tax.regime]}` : "стандартная"}
+              placeholder={scenario.taxRegime !== "organization" && taxOn ? `стандартная ${DEFAULT_TAX_RATES[tax.regime]}` : "стандартная"}
               style={{ width: 130 }}
               disabled={!canManage}
             />
@@ -681,7 +700,7 @@ export default async function ScenarioDetailPage({
               Сохранить налог
             </button>
           ) : null}
-          {taxOn ? <span className="text-muted">Сейчас: {TAX_REGIME_LABELS[tax.regime]}, {formatNumber(tax.ratePct)}%</span> : null}
+          <span className="text-muted">Сейчас: {tax.label}</span>
         </form>
       </div>
 

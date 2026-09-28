@@ -3,7 +3,7 @@ import { toDecimal } from "@/lib/money";
 import { computeBreakEven, computeMarginOfSafety } from "@/lib/reports/margin";
 import type { DriverCode } from "./drivers";
 import { loanSchedule, shiftByLag, type LoanInput, type LoanMonth } from "./cash-timing";
-import { taxSchedule, type TaxRegime } from "./taxes";
+import { taxSchedule, type TaxRateInput, type TaxRegime } from "./taxes";
 
 export interface ScenarioValueRow {
   year: number;
@@ -125,7 +125,7 @@ export interface ScenarioCashExtras {
   openingReceivableDue?: DueAmount[];
   openingPayableDue?: DueAmount[];
   loans?: LoanInput[];
-  tax?: { regime: TaxRegime; ratePct: Decimal };
+  tax?: { regime: TaxRegime; ratePct: TaxRateInput };
 }
 
 export interface DueAmount {

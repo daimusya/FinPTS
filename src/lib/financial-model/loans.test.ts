@@ -50,3 +50,22 @@ describe("parseLoanForm — grace period and prepayment", () => {
     }
   });
 });
+
+describe("organizationTax", () => {
+  const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d));
+  it("takes the regime from the tax system and the rate valid on 1 January of each year", async () => {
+    const { organizationTax } = await import("./loans");
+    const rates = [
+      { taxKind: "usn", ratePct: "6", validFrom: utc(2026, 1, 1) },
+      { taxKind: "usn", ratePct: "3", validFrom: utc(2027, 1, 1) },
+    ];
+    const tax = organizationTax({ name: "Альфа", taxSystem: "usn_income" }, rates, 2027);
+    expect(tax.regime).toBe("usn_income");
+    const rate = tax.ratePct as (y: number) => { toNumber(): number };
+    expect([rate(2026).toNumber(), rate(2027).toNumber()]).toEqual([6, 3]);
+    expect(tax.label).toBe("как у «Альфа»: УСН «доходы», 3% в 2027 году");
+    // No own rate — the standard one; the patent is not a percentage tax.
+    expect((organizationTax({ name: "Б", taxSystem: "osn" }, [], 2027).ratePct as (y: number) => { toNumber(): number })(2027).toNumber()).toBe(25);
+    expect(organizationTax({ name: "ИП", taxSystem: "psn" }, [], 2027).regime).toBe("none");
+  });
+});

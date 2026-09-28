@@ -107,11 +107,11 @@ export async function addPayrollLineAction(runId: string, formData: FormData) {
     redirect(`/payroll/${runId}?error=${encodeURIComponent("Выберите сотрудника, вид начисления и укажите сумму")}`);
   }
 
-  const [run, accrualType, rates] = await Promise.all([
+  const [run, accrualType] = await Promise.all([
     prisma.payrollRun.findUniqueOrThrow({ where: { id: runId } }),
     prisma.payrollAccrualType.findUniqueOrThrow({ where: { id: accrualTypeId } }),
-    loadTaxRates(),
   ]);
+  const rates = await loadTaxRates(run.organizationId, run.payoutDate);
 
   try {
     await assertPeriodOpenForDate(run.payoutDate);
@@ -174,7 +174,7 @@ export async function addAverageEarningsLineAction(runId: string, formData: Form
   const accrualType = await prisma.payrollAccrualType.findFirst({ where: { code: result.accrualCode, isArchived: false } });
   if (!accrualType) back(`В справочнике «Виды начислений зарплаты» нет активного вида с кодом ${result.accrualCode}`);
 
-  const rates = await loadTaxRates();
+  const rates = await loadTaxRates(run.organizationId, run.payoutDate);
   const amount = result.lineAmount;
   const { ndflAmount, insuranceAmount } = computeTaxes(amount, accrualType!.subjectToNdfl, accrualType!.subjectToInsurance, rates);
   const shares = await prisma.employeeProjectAllocation.findMany({ where: { employeeId: result.employee.id, validTo: null } });

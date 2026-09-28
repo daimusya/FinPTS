@@ -5,7 +5,8 @@ import { allocatedAsOf } from "@/lib/reports/balance-lines";
 import { accrualScopeWhere, type AccessScope } from "@/lib/access-scope";
 import type { LoanInput, LoanRepayment } from "./cash-timing";
 import type { DueAmount, ScenarioCashExtras } from "./project";
-import { TAX_REGIMES, taxRate, type TaxRegime } from "./taxes";
+import { DEFAULT_TAX_RATES, TAX_REGIME_LABELS, TAX_REGIMES, taxRate, type TaxRateInput, type TaxRegime } from "./taxes";
+import { isTaxSystem, rateAt, TAX_SYSTEM_OPTIONS, type TaxKind, type TaxRateRecord, type TaxSystem } from "@/lib/organizations/taxes";
 
 export const MAX_LOAN_TERM_MONTHS = 360;
 const REPAYMENTS: LoanRepayment[] = ["annuity", "linear", "bullet"];
@@ -144,8 +145,55 @@ export async function loadOpeningBalances(scope: AccessScope, now = new Date()):
   };
 }
 
-/** Налоговый режим сценария для projectScenario. */
-export function scenarioTax(scenario: { taxRegime: string; taxRatePct: { toString(): string } | null }): ScenarioCashExtras["tax"] {
+/** Налог сценария: режим, ставка (по годам) и подпись для экрана. */
+export interface ScenarioTax {
+  regime: TaxRegime;
+  ratePct: TaxRateInput;
+  label: string;
+}
+
+/** Как система налогообложения организации считается в прогнозе и по какому налогу из её ставок. */
+export const SYSTEM_REGIME: Record<TaxSystem, { regime: TaxRegime; kind: TaxKind | null }> = {
+  osn: { regime: "profit", kind: "profit" },
+  usn_income: { regime: "usn_income", kind: "usn" },
+  usn_income_expense: { regime: "usn_income_expense", kind: "usn" },
+  ausn_income: { regime: "ausn_income", kind: "ausn" },
+  ausn_income_expense: { regime: "ausn_income_expense", kind: "ausn" },
+  eshn: { regime: "eshn", kind: "eshn" },
+  // The patent is a fixed cost, not a share of income or profit: set it as a fixed cost of the scenario.
+  psn: { regime: "none", kind: null },
+};
+
+/**
+ * Налог «как у организации»: режим — по её системе налогообложения, ставка
+ * на каждый год — действующая на 1 января этого года по её ставкам (нет
+ * ставки — стандартная для режима).
+ */
+export function organizationTax(organization: { name: string; taxSystem: string }, rates: TaxRateRecord[], year: number): ScenarioTax {
+  const system: TaxSystem = isTaxSystem(organization.taxSystem) ? organization.taxSystem : "osn";
+  const { regime, kind } = SYSTEM_REGIME[system];
+  const ratePct = (y: number) => (kind ? rateAt(rates, kind, new Date(Date.UTC(y, 0, 1))) : null) ?? new Decimal(DEFAULT_TAX_RATES[regime]);
+  const systemLabel = TAX_SYSTEM_OPTIONS.find((o) => o.value === system)!.label;
+  const label =
+    regime === "none"
+      ? `как у «${organization.name}»: ${systemLabel} — налог в прогнозе не считается (стоимость патента задайте постоянными расходами)`
+      : `как у «${organization.name}»: ${systemLabel}, ${ratePct(year).toString().replace(".", ",")}% в ${year} году`;
+  return { regime, ratePct, label };
+}
+
+/** Налог сценария для projectScenario: свой режим и ставка или «как у организации». */
+export async function loadScenarioTax(
+  scenario: { taxRegime: string; taxRatePct: { toString(): string } | null; taxOrganizationId: string | null },
+  startYear: number,
+): Promise<ScenarioTax> {
+  if (scenario.taxRegime === "organization" && scenario.taxOrganizationId) {
+    const organization = await prisma.organization.findUnique({
+      where: { id: scenario.taxOrganizationId },
+      select: { name: true, shortName: true, taxSystem: true, taxRates: true },
+    });
+    if (organization) return organizationTax({ name: organization.shortName || organization.name, taxSystem: organization.taxSystem }, organization.taxRates, startYear);
+  }
   const regime = (TAX_REGIMES as string[]).includes(scenario.taxRegime) ? (scenario.taxRegime as TaxRegime) : "none";
-  return { regime, ratePct: taxRate(regime, scenario.taxRatePct?.toString() ?? null) };
+  const rate = taxRate(regime, scenario.taxRatePct?.toString() ?? null);
+  return { regime, ratePct: rate, label: regime === "none" ? TAX_REGIME_LABELS.none : `${TAX_REGIME_LABELS[regime]}, ${rate.toString().replace(".", ",")}%` };
 }

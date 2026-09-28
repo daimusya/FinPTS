@@ -133,6 +133,8 @@ model Organization {
   legalAddress  String?
   /// Районный коэффициент (1,15; 1,5 …) — для минимума больничного из МРОТ. Пусто — 1.
   districtCoefficient Decimal? @db.Decimal(5, 3)
+  /// Система налогообложения: osn / usn_income / usn_income_expense / ausn_income / ausn_income_expense / eshn / psn (src/lib/organizations/taxes.ts).
+  taxSystem     String           @default("osn")
   isArchived    Boolean          @default(false)
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
@@ -153,7 +155,28 @@ model Organization {
 
   fixedAssets      FixedAsset[]
   creditAgreements CreditAgreement[]
+  taxRates           OrganizationTaxRate[]
+  scenarioTaxes      FinancialScenario[]
+
   @@map("organizations")
+}
+
+// Ставка налога организации с даты: действует до даты следующей записи того
+// же налога. taxKind — profit / vat / usn / ausn / eshn / property /
+// insurance (единый тариф взносов вместо общих правил) / injury.
+model OrganizationTaxRate {
+  id             String   @id @default(cuid())
+  organizationId String
+  taxKind        String
+  ratePct        Decimal  @db.Decimal(6, 3)
+  validFrom      DateTime @db.Date
+  comment        String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, taxKind, validFrom])
+  @@map("organization_tax_rates")
 }
 
 model Department {
@@ -1275,6 +1298,9 @@ model FinancialScenario {
   /// Налог в прогнозе: none / usn_income / usn_income_expense / profit (см. src/lib/financial-model/taxes.ts); ставка — пусто = стандартная.
   taxRegime   String   @default("none")
   taxRatePct  Decimal? @db.Decimal(5, 2)
+  /// Для taxRegime = organization: система и ставки берутся из карточки этой организации.
+  taxOrganizationId String?
+  taxOrganization   Organization? @relation(fields: [taxOrganizationId], references: [id], onDelete: SetNull)
   isArchived  Boolean  @default(false)
   createdAt   DateTime @default(now())
 

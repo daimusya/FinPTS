@@ -6,7 +6,7 @@ import { SCENARIO_TYPE_LABELS } from "@/lib/financial-model/drivers";
 import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
 import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
 import { loadNewServices } from "@/lib/financial-model/new-services";
-import { loadLoans, loadOpeningBalances, scenarioTax } from "@/lib/financial-model/loans";
+import { loadLoans, loadOpeningBalances, loadScenarioTax } from "@/lib/financial-model/loans";
 import { getAccessScope } from "@/lib/access-scope";
 
 const HORIZON_MONTHS = 12;
@@ -45,12 +45,13 @@ export default async function CompareScenariosPage({
     where: { id: { in: selectedIds } },
     include: { values: true },
   });
-  const [newServices, loans] = await Promise.all([
+  const [newServices, loans, taxes] = await Promise.all([
     loadNewServices(scenarios.map((s) => s.id)),
     loadLoans(scenarios.map((s) => s.id)),
+    Promise.all(scenarios.map((s) => loadScenarioTax(s, startYear))),
   ]);
 
-  const results = scenarios.map((s) => {
+  const results = scenarios.map((s, index) => {
     const rows: ScenarioValueRow[] = s.values.map((v) => ({
       year: v.year,
       month: v.month,
@@ -61,7 +62,7 @@ export default async function CompareScenariosPage({
     const projection = projectScenario(startYear, startMonth, HORIZON_MONTHS, rows, startingCash, newServices.get(s.id) ?? [], {
       ...opening,
       loans: loans.get(s.id) ?? [],
-      tax: scenarioTax(s),
+      tax: taxes[index],
     });
     return {
       scenario: s,
@@ -71,6 +72,7 @@ export default async function CompareScenariosPage({
       totalOperatingProfit: sumMoney(projection.map((p) => p.operatingProfit)),
       totalNetProfit: sumMoney(projection.map((p) => p.netProfit)),
       totalTax: sumMoney(projection.map((p) => p.tax)),
+      taxOn: taxes[index].regime !== "none",
       finalDebt: projection[projection.length - 1]?.loanDebt ?? sumMoney([]),
       finalCash: projection[projection.length - 1]?.cashBalance ?? sumMoney([]),
       avgBreakEven: sumMoney(projection.filter((p) => p.breakEvenRevenue !== null).map((p) => p.breakEvenRevenue!)).dividedBy(
@@ -151,7 +153,7 @@ export default async function CompareScenariosPage({
               <td>Налог за 12 месяцев (начислено)</td>
               {results.map((r) => (
                 <td key={r.scenario.id} className="mono">
-                  {r.scenario.taxRegime === "none" ? "не считается" : formatMoney(r.totalTax)}
+                  {r.taxOn ? formatMoney(r.totalTax) : "не считается"}
                 </td>
               ))}
             </tr>

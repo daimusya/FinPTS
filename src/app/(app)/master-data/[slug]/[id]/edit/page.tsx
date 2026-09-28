@@ -6,6 +6,7 @@ import { DictionaryFormFields, resolveFieldDefault, type ResolvedField } from "@
 import { updateDictionaryItem } from "../../../actions";
 import { CounterpartyDetails } from "@/components/counterparty-details";
 import { CounterpartyInnCard } from "@/components/counterparty-inn";
+import { OrganizationTaxes } from "@/components/organization-taxes";
 
 export default async function EditDictionaryItemPage({
   params,
@@ -21,6 +22,9 @@ export default async function EditDictionaryItemPage({
     bankNotice?: string;
     contactError?: string;
     contactNotice?: string;
+    editTaxRate?: string;
+    taxError?: string;
+    taxNotice?: string;
   }>;
 }) {
   const { slug, id } = await params;
@@ -78,6 +82,12 @@ export default async function EditDictionaryItemPage({
         </form>
       </div>
 
+      {slug === "organizations" ? (
+        <OrganizationTaxes
+          organizationId={id}
+          state={{ editTaxRateId: detailsState.editTaxRate, taxError: detailsState.taxError, taxNotice: detailsState.taxNotice }}
+        />
+      ) : null}
       {slug === "counterparties" ? <CounterpartyInnCard counterpartyId={id} /> : null}
       {slug === "counterparties" ? <CounterpartyDetails
           counterpartyId={id}

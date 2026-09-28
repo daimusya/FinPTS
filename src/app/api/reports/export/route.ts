@@ -23,7 +23,7 @@ import { computeManagementBalance } from "@/lib/reports/balance";
 import { computePayrollSummary, type PayrollSummaryLine } from "@/lib/payroll/summary";
 import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
 import { loadNewServices } from "@/lib/financial-model/new-services";
-import { loadLoans, loadOpeningBalances, scenarioTax } from "@/lib/financial-model/loans";
+import { loadLoans, loadOpeningBalances, loadScenarioTax } from "@/lib/financial-model/loans";
 import { TAX_REGIME_LABELS } from "@/lib/financial-model/taxes";
 import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
 import { MONTH_NAMES_SHORT } from "@/lib/financial-model/drivers";
@@ -285,7 +285,7 @@ export async function GET(request: NextRequest) {
     const newServices = (await loadNewServices([scenarioId])).get(scenarioId) ?? [];
     const loans = (await loadLoans([scenarioId])).get(scenarioId) ?? [];
     const opening = await loadOpeningBalances(scope);
-    const tax = scenarioTax(scenario);
+    const tax = await loadScenarioTax(scenario, startYear);
     const projection = projectScenario(startYear, startMonth, SCENARIO_HORIZON_MONTHS, rows_, startingCash, newServices, {
       ...opening,
       loans,
@@ -330,7 +330,7 @@ export async function GET(request: NextRequest) {
       ["Запас прочности, %", ...projection.map((p) => (p.marginOfSafetyPct ? toNum(p.marginOfSafetyPct) : ""))],
       ["Проценты по кредитам", ...projection.map((p) => toNum(p.loanInterest))],
       ["Прибыль до налога", ...projection.map((p) => toNum(p.profitBeforeTax))],
-      [`${TAX_REGIME_LABELS[tax!.regime]} — начислено`, ...projection.map((p) => toNum(p.tax))],
+      [`${TAX_REGIME_LABELS[tax.regime]} — начислено`, ...projection.map((p) => toNum(p.tax))],
       ["Чистая прибыль", ...projection.map((p) => toNum(p.netProfit))],
       [],
       ["Поступления от клиентов", ...projection.map((p) => toNum(p.collections))],

@@ -3,6 +3,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import type { DictionaryConfig, DictionaryDelegate, FieldOption } from "./types";
 import { acceptsManualEntries } from "@/lib/reports/balance-lines";
 import { validateInn } from "@/lib/integrations/inn";
+import { TAX_SYSTEM_OPTIONS } from "@/lib/organizations/taxes";
 import { validateCreditAgreementRecord, validateFixedAssetRecord } from "@/lib/reports/non-cash-guards";
 
 function delegate(d: unknown): DictionaryDelegate {
@@ -171,7 +172,7 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
     permissionView: PERMISSIONS.MASTERDATA_VIEW,
     permissionManage: PERMISSIONS.MASTERDATA_MANAGE,
     orderBy: { name: "asc" },
-    listColumns: ["name", "type", "inn"],
+    listColumns: ["name", "type", "inn", "taxSystem"],
     fields: [
       { name: "name", label: "Полное наименование", type: "text", required: true },
       { name: "shortName", label: "Краткое наименование", type: "text" },
@@ -188,6 +189,14 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
           const n = Number(value.replace(",", "."));
           return Number.isNaN(n) || n < 1 || n > 3 ? "от 1 до 3, например 1,15 (пусто — без коэффициента)" : null;
         },
+      },
+      {
+        name: "taxSystem",
+        label: "Система налогообложения",
+        type: "select",
+        required: true,
+        options: TAX_SYSTEM_OPTIONS,
+        defaultValue: "osn",
       },
     ],
   },

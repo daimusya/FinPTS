@@ -1,3 +1,4 @@
+import { rateAt, type TaxRateRecord } from "@/lib/organizations/taxes";
 import { prisma } from "@/lib/db";
 import { toDecimal, sumMoney } from "@/lib/money";
 import Decimal from "decimal.js";
@@ -21,14 +22,31 @@ export interface TaxRates {
   insurancePct: Decimal;
 }
 
-export async function loadTaxRates(): Promise<TaxRates> {
-  const rules = await prisma.taxRule.findMany({ where: { isArchived: false } });
-  const byBase = new Map(rules.map((r) => [r.base, toDecimal(r.ratePct)]));
+/**
+ * Ставки НДФЛ и взносов: общие — справочник «Налоговые и страховые
+ * правила»; у организации в карточке («Налоги и ставки») на дату расчёта
+ * могут быть свой единый тариф взносов (заменяет пенсионные, медицинские и
+ * социальные) и свой тариф на травматизм.
+ */
+export async function loadTaxRates(organizationId?: string, onDate: Date = new Date()): Promise<TaxRates> {
+  const [rules, orgRates] = await Promise.all([
+    prisma.taxRule.findMany({ where: { isArchived: false } }),
+    organizationId ? prisma.organizationTaxRate.findMany({ where: { organizationId, taxKind: { in: ["insurance", "injury"] } } }) : [],
+  ]);
+  return combineTaxRates(rules, orgRates, onDate);
+}
+
+export function combineTaxRates(
+  rules: Array<{ base: string; ratePct: Decimal | number | string | { toString(): string } }>,
+  orgRates: TaxRateRecord[],
+  onDate: Date,
+): TaxRates {
+  const byBase = new Map(rules.map((r) => [r.base, toDecimal(r.ratePct.toString())]));
   const ndflPct = byBase.get("ndfl") ?? toDecimal(0);
-  const insurancePct = ["pension", "medical", "social", "injury"]
-    .map((b) => byBase.get(b) ?? toDecimal(0))
-    .reduce((acc, v) => acc.plus(v), toDecimal(0));
-  return { ndflPct, insurancePct };
+  const general = ["pension", "medical", "social"].map((b) => byBase.get(b) ?? toDecimal(0)).reduce((acc, v) => acc.plus(v), toDecimal(0));
+  const insurance = rateAt(orgRates, "insurance", onDate) ?? general;
+  const injury = rateAt(orgRates, "injury", onDate) ?? byBase.get("injury") ?? toDecimal(0);
+  return { ndflPct, insurancePct: toDecimal(insurance.toString()).plus(toDecimal(injury.toString())) };
 }
 
 export function computeTaxes(
@@ -85,7 +103,7 @@ export async function calculatePayrollRun(runId: string, userId: string) {
       where: { organizationId: run.organizationId, status: "ACTIVE", salary: { not: null } },
       include: { projectAlloc: { where: { validTo: null } }, workSchedule: true },
     }),
-    loadTaxRates(),
+    loadTaxRates(run.organizationId, run.payoutDate),
     prisma.payrollAccrualType.findFirstOrThrow({ where: { code: "advance" } }),
     prisma.payrollAccrualType.findFirstOrThrow({ where: { code: "salary" } }),
   ]);

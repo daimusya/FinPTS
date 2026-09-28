@@ -50,3 +50,24 @@ describe("taxSchedule", () => {
     expect(taxSchedule("none", d(0), [month(2027, 1, 100)])[0].accrued.toNumber()).toBe(0);
   });
 });
+
+describe("taxSchedule — AUSN, ESHN and rates by year", () => {
+  it("AUSN is paid every month for the previous one, with the 3 % annual minimum", () => {
+    const months = [11, 12].map((m) => month(2026, m, 100000, 99000)).concat([month(2027, 1, 100000, 99000)]);
+    const s = taxSchedule("ausn_income_expense", d(20), months);
+    // 20 % of 1 000 a month; December tops the year up to 3 % of 200 000 income = 6 000.
+    expect(nums(s.map((x) => x.accrued))).toEqual([200, 5800, 200]);
+    expect(nums(s.map((x) => x.paid))).toEqual([0, 200, 5800]);
+  });
+
+  it("ESHN is paid for the half-year in July", () => {
+    const months = [1, 2, 3, 4, 5, 6, 7].map((m) => month(2027, m, 100000, 50000));
+    const s = taxSchedule("eshn", d(6), months);
+    expect(nums(s.map((x) => x.paid))).toEqual([0, 0, 0, 0, 0, 0, 18000]);
+  });
+
+  it("uses each year's own rate", () => {
+    const s = taxSchedule("usn_income", (y) => d(y === 2026 ? 6 : 4), [month(2026, 12, 100000), month(2027, 1, 100000)]);
+    expect(nums(s.map((x) => x.accrued))).toEqual([6000, 4000]);
+  });
+});

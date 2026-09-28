@@ -179,22 +179,28 @@ export async function addLoanAction(scenarioId: string, formData: FormData) {
 export async function saveScenarioTaxAction(scenarioId: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
 
-  const regime = String(formData.get("taxRegime") ?? "none") as TaxRegime;
-  if (!TAX_REGIMES.includes(regime)) redirect(scenarioUrl(scenarioId, formData, "Выберите налоговый режим"));
+  const regime = String(formData.get("taxRegime") ?? "none");
+  if (regime !== "organization" && !TAX_REGIMES.includes(regime as TaxRegime)) redirect(scenarioUrl(scenarioId, formData, "Выберите налоговый режим"));
+  let taxOrganizationId: string | null = null;
+  if (regime === "organization") {
+    const organization = await prisma.organization.findUnique({ where: { id: String(formData.get("taxOrganizationId") ?? "") } });
+    if (!organization) redirect(scenarioUrl(scenarioId, formData, "Выберите организацию, чьи налоги взять"));
+    taxOrganizationId = organization!.id;
+  }
   const rateRaw = String(formData.get("taxRatePct") ?? "").replace(/[\s ]/g, "").replace(",", ".");
   let taxRatePct: string | null = null;
-  if (rateRaw !== "" && regime !== "none") {
+  if (rateRaw !== "" && regime !== "none" && regime !== "organization") {
     const rate = Number(rateRaw);
     if (!/^\d+(\.\d+)?$/.test(rateRaw) || rate > 100) redirect(scenarioUrl(scenarioId, formData, "Ставка налога — от 0 до 100%"));
     taxRatePct = rate.toFixed(2);
   }
 
-  const before = await prisma.financialScenario.findUnique({ where: { id: scenarioId }, select: { taxRegime: true, taxRatePct: true } });
+  const before = await prisma.financialScenario.findUnique({ where: { id: scenarioId }, select: { taxRegime: true, taxRatePct: true, taxOrganizationId: true } });
   if (!before) redirect("/financial-model");
   const updated = await prisma.financialScenario.update({
     where: { id: scenarioId },
-    data: { taxRegime: regime, taxRatePct },
-    select: { taxRegime: true, taxRatePct: true },
+    data: { taxRegime: regime, taxRatePct, taxOrganizationId },
+    select: { taxRegime: true, taxRatePct: true, taxOrganizationId: true },
   });
   await logAudit({
     userId: session.userId,
