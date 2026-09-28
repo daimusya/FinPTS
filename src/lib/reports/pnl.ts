@@ -5,6 +5,8 @@ import type { Prisma } from "@prisma/client";
 import type { ReportFilters } from "./filters";
 import type { ReportPeriod } from "./period";
 import { accrualScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
+import { chargesIn } from "./non-cash";
+import { loadNonCashCharges, organizationFilter } from "./non-cash-load";
 
 export const PNL_TYPE_ORDER = [
   "REVENUE",
@@ -36,6 +38,8 @@ export interface PnlArticleRow {
   articleName: string;
   amount: Decimal;
   documentIds: string[];
+  /** В т.ч. без документов: амортизация основных средств и проценты по займам. */
+  nonCash?: Decimal;
 }
 
 export interface PnlReport {
@@ -129,6 +133,22 @@ export async function computePnlReport(
       row.amount = row.amount.plus(toDecimal(line.amount));
       if (!row.documentIds.includes(doc.id)) row.documentIds.push(doc.id);
       map.set(key, row);
+    }
+  }
+
+  // Depreciation and loan interest have no documents: they belong to no counterparty, cost center,
+  // project or product, and a loan to no department — such filters leave them out.
+  if (!filters.counterpartyId && !filters.costCenterId && !filters.projectId && !filters.productServiceId) {
+    const items = await loadNonCashCharges(period.to, organizationFilter(filters.organizationId, scope.organizationIds));
+    for (const item of items) {
+      if (filters.departmentId && item.departmentId !== filters.departmentId) continue;
+      const amount = chargesIn(item.schedule, period.from, period.to);
+      if (amount.isZero()) continue;
+      const map = rowMaps[item.pnlArticle.type];
+      const row = map.get(item.pnlArticle.id) ?? { articleId: item.pnlArticle.id, articleName: item.pnlArticle.name, amount: toDecimal(0), documentIds: [] };
+      row.amount = row.amount.plus(amount);
+      row.nonCash = (row.nonCash ?? toDecimal(0)).plus(amount);
+      map.set(item.pnlArticle.id, row);
     }
   }
 

@@ -265,7 +265,10 @@ export default async function BalanceReportPage({
         ) : null}
         <p className="text-muted" style={{ marginTop: 12 }}>
           Свои статьи баланса (например, «Основные средства», «Кредит банка») добавляются в справочнике{" "}
-          <Link href="/master-data/balance-articles">«Статьи баланса»</Link>.
+          <Link href="/master-data/balance-articles">«Статьи баланса»</Link>. Амортизация считается по справочнику{" "}
+          <Link href="/master-data/fixed-assets">«Основные средства»</Link> (строка «Накопленная амортизация»), проценты — по
+          справочнику <Link href="/master-data/credit-agreements">«Займы и кредиты»</Link> (строка «Проценты к уплате»; уплату
+          процентов проводите по статье ДДС, привязанной к ней).
         </p>
       </div>
     </div>
@@ -274,10 +277,12 @@ export default async function BalanceReportPage({
 
 function ArticleLine({ line }: { line: BalanceArticleLine }) {
   const parts = [
+    !line.accrued.isZero() ? `начислено по реестру ${formatMoney(line.accrued)}` : null,
     !line.linkedFlows.isZero() ? `по ДДС ${formatMoney(line.linkedFlows)}` : null,
     !line.entries.isZero() ? `операции ${formatMoney(line.entries)}` : null,
   ].filter(Boolean);
-  return <BalanceLine label={line.name} value={line.amount} note={parts.length === 2 ? parts.join(" + ") : undefined} />;
+  const showNote = parts.length >= 2 || !line.accrued.isZero();
+  return <BalanceLine label={line.name} value={line.amount} note={showNote ? parts.join(" + ") : undefined} />;
 }
 
 function BalanceLine({ label, value, bold, note }: { label: string; value: Decimal; bold?: boolean; note?: string }) {

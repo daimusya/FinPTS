@@ -109,7 +109,7 @@ export default async function PnlReportPage({
       <div className="page-header">
         <div>
           <h1>ОПиУ — Отчёт о прибылях и убытках</h1>
-          <p>Период: {period.label}, метод начисления. Считается только из проведённых документов.</p>
+          <p>Период: {period.label}, метод начисления. Считается из проведённых документов, плюс амортизация основных средств и проценты по займам (по реестрам в справочниках).</p>
         </div>
         <a href={exportHref} className="btn btn-secondary">
           Экспорт в Excel
@@ -210,6 +210,7 @@ export default async function PnlReportPage({
                         <tr key={row.articleId ?? `${type}-none`}>
                           <td style={{ paddingLeft: 24 }}>
                             <Link href={drillDownHref(row, fromStr, toStr)}>{row.articleName}</Link>
+                            {row.nonCash ? <div className="text-muted">в т.ч. амортизация и проценты без документов: {formatMoney(row.nonCash)}</div> : null}
                           </td>
                           <td>{row.documentIds.length}</td>
                           <td className="mono">{formatMoney(row.amount)}</td>
@@ -270,6 +271,7 @@ export default async function PnlReportPage({
                         <tr key={row.articleId ?? `${type}-none`}>
                           <td style={{ paddingLeft: 24 }}>
                             <Link href={drillDownHref(row, fromStr, toStr)}>{row.articleName}</Link>
+                            {row.nonCash ? <div className="text-muted">в т.ч. амортизация и проценты без документов: {formatMoney(row.nonCash)}</div> : null}
                           </td>
                           <td>{row.documentIds.length}</td>
                           <td className="mono">{formatMoney(row.amount)}</td>

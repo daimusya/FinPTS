@@ -6,11 +6,14 @@ import type { ReportFilters } from "./filters";
 import { derivePnlTotals, type PnlType } from "./pnl";
 import {
   advanceFromTransaction,
+  allocatedAsOf,
   assembleBalance,
   linkedFlowEffect,
   type AssembledBalance,
   type BalanceCategory,
 } from "./balance-lines";
+import { chargesIn } from "./non-cash";
+import { loadNonCashCharges, organizationFilter } from "./non-cash-load";
 import { accrualScopeWhere, bankTransactionScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
 
 export type ManagementBalance = AssembledBalance & { asOfDate: Date };
@@ -24,9 +27,14 @@ export type ManagementBalance = AssembledBalance & { asOfDate: Date };
  * — авансы — несопоставленные с документами платежи контрагентам;
  * — займы, капитал, прочие активы и другие статьи без systemCode — по
  *   балансовым операциям и операциям по статьям ДДС, привязанным к ним;
- * — нераспределённая прибыль — накопленная чистая прибыль по ОПиУ плюс
- *   балансовые операции по ней (остаток на начало учёта, дивиденды).
- * Сопоставления платежей берутся текущие (на сегодня), а не на дату отчёта.
+ * — накопленная амортизация и проценты к уплате — начисленное по реестрам
+ *   «Основные средства» и «Займы и кредиты» плюс операции по этим статьям;
+ * — нераспределённая прибыль — накопленная чистая прибыль по ОПиУ (включая
+ *   амортизацию и проценты) плюс балансовые операции по ней (остаток на
+ *   начало учёта, дивиденды).
+ * Сопоставление платежа с документом действует на дату отчёта, если к ней
+ * есть и платёж, и документ (allocatedAsOf): баланс на прошлую дату видит
+ * тогдашние долги и авансы, даже если сопоставили их позже.
  */
 export async function computeManagementBalance(
   asOfDate: Date,
@@ -55,7 +63,7 @@ export async function computeManagementBalance(
   if (filters.organizationId) entryWhere.organizationId = filters.organizationId;
   else if (scope.organizationIds) entryWhere.organizationId = { in: scope.organizationIds };
 
-  const [transactions, unpaidDocuments, allDocuments, entries, articles] = await Promise.all([
+  const [transactions, allDocuments, entries, articles, nonCash] = await Promise.all([
     prisma.bankTransaction.findMany({
       where: { AND: bankAnd },
       select: {
@@ -63,20 +71,25 @@ export async function computeManagementBalance(
         direction: true,
         isTransfer: true,
         counterpartyId: true,
-        allocations: { where: { cancelledAt: null }, select: { amount: true } },
+        operationDate: true,
+        allocations: {
+          where: { cancelledAt: null, accrualDocument: { status: "POSTED" } },
+          select: { amount: true, accrualDocument: { select: { date: true } } },
+        },
         cashFlowArticle: { select: { balanceArticleId: true, balanceArticle: { select: { category: true } } } },
       },
     }),
-    prisma.accrualDocument.findMany({
-      where: { AND: [...accrualAndBase, { paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID", "OVERPAID"] } }] },
-      include: { lines: true, allocations: { where: { cancelledAt: null } } },
-    }),
+    // All posted documents up to the date: one paid today may still have been unpaid on the report date.
     prisma.accrualDocument.findMany({
       where: { AND: accrualAndBase },
-      include: { lines: { include: { pnlArticle: true } } },
+      include: {
+        lines: { include: { pnlArticle: true } },
+        allocations: { where: { cancelledAt: null }, select: { amount: true, bankTransaction: { select: { operationDate: true } } } },
+      },
     }),
     prisma.balanceEntry.findMany({ where: entryWhere, select: { balanceArticleId: true, amount: true } }),
     prisma.balanceArticle.findMany({ orderBy: { name: "asc" } }),
+    loadNonCashCharges(asOfDate, organizationFilter(filters.organizationId, scope.organizationIds)),
   ]);
 
   let cash = toDecimal(0);
@@ -94,7 +107,10 @@ export async function computeManagementBalance(
     const advance = advanceFromTransaction({
       direction: tx.direction,
       amount,
-      allocated: sumMoney(tx.allocations.map((a) => a.amount)),
+      allocated: allocatedAsOf(
+        tx.allocations.map((a) => ({ amount: toDecimal(a.amount), paymentDate: tx.operationDate, documentDate: a.accrualDocument.date })),
+        asOfDate,
+      ),
       hasCounterparty: Boolean(tx.counterpartyId),
       isTransfer: tx.isTransfer,
       linkedToBalance: Boolean(linked),
@@ -106,8 +122,13 @@ export async function computeManagementBalance(
   let receivable = toDecimal(0);
   let payable = toDecimal(0);
   let payrollPayable = toDecimal(0);
-  for (const doc of unpaidDocuments) {
-    const remaining = sumMoney(doc.lines.map((l) => l.amount)).minus(sumMoney(doc.allocations.map((a) => a.amount)));
+  for (const doc of allDocuments) {
+    const paid = allocatedAsOf(
+      doc.allocations.map((a) => ({ amount: toDecimal(a.amount), paymentDate: a.bankTransaction.operationDate, documentDate: doc.date })),
+      asOfDate,
+    );
+    const remaining = sumMoney(doc.lines.map((l) => l.amount)).minus(paid);
+    if (remaining.isZero()) continue;
     if (doc.direction === "INCOME") receivable = receivable.plus(remaining);
     else if (doc.sourceSystem === "payroll") payrollPayable = payrollPayable.plus(remaining);
     else payable = payable.plus(remaining);
@@ -129,6 +150,20 @@ export async function computeManagementBalance(
       byType[type] = byType[type].plus(toDecimal(line.amount));
     }
   }
+  // Depreciation and interest accrued by the date: expenses in the P&L, and lines in the balance.
+  let accumulatedDepreciation = toDecimal(0);
+  let accruedInterest = toDecimal(0);
+  for (const item of nonCash) {
+    const amount = chargesIn(item.schedule, null, asOfDate);
+    byType[item.pnlArticle.type] = byType[item.pnlArticle.type].plus(amount);
+    if (item.kind === "depreciation") accumulatedDepreciation = accumulatedDepreciation.plus(amount);
+    else accruedInterest = accruedInterest.plus(amount);
+  }
+  const accruedBySystemCode = new Map<string, Decimal>([
+    ["accumulated_depreciation", accumulatedDepreciation.negated()],
+    ["interest_payable", accruedInterest],
+  ]);
+
   const pnlTotals = derivePnlTotals({
     revenue: byType.REVENUE,
     directVariable: byType.DIRECT_VARIABLE,
@@ -144,7 +179,9 @@ export async function computeManagementBalance(
     entrySums.set(e.balanceArticleId, (entrySums.get(e.balanceArticleId) ?? toDecimal(0)).plus(toDecimal(e.amount)));
   }
   // Archived articles still count while they carry a balance.
-  const visibleArticles = articles.filter((a) => !a.isArchived || entrySums.has(a.id) || linkedFlows.has(a.id));
+  const visibleArticles = articles.filter(
+    (a) => !a.isArchived || entrySums.has(a.id) || linkedFlows.has(a.id) || !(accruedBySystemCode.get(a.systemCode ?? "")?.isZero() ?? true),
+  );
 
   const assembled = assembleBalance({
     cash,
@@ -161,6 +198,7 @@ export async function computeManagementBalance(
       systemCode: a.systemCode,
       entries: entrySums.get(a.id) ?? toDecimal(0),
       linkedFlows: linkedFlows.get(a.id) ?? toDecimal(0),
+      accrued: accruedBySystemCode.get(a.systemCode ?? ""),
     })),
   });
 

@@ -18,6 +18,13 @@ export const DERIVED_SYSTEM_CODES: ReadonlySet<string> = new Set([
   "payroll_payable",
 ]);
 
+/**
+ * Строки начислений без документов (src/lib/reports/non-cash.ts): сумма —
+ * начисленное по реестрам плюс балансовые операции и привязанные статьи ДДС
+ * (остаток на начало учёта, уплата процентов, списание при выбытии).
+ */
+export const ACCRUED_SYSTEM_CODES: ReadonlySet<string> = new Set(["accumulated_depreciation", "interest_payable"]);
+
 export function acceptsManualEntries(systemCode: string | null): boolean {
   return !systemCode || !DERIVED_SYSTEM_CODES.has(systemCode);
 }
@@ -63,6 +70,8 @@ export interface BalanceArticleInput {
   entries: Decimal;
   /** Изменение от операций по привязанным статьям ДДС на дату. */
   linkedFlows: Decimal;
+  /** Начислено по реестрам (амортизация — со знаком минус, проценты — плюс); только у ACCRUED_SYSTEM_CODES. */
+  accrued?: Decimal;
 }
 
 export interface BalanceArticleLine {
@@ -70,6 +79,7 @@ export interface BalanceArticleLine {
   name: string;
   entries: Decimal;
   linkedFlows: Decimal;
+  accrued: Decimal;
   amount: Decimal;
 }
 
@@ -111,14 +121,11 @@ export function assembleBalance(input: {
   netProfitFromPnl: Decimal;
   articles: BalanceArticleInput[];
 }): AssembledBalance {
-  const line = (a: BalanceArticleInput): BalanceArticleLine => ({
-    id: a.id,
-    name: a.name,
-    entries: a.entries,
-    linkedFlows: a.linkedFlows,
-    amount: a.entries.plus(a.linkedFlows),
-  });
-  const manual = input.articles.filter((a) => !a.systemCode);
+  const line = (a: BalanceArticleInput): BalanceArticleLine => {
+    const accrued = a.accrued ?? toDecimal(0);
+    return { id: a.id, name: a.name, entries: a.entries, linkedFlows: a.linkedFlows, accrued, amount: a.entries.plus(a.linkedFlows).plus(accrued) };
+  };
+  const manual = input.articles.filter((a) => !a.systemCode || ACCRUED_SYSTEM_CODES.has(a.systemCode));
   const assetArticles = manual.filter((a) => a.category === "ASSET").map(line);
   const liabilityArticles = manual.filter((a) => a.category === "LIABILITY").map(line);
   const equityArticles = manual.filter((a) => a.category === "EQUITY").map(line);
@@ -157,4 +164,17 @@ export function assembleBalance(input: {
     discrepancy,
     isBalanced: discrepancy.abs().lessThan(0.01),
   };
+}
+
+/**
+ * Сколько из сопоставлений погашено на дату отчёта. Сопоставление действует,
+ * когда уже есть и платёж, и документ, — с более поздней из двух дат: до
+ * документа предоплата остаётся авансом, до платежа документ не оплачен.
+ * Дата ввода сопоставления в систему роли не играет — это технический шаг;
+ * отменённые сопоставления не учитываются вовсе (их как бы не было).
+ */
+export function allocatedAsOf(allocations: Array<{ amount: Decimal; paymentDate: Date; documentDate: Date }>, asOfDate: Date): Decimal {
+  return sumMoney(
+    allocations.filter((a) => Math.max(a.paymentDate.getTime(), a.documentDate.getTime()) <= asOfDate.getTime()).map((a) => a.amount),
+  );
 }

@@ -3,6 +3,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import type { DictionaryConfig, DictionaryDelegate, FieldOption } from "./types";
 import { acceptsManualEntries } from "@/lib/reports/balance-lines";
 import { validateInn } from "@/lib/integrations/inn";
+import { validateCreditAgreementRecord, validateFixedAssetRecord } from "@/lib/reports/non-cash-guards";
 
 function delegate(d: unknown): DictionaryDelegate {
   return d as DictionaryDelegate;
@@ -37,6 +38,20 @@ async function counterpartyOptions(): Promise<FieldOption[]> {
 async function balanceArticleOptions(): Promise<FieldOption[]> {
   const rows = await prisma.balanceArticle.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } });
   return rows.filter((r) => acceptsManualEntries(r.systemCode)).map((r) => ({ value: r.id, label: r.name }));
+}
+
+// A loan needs its own liability line: its balance is the loan's outstanding debt.
+async function loanBalanceArticleOptions(): Promise<FieldOption[]> {
+  const rows = await prisma.balanceArticle.findMany({ where: { isArchived: false, category: "LIABILITY", systemCode: null }, orderBy: { name: "asc" } });
+  return rows.map((r) => ({ value: r.id, label: r.name }));
+}
+
+async function expensePnlArticleOptions(): Promise<FieldOption[]> {
+  const rows = await prisma.pnlArticle.findMany({
+    where: { isArchived: false, type: { notIn: ["REVENUE", "OTHER_INCOME"] } },
+    orderBy: { name: "asc" },
+  });
+  return rows.map((r) => ({ value: r.id, label: r.name }));
 }
 
 async function pnlArticleOptions(): Promise<FieldOption[]> {
@@ -479,6 +494,50 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "code", label: "Параметр", type: "select", required: true, options: PAYROLL_PARAMETER_OPTIONS },
       { name: "year", label: "Год", type: "number", required: true },
       { name: "value", label: "Значение, ₽", type: "number", required: true },
+    ],
+  },
+  "fixed-assets": {
+    slug: "fixed-assets",
+    title: "Основные средства",
+    singularTitle: "Основное средство",
+    entityAuditType: "fixed_asset",
+    delegate: delegate(prisma.fixedAsset),
+    permissionView: PERMISSIONS.MASTERDATA_VIEW,
+    permissionManage: PERMISSIONS.MASTERDATA_MANAGE,
+    orderBy: { name: "asc" },
+    listColumns: ["name", "cost", "commissioningDate", "usefulLifeMonths", "disposalDate"],
+    validateRecord: validateFixedAssetRecord,
+    fields: [
+      { name: "name", label: "Наименование", type: "text", required: true },
+      { name: "inventoryNumber", label: "Инвентарный номер", type: "text" },
+      { name: "organizationId", label: "Организация", type: "select", required: true, loadOptions: organizationOptions },
+      { name: "departmentId", label: "Подразделение", type: "select", loadOptions: () => departmentOptions() },
+      { name: "cost", label: "Первоначальная стоимость, ₽", type: "number", required: true },
+      { name: "commissioningDate", label: "Дата ввода в эксплуатацию", type: "date", required: true },
+      { name: "usefulLifeMonths", label: "Срок полезного использования, мес.", type: "number", required: true, validate: intBetween(1, 600, "Срок") },
+      { name: "pnlArticleId", label: "Статья ОПиУ для амортизации", type: "select", required: true, loadOptions: expensePnlArticleOptions },
+      { name: "disposalDate", label: "Дата выбытия", type: "date" },
+    ],
+  },
+  "credit-agreements": {
+    slug: "credit-agreements",
+    title: "Займы и кредиты",
+    singularTitle: "Займ или кредит",
+    entityAuditType: "credit_agreement",
+    delegate: delegate(prisma.creditAgreement),
+    permissionView: PERMISSIONS.MASTERDATA_VIEW,
+    permissionManage: PERMISSIONS.MASTERDATA_MANAGE,
+    orderBy: { name: "asc" },
+    listColumns: ["name", "annualRatePct", "startDate", "endDate"],
+    validateRecord: validateCreditAgreementRecord,
+    fields: [
+      { name: "name", label: "Название (банк, номер договора)", type: "text", required: true },
+      { name: "organizationId", label: "Организация", type: "select", required: true, loadOptions: organizationOptions },
+      { name: "balanceArticleId", label: "Статья баланса займа (своя для каждого)", type: "select", required: true, loadOptions: loanBalanceArticleOptions },
+      { name: "annualRatePct", label: "Ставка, % годовых", type: "number", required: true },
+      { name: "startDate", label: "Начисление процентов с", type: "date", required: true },
+      { name: "endDate", label: "Договор до (необязательно)", type: "date" },
+      { name: "pnlArticleId", label: "Статья ОПиУ для процентов", type: "select", required: true, loadOptions: expensePnlArticleOptions },
     ],
   },
   "production-calendar": {

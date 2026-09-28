@@ -39,4 +39,9 @@ export interface DictionaryConfig {
   permissionView: PermissionCode;
   permissionManage: PermissionCode;
   orderBy?: Record<string, "asc" | "desc">;
+  /**
+   * Проверка записи целиком перед сохранением (форма и загрузка из Excel):
+   * текст ошибки или null. before — прежняя запись при изменении.
+   */
+  validateRecord?: (data: Record<string, unknown>, before: Record<string, unknown> | null) => Promise<string | null>;
 }

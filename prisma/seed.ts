@@ -84,10 +84,13 @@ const INITIAL_BALANCE_ARTICLES: Array<{ name: string; category: "ASSET" | "LIABI
   { name: "Дебиторская задолженность", category: "ASSET", systemCode: "receivable" },
   { name: "Авансы выданные", category: "ASSET", systemCode: "advances_issued" },
   { name: "Прочие активы", category: "ASSET" },
+  { name: "Основные средства", category: "ASSET" },
+  { name: "Накопленная амортизация", category: "ASSET", systemCode: "accumulated_depreciation" },
   { name: "Кредиторская задолженность", category: "LIABILITY", systemCode: "payable" },
   { name: "Авансы полученные", category: "LIABILITY", systemCode: "advances_received" },
   { name: "Налоги и зарплата к выплате", category: "LIABILITY", systemCode: "payroll_payable" },
   { name: "Займы и кредиты", category: "LIABILITY" },
+  { name: "Проценты к уплате", category: "LIABILITY", systemCode: "interest_payable" },
   { name: "Капитал", category: "EQUITY" },
   { name: "Нераспределённая прибыль", category: "EQUITY", systemCode: "retained_earnings" },
 ];

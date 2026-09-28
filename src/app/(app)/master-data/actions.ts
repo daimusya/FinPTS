@@ -65,6 +65,9 @@ export async function createDictionaryItem(slug: string, formData: FormData) {
     redirect(`/master-data/${slug}/new?error=${encodeURIComponent((error as Error).message)}`);
   }
 
+  const invalid = config.validateRecord ? await config.validateRecord(data!, null) : null;
+  if (invalid) redirect(`/master-data/${slug}/new?error=${encodeURIComponent(invalid)}`);
+
   let created: Awaited<ReturnType<typeof config.delegate.create>>;
   try {
     created = await config.delegate.create({ data });
@@ -97,6 +100,9 @@ export async function updateDictionaryItem(slug: string, id: string, formData: F
   } catch (error) {
     redirect(`/master-data/${slug}/${id}/edit?error=${encodeURIComponent((error as Error).message)}`);
   }
+
+  const invalid = config.validateRecord ? await config.validateRecord({ ...before, ...data! }, before) : null;
+  if (invalid) redirect(`/master-data/${slug}/${id}/edit?error=${encodeURIComponent(invalid)}`);
 
   let updated: Awaited<ReturnType<typeof config.delegate.update>>;
   try {

@@ -132,6 +132,7 @@ export async function GET(request: NextRequest) {
       rows.push([TYPE_LABELS[t], toNum(bucket.total), ...plan(bucket.total, planByType.get(t) ?? null)]);
       for (const row of merged) {
         rows.push([`  ${row.articleName}`, toNum(row.amount), ...(withPlan ? planCells(row) : [])]);
+        if (row.nonCash) rows.push([`    в т.ч. амортизация и проценты без документов`, toNum(row.nonCash)]);
       }
     }
     const planTotals = derivePnlTotals({

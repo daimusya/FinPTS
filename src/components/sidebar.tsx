@@ -34,6 +34,8 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/master-data/cash-flow-articles", label: "Статьи ДДС" },
       { href: "/master-data/pnl-articles", label: "Статьи ОПиУ" },
       { href: "/master-data/balance-articles", label: "Статьи баланса" },
+      { href: "/master-data/fixed-assets", label: "Основные средства" },
+      { href: "/master-data/credit-agreements", label: "Займы и кредиты" },
       { href: "/master-data/positions", label: "Должности" },
       { href: "/master-data/work-schedules", label: "Графики работы" },
       { href: "/master-data/payroll-accrual-types", label: "Виды начислений зарплаты" },

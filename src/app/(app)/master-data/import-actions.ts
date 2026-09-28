@@ -114,6 +114,19 @@ export async function importDictionaryAction(slug: string, formData: FormData) {
   }
 
   const errors = [...plan.errors, ...(details?.errors ?? [])];
+  // Whole-record checks of the dictionary (for example, closed periods for fixed assets) — row by row.
+  if (config.validateRecord && errors.length === 0) {
+    const byId = new Map(existingItems.map((item) => [String(item.id), item]));
+    for (const c of plan.creates) {
+      const problem = await config.validateRecord(c.data, null);
+      if (problem) errors.push(`Строка ${c.line}: ${problem}`);
+    }
+    for (const u of plan.updates) {
+      const before = byId.get(u.id) ?? null;
+      const problem = await config.validateRecord({ ...before, ...u.data }, before);
+      if (problem) errors.push(`Строка ${u.line}: ${problem}`);
+    }
+  }
   if (errors.length > 0) backWithErrors(slug, errors);
 
   if (dryRun) {

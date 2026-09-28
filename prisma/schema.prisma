@@ -151,6 +151,8 @@ model Organization {
   budgetEntries     BudgetEntry[]
   balanceEntries    BalanceEntry[]
 
+  fixedAssets      FixedAsset[]
+  creditAgreements CreditAgreement[]
   @@map("organizations")
 }
 
@@ -179,6 +181,7 @@ model Department {
   scenarios       FinancialScenarioDepartment[]
 
   budgetEntries BudgetEntry[]
+  fixedAssets FixedAsset[]
   @@map("departments")
 }
 
@@ -396,6 +399,8 @@ model PnlArticle {
   payrollTypes PayrollAccrualType[]
   budgetEntries BudgetEntry[]
 
+  fixedAssets      FixedAsset[]
+  creditAgreements CreditAgreement[]
   @@map("pnl_articles")
 }
 
@@ -423,6 +428,7 @@ model BalanceArticle {
   entries          BalanceEntry[]
   cashFlowArticles CashFlowArticle[]
 
+  creditAgreements CreditAgreement[]
   @@map("balance_articles")
 }
 
@@ -1440,4 +1446,52 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@map("audit_log")
+}
+
+/// Основное средство: по нему помесячно начисляется линейная амортизация
+/// (ОПиУ — статья pnlArticleId, баланс — «Накопленная амортизация»). Стоимость
+/// в балансе — по операциям и балансовым операциям статьи актива, реестр её не
+/// добавляет, чтобы не задвоить.
+model FixedAsset {
+  id                String    @id @default(cuid())
+  name              String
+  inventoryNumber   String?
+  organizationId    String
+  departmentId      String?
+  pnlArticleId      String
+  cost              Decimal   @db.Decimal(18, 2)
+  commissioningDate DateTime  @db.Date
+  usefulLifeMonths  Int
+  disposalDate      DateTime? @db.Date
+  isArchived        Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  department   Department?  @relation(fields: [departmentId], references: [id])
+  pnlArticle   PnlArticle   @relation(fields: [pnlArticleId], references: [id])
+
+  @@map("fixed_assets")
+}
+
+/// Займ или кредит: проценты начисляются ежедневно на остаток долга по его
+/// статье баланса (получение и погашение — операции по привязанной статье ДДС
+/// или балансовые операции) и копятся в «Процентах к уплате» до оплаты.
+model CreditAgreement {
+  id               String    @id @default(cuid())
+  name             String
+  organizationId   String
+  /// Своя статья баланса займа — по ней считается остаток долга.
+  balanceArticleId String    @unique
+  pnlArticleId     String
+  annualRatePct    Decimal   @db.Decimal(6, 3)
+  startDate        DateTime  @db.Date
+  endDate          DateTime? @db.Date
+  isArchived       Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  balanceArticle BalanceArticle @relation(fields: [balanceArticleId], references: [id])
+  pnlArticle     PnlArticle     @relation(fields: [pnlArticleId], references: [id])
+
+  @@map("credit_agreements")
 }
