@@ -9,7 +9,8 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { ALL_DRIVER_DEFS } from "@/lib/financial-model/drivers";
 import { parseNewServiceForm, type NewServiceFormData, NEW_SERVICE_FIELDS, newServiceDbData } from "@/lib/financial-model/new-services";
 import { materializeScenarioDepartments } from "@/lib/financial-model/scenario-departments";
-import { parseLoanForm, type LoanFormData } from "@/lib/financial-model/loans";
+import { LOAN_FIELDS, parseLoanForm, type LoanFormData } from "@/lib/financial-model/loans";
+import { TAX_REGIMES, type TaxRegime } from "@/lib/financial-model/taxes";
 
 export async function createScenarioAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
@@ -140,9 +141,7 @@ export async function removeNewServiceAction(scenarioId: string, serviceId: stri
 export async function addLoanAction(scenarioId: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
 
-  const raw = Object.fromEntries(
-    ["name", "amount", "start", "annualRatePct", "termMonths", "repayment"].map((k) => [k, String(formData.get(k) ?? "")]),
-  );
+  const raw = Object.fromEntries(LOAN_FIELDS.map((k) => [k, String(formData.get(k) ?? "")]));
   const parsed = parseLoanForm(raw);
   if ("error" in parsed) redirect(scenarioUrl(scenarioId, formData, parsed.error));
   const { data } = parsed as { data: LoanFormData };
@@ -157,6 +156,10 @@ export async function addLoanAction(scenarioId: string, formData: FormData) {
       annualRatePct: data.annualRatePct.toFixed(3),
       termMonths: data.termMonths,
       repayment: data.repayment,
+      graceMonths: data.graceMonths,
+      prepaymentYear: data.prepaymentYear,
+      prepaymentMonth: data.prepaymentMonth,
+      prepaymentAmount: data.prepaymentAmount?.toFixed(2) ?? null,
     },
   });
 
@@ -166,6 +169,40 @@ export async function addLoanAction(scenarioId: string, formData: FormData) {
     entityId: scenarioId,
     action: "add_loan",
     after: created as never,
+  });
+
+  revalidatePath(`/financial-model/${scenarioId}`);
+  redirect(scenarioUrl(scenarioId, formData));
+}
+
+/** Налог в прогнозе сценария: режим и ставка (пусто — стандартная для режима). */
+export async function saveScenarioTaxAction(scenarioId: string, formData: FormData) {
+  const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
+
+  const regime = String(formData.get("taxRegime") ?? "none") as TaxRegime;
+  if (!TAX_REGIMES.includes(regime)) redirect(scenarioUrl(scenarioId, formData, "Выберите налоговый режим"));
+  const rateRaw = String(formData.get("taxRatePct") ?? "").replace(/[\s ]/g, "").replace(",", ".");
+  let taxRatePct: string | null = null;
+  if (rateRaw !== "" && regime !== "none") {
+    const rate = Number(rateRaw);
+    if (!/^\d+(\.\d+)?$/.test(rateRaw) || rate > 100) redirect(scenarioUrl(scenarioId, formData, "Ставка налога — от 0 до 100%"));
+    taxRatePct = rate.toFixed(2);
+  }
+
+  const before = await prisma.financialScenario.findUnique({ where: { id: scenarioId }, select: { taxRegime: true, taxRatePct: true } });
+  if (!before) redirect("/financial-model");
+  const updated = await prisma.financialScenario.update({
+    where: { id: scenarioId },
+    data: { taxRegime: regime, taxRatePct },
+    select: { taxRegime: true, taxRatePct: true },
+  });
+  await logAudit({
+    userId: session.userId,
+    entityType: "financial_scenario",
+    entityId: scenarioId,
+    action: "update_tax",
+    before: before as never,
+    after: updated as never,
   });
 
   revalidatePath(`/financial-model/${scenarioId}`);

@@ -48,6 +48,10 @@ export interface LoanInput {
   annualRatePct: Decimal;
   termMonths: number;
   repayment: LoanRepayment;
+  /** Льготный период: первые N месяцев платежей — только проценты. */
+  graceMonths?: number;
+  /** Досрочное погашение части долга в месяц index (вместе с плановым платежом). */
+  prepayment?: { index: number; amount: Decimal } | null;
 }
 
 export interface LoanMonth {
@@ -62,29 +66,47 @@ export interface LoanMonth {
  * График кредита по месяцам (ключ — индекс месяца год × 12 + месяц − 1).
  * Деньги приходят в месяц получения, платежи начинаются со следующего:
  * проценты = остаток × ставка / 12; основной долг — по типу погашения.
+ * В льготный период платятся только проценты, долг гасится за оставшиеся
+ * месяцы срока. Досрочное погашение уменьшает долг сверх планового платежа;
+ * срок сохраняется, платёж дальше пересчитывается на новый остаток.
  * Суммы округляются до копеек, последний платёж закрывает долг ровно в ноль.
  */
 export function loanSchedule(loan: LoanInput): Map<number, LoanMonth> {
   const schedule = new Map<number, LoanMonth>();
   const r = loan.annualRatePct.dividedBy(100).dividedBy(12);
   const n = loan.termMonths;
+  const grace = Math.min(Math.max(0, loan.graceMonths ?? 0), n - 1);
   schedule.set(loan.startIndex, { drawdown: loan.amount, interest: new Decimal(0), principal: new Decimal(0), balance: loan.amount });
 
-  const annuity = r.isZero()
-    ? loan.amount.dividedBy(n)
-    : loan.amount.times(r).dividedBy(new Decimal(1).minus(new Decimal(1).plus(r).pow(-n)));
+  // Planned principal part (linear) or payment (annuity) for the remaining months, recalculated after grace and prepayment.
+  const plan = (balance: Decimal, remaining: number) => {
+    if (loan.repayment === "linear") return round2(balance.dividedBy(remaining));
+    if (r.isZero()) return round2(balance.dividedBy(remaining));
+    return round2(balance.times(r).dividedBy(new Decimal(1).minus(new Decimal(1).plus(r).pow(-remaining))));
+  };
 
   let balance = loan.amount;
+  let planned = plan(balance, n - grace);
   for (let k = 1; k <= n; k += 1) {
+    const index = loan.startIndex + k;
     const interest = round2(balance.times(r));
     let principal: Decimal;
     if (k === n) principal = balance;
-    else if (loan.repayment === "annuity") principal = round2(annuity).minus(interest);
-    else if (loan.repayment === "linear") principal = round2(loan.amount.dividedBy(n));
-    else principal = new Decimal(0);
+    else if (k <= grace || loan.repayment === "bullet") principal = new Decimal(0);
+    else if (loan.repayment === "annuity") principal = r.isZero() ? planned : planned.minus(interest);
+    else principal = planned;
     principal = Decimal.max(0, Decimal.min(principal, balance));
     balance = balance.minus(principal);
-    schedule.set(loan.startIndex + k, { drawdown: new Decimal(0), interest, principal, balance });
+    let recalc = k === grace;
+    if (loan.prepayment && loan.prepayment.index === index && balance.greaterThan(0)) {
+      const extra = Decimal.min(loan.prepayment.amount, balance);
+      principal = principal.plus(extra);
+      balance = balance.minus(extra);
+      recalc = true;
+    }
+    if (recalc && k < n) planned = plan(balance, n - Math.max(k, grace));
+    schedule.set(index, { drawdown: new Decimal(0), interest, principal, balance });
+    if (balance.isZero()) break;
   }
   return schedule;
 }

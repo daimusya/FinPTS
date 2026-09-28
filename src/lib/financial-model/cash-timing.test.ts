@@ -70,3 +70,41 @@ describe("loanSchedule", () => {
     expect(nums(m.slice(1).map((x) => x.principal))).toEqual([300000, 300000, 300000, 300000]);
   });
 });
+
+describe("loanSchedule — grace period and prepayment", () => {
+  const base = { id: "l", name: "Кредит", startIndex: 2027 * 12, termMonths: 12 };
+
+  it("charges only interest during the grace period, then repays over the rest of the term", () => {
+    const s = loanSchedule({ ...base, amount: d(1200000), annualRatePct: d(12), repayment: "linear", graceMonths: 2 });
+    const payments = [...s.entries()].filter(([i]) => i > base.startIndex).map(([, m]) => m);
+    expect(nums(payments.slice(0, 3).map((m) => m.principal))).toEqual([0, 0, 120000]);
+    expect(nums(payments.slice(0, 3).map((m) => m.interest))).toEqual([12000, 12000, 12000]);
+    expect(payments.reduce((a, m) => a.plus(m.principal), d(0)).toNumber()).toBe(1200000);
+    expect(payments[11].balance.toNumber()).toBe(0);
+  });
+
+  it("a prepayment lowers the later payments and keeps the term", () => {
+    const s = loanSchedule({
+      ...base,
+      amount: d(1200000),
+      annualRatePct: d(0),
+      repayment: "linear",
+      prepayment: { index: base.startIndex + 3, amount: d(300000) },
+    });
+    const payments = [...s.entries()].filter(([i]) => i > base.startIndex).map(([, m]) => m);
+    expect(nums(payments.slice(0, 4).map((m) => m.principal))).toEqual([100000, 100000, 400000, 66666.67]);
+    expect(payments[11].principal.toNumber()).toBe(66666.64);
+    expect(payments[11].balance.toNumber()).toBe(0);
+  });
+
+  it("an annuity recalculated after a prepayment still ends at zero; a prepayment above the debt closes the loan", () => {
+    const s = loanSchedule({ ...base, amount: d(1200000), annualRatePct: d(12), repayment: "annuity", prepayment: { index: base.startIndex + 6, amount: d(200000) } });
+    const payments = [...s.entries()].filter(([i]) => i > base.startIndex).map(([, m]) => m);
+    expect(payments[0].principal.plus(payments[0].interest).toNumber()).toBe(106618.55);
+    expect(payments[6].principal.plus(payments[6].interest).toNumber()).toBeLessThan(106618.55);
+    expect(payments.reduce((a, m) => a.plus(m.principal), d(0)).toNumber()).toBe(1200000);
+    const closed = loanSchedule({ ...base, amount: d(100000), annualRatePct: d(0), repayment: "linear", prepayment: { index: base.startIndex + 2, amount: d(500000) } });
+    expect(Math.max(...closed.keys())).toBe(base.startIndex + 2);
+    expect(closed.get(base.startIndex + 2)!.balance.toNumber()).toBe(0);
+  });
+});

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import type { NewServiceInput } from "./project";
 
 export const MAX_RAMP_UP_MONTHS = 36;
+export const MAX_PAYMENT_DAYS = 365;
 
 export interface NewServiceFormData {
   name: string;
@@ -17,6 +18,7 @@ export interface NewServiceFormData {
   staffCostPerEmployee: Decimal | null;
   monthlyFixedCosts: Decimal | null;
   launchCosts: Decimal | null;
+  customerPaymentDays: number | null;
 }
 
 /** Поля формы новой услуги — общие для добавления и правки. */
@@ -32,6 +34,7 @@ export const NEW_SERVICE_FIELDS = [
   "staffCostPerEmployee",
   "monthlyFixedCosts",
   "launchCosts",
+  "customerPaymentDays",
 ] as const;
 
 function parseAmount(raw: string): Decimal | null {
@@ -89,6 +92,12 @@ export function parseNewServiceForm(
   const launchCosts = optionalAmount("launchCosts", "Расходы на запуск");
   for (const v of [staffCost, monthlyFixed, launchCosts]) if (v && "error" in v) return v;
 
+  const lagRaw = (raw.customerPaymentDays ?? "").trim();
+  const customerPaymentDays = lagRaw === "" ? null : Number(lagRaw);
+  if (customerPaymentDays !== null && (!Number.isInteger(customerPaymentDays) || customerPaymentDays < 0 || customerPaymentDays > MAX_PAYMENT_DAYS)) {
+    return { error: `Отсрочка оплаты клиентов услуги — целое число дней от 0 до ${MAX_PAYMENT_DAYS}` };
+  }
+
   return {
     data: {
       name,
@@ -103,6 +112,7 @@ export function parseNewServiceForm(
       staffCostPerEmployee: staffCost as Decimal | null,
       monthlyFixedCosts: monthlyFixed as Decimal | null,
       launchCosts: launchCosts as Decimal | null,
+      customerPaymentDays,
     },
   };
 }
@@ -123,6 +133,7 @@ export function newServiceDbData(data: NewServiceFormData) {
     staffCostPerEmployee: money(data.staffCostPerEmployee),
     monthlyFixedCosts: money(data.monthlyFixedCosts),
     launchCosts: money(data.launchCosts),
+    customerPaymentDays: data.customerPaymentDays,
   };
 }
 
@@ -147,6 +158,7 @@ export async function loadNewServices(scenarioIds: string[]): Promise<Map<string
       staffCostPerEmployee: r.staffCostPerEmployee?.toString() ?? null,
       monthlyFixedCosts: r.monthlyFixedCosts?.toString() ?? null,
       launchCosts: r.launchCosts?.toString() ?? null,
+      customerPaymentDays: r.customerPaymentDays,
     });
   }
   return byScenario;

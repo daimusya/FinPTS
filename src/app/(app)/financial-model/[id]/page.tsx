@@ -16,12 +16,14 @@ import {
   removeLoanAction,
   removeNewServiceAction,
   removeScenarioDepartmentAction,
+  saveScenarioTaxAction,
   saveScenarioValuesAction,
 } from "../actions";
 import { loadScenarioDepartments } from "@/lib/financial-model/scenario-departments";
-import { loadLoans, loadOpeningBalances, MAX_LOAN_TERM_MONTHS } from "@/lib/financial-model/loans";
+import { loadLoans, loadOpeningBalances, MAX_LOAN_TERM_MONTHS, scenarioTax } from "@/lib/financial-model/loans";
+import { DEFAULT_TAX_RATES, TAX_REGIME_LABELS, TAX_REGIMES } from "@/lib/financial-model/taxes";
 import { LOAN_REPAYMENT_LABELS, type LoanRepayment } from "@/lib/financial-model/cash-timing";
-import { loadNewServices, MAX_RAMP_UP_MONTHS } from "@/lib/financial-model/new-services";
+import { loadNewServices, MAX_PAYMENT_DAYS, MAX_RAMP_UP_MONTHS } from "@/lib/financial-model/new-services";
 
 const HORIZON_MONTHS = 12;
 
@@ -98,10 +100,15 @@ export default async function ScenarioDetailPage({
     }),
     loadOpeningBalances(scope),
   ]);
+  const tax = scenarioTax(scenario)!;
+  const taxOn = tax.regime !== "none";
   const projection = projectScenario(startYear, startMonth, HORIZON_MONTHS, rows, startingCash, newServiceInputs, {
     ...opening,
     loans: loanInputs,
+    tax,
   });
+  const startIndex = startYear * 12 + (startMonth - 1);
+  const dueLater = (due: typeof opening.openingReceivableDue) => sumMoney(due.filter((d) => d.index > startIndex).map((d) => d.amount));
   const totalNetProfit = sumMoney(projection.map((p) => p.netProfit));
   const finalDebt = projection[projection.length - 1]?.loanDebt ?? sumMoney([]);
   const noService = null as (typeof newServiceRows)[number] | null;
@@ -163,7 +170,7 @@ export default async function ScenarioDetailPage({
           <div className="stat-value">{formatMoney(totalOperatingProfit)}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Прибыль после процентов за 12 месяцев</div>
+          <div className="stat-label">{taxOn ? "Чистая прибыль (после налога) за 12 месяцев" : "Прибыль после процентов за 12 месяцев"}</div>
           <div className="stat-value">{formatMoney(totalNetProfit)}</div>
         </div>
         <div className="stat-card">
@@ -322,6 +329,7 @@ export default async function ScenarioDetailPage({
                 <th>Переменные расходы</th>
                 <th>Персонал</th>
                 <th>Постоянные в мес. / на запуск</th>
+                <th>Отсрочка клиентов</th>
                 <th />
               </tr>
             </thead>
@@ -329,7 +337,7 @@ export default async function ScenarioDetailPage({
               {newServiceRows.map((service) =>
                 canManage && sp.editService === service.id ? (
                   <tr key={service.id} className="row-editing">
-                    <td colSpan={9}>
+                    <td colSpan={10}>
                       <form action={updateNewServiceAction.bind(null, id, service.id)} className="form-grid" style={{ alignItems: "flex-end" }}>
                         {keepStart}
                         <label className="field">
@@ -383,6 +391,10 @@ export default async function ScenarioDetailPage({
                           <span>Расходы на запуск (разово), ₽</span>
                           <input type="text" inputMode="decimal" name="launchCosts" defaultValue={service?.launchCosts?.toString() ?? ""} placeholder="0" style={{ width: 140 }} />
                         </label>
+                        <label className="field">
+                          <span>Отсрочка оплаты клиентов, дней</span>
+                          <input type="number" name="customerPaymentDays" min={0} max={MAX_PAYMENT_DAYS} step={1} defaultValue={service?.customerPaymentDays ?? ""} placeholder="как у сценария" style={{ width: 130 }} />
+                        </label>
                         <div className="form-actions">
                           <button type="submit" className="btn btn-primary btn-sm">
                             Сохранить
@@ -421,6 +433,7 @@ export default async function ScenarioDetailPage({
                       ? `${formatMoney(service.monthlyFixedCosts ?? 0)} / ${formatMoney(service.launchCosts ?? 0)}`
                       : "—"}
                   </td>
+                  <td>{service.customerPaymentDays === null ? "как у сценария" : `${service.customerPaymentDays} дн.`}</td>
                   <td>
                     {canManage ? (
                       <div className="row-actions">
@@ -441,7 +454,7 @@ export default async function ScenarioDetailPage({
               )}
               {newServiceRows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="empty-state">
+                  <td colSpan={10} className="empty-state">
                     Новых услуг в сценарии нет.
                   </td>
                 </tr>
@@ -503,6 +516,10 @@ export default async function ScenarioDetailPage({
               <span>Расходы на запуск (разово), ₽</span>
               <input type="text" inputMode="decimal" name="launchCosts" defaultValue={noService?.launchCosts?.toString() ?? ""} placeholder="0" style={{ width: 140 }} />
             </label>
+            <label className="field">
+              <span>Отсрочка оплаты клиентов, дней</span>
+              <input type="number" name="customerPaymentDays" min={0} max={MAX_PAYMENT_DAYS} step={1} defaultValue={noService?.customerPaymentDays ?? ""} placeholder="как у сценария" style={{ width: 130 }} />
+            </label>
             <button type="submit" className="btn btn-secondary">
               Добавить услугу
             </button>
@@ -515,7 +532,10 @@ export default async function ScenarioDetailPage({
         <p className="text-muted" style={{ marginBottom: 12 }}>
           Деньги по кредиту приходят в месяц получения, со следующего месяца — платежи по графику. Проценты (остаток
           долга × ставка / 12) — расход: уменьшают прибыль после процентов и деньги. Погашение основного долга — только
-          отток денег. Для разовых платежей без графика остаётся драйвер «Прочие платежи по кредитам/лизингу».
+          отток денег. Льготный период — первые месяцы платятся только проценты, долг гасится за оставшийся срок.
+          Досрочное погашение — разовая сумма сверх платежа в выбранный месяц; срок сохраняется, дальше платёж
+          пересчитывается на новый остаток. Для разовых платежей без графика остаётся драйвер «Прочие платежи по
+          кредитам/лизингу».
         </p>
         <div className="table-wrap" style={{ marginBottom: 14 }}>
           <table>
@@ -527,6 +547,8 @@ export default async function ScenarioDetailPage({
                 <th>Ставка, % годовых</th>
                 <th>Срок, мес.</th>
                 <th>Погашение</th>
+                <th>Льготный период</th>
+                <th>Досрочно</th>
                 <th />
               </tr>
             </thead>
@@ -541,6 +563,12 @@ export default async function ScenarioDetailPage({
                   <td>{formatNumber(loan.annualRatePct)}</td>
                   <td>{loan.termMonths}</td>
                   <td>{LOAN_REPAYMENT_LABELS[loan.repayment as LoanRepayment] ?? loan.repayment}</td>
+                  <td>{loan.graceMonths > 0 ? `${loan.graceMonths} мес.` : "—"}</td>
+                  <td>
+                    {loan.prepaymentAmount && loan.prepaymentMonth && loan.prepaymentYear
+                      ? `${formatMoney(loan.prepaymentAmount)} в ${MONTH_NAMES_SHORT[loan.prepaymentMonth - 1]} ${loan.prepaymentYear}`
+                      : "—"}
+                  </td>
                   <td>
                     {canManage ? (
                       <form action={removeLoanAction.bind(null, id, loan.id)}>
@@ -555,7 +583,7 @@ export default async function ScenarioDetailPage({
               ))}
               {loanRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="empty-state">
+                  <td colSpan={9} className="empty-state">
                     Кредитов в сценарии нет.
                   </td>
                 </tr>
@@ -596,6 +624,18 @@ export default async function ScenarioDetailPage({
                 ))}
               </select>
             </label>
+            <label className="field">
+              <span>Льготный период, мес.</span>
+              <input type="number" name="graceMonths" min={0} max={MAX_LOAN_TERM_MONTHS - 1} step={1} placeholder="0 — нет" style={{ width: 110 }} />
+            </label>
+            <label className="field">
+              <span>Досрочное погашение: месяц</span>
+              <input type="month" name="prepayment" />
+            </label>
+            <label className="field">
+              <span>Досрочно, ₽</span>
+              <input type="text" inputMode="decimal" name="prepaymentAmount" placeholder="необязательно" style={{ width: 130 }} />
+            </label>
             <button type="submit" className="btn btn-secondary">
               Добавить кредит
             </button>
@@ -603,13 +643,58 @@ export default async function ScenarioDetailPage({
         ) : null}
       </div>
 
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Налог</h2>
+        <p className="text-muted" style={{ marginBottom: 12 }}>
+          УСН «доходы» — ставка × деньги от клиентов; УСН «доходы минус расходы» — ставка × (полученное − оплаченные
+          расходы), за год не меньше 1% доходов; налог на прибыль — ставка × прибыль после процентов. Налог считается
+          нарастающим итогом с начала года в пределах прогноза (убыток уменьшает налог года), уплата — в апреле, июле и
+          октябре за квартал и в марте за год. Налог уменьшает чистую прибыль и деньги. Ставка не указана — стандартная:
+          УСН 6% и 15%, налог на прибыль 25%. НДС и налоги прошлых периодов не считаются.
+        </p>
+        <form action={saveScenarioTaxAction.bind(null, id)} className="form-grid" style={{ alignItems: "flex-end" }}>
+          {keepStart}
+          <label className="field">
+            <span>Режим</span>
+            <select name="taxRegime" defaultValue={tax.regime} disabled={!canManage}>
+              {TAX_REGIMES.map((r) => (
+                <option key={r} value={r}>
+                  {TAX_REGIME_LABELS[r]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Ставка, %</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              name="taxRatePct"
+              defaultValue={scenario.taxRatePct?.toString() ?? ""}
+              placeholder={taxOn ? `стандартная ${DEFAULT_TAX_RATES[tax.regime]}` : "стандартная"}
+              style={{ width: 130 }}
+              disabled={!canManage}
+            />
+          </label>
+          {canManage ? (
+            <button type="submit" className="btn btn-secondary">
+              Сохранить налог
+            </button>
+          ) : null}
+          {taxOn ? <span className="text-muted">Сейчас: {TAX_REGIME_LABELS[tax.regime]}, {formatNumber(tax.ratePct)}%</span> : null}
+        </form>
+      </div>
+
       <div className="card">
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Прогноз</h2>
         <p className="text-muted" style={{ marginBottom: 10 }}>
           Деньги: выручка поступает с отсрочкой оплаты клиентов, переменные расходы и комиссия оплачиваются с
-          отсрочкой оплаты поставщикам (драйверы в днях), постоянные расходы и ФОТ — в том же месяце. Фактическая
-          дебиторка ({formatMoney(opening.openingReceivable ?? 0)}) и кредиторка с зарплатой к выплате (
-          {formatMoney(opening.openingPayable ?? 0)}) на сегодня погашаются в первом месяце.
+          отсрочкой оплаты поставщикам (драйверы в днях; у новой услуги может быть своя отсрочка клиентов), постоянные
+          расходы и ФОТ — в том же месяце. Фактическая дебиторка ({formatMoney(opening.openingReceivable)}) и кредиторка с
+          зарплатой к выплате ({formatMoney(opening.openingPayable)}) на сегодня погашаются по срокам оплаты документов
+          (срок не указан — дата документа), просроченное — в первом месяце; позже первого месяца по сроку —{" "}
+          {formatMoney(dueLater(opening.openingReceivableDue))} дебиторки и {formatMoney(dueLater(opening.openingPayableDue))}{" "}
+          кредиторки.
         </p>
         <div className="table-wrap">
           <table>
@@ -658,10 +743,16 @@ export default async function ScenarioDetailPage({
               <ProjectionRow label="Точка безубыточности" values={projection.map((p) => p.breakEvenRevenue)} format="money" />
               <ProjectionRow label="Запас прочности, %" values={projection.map((p) => p.marginOfSafetyPct)} format="pct" />
               {loanInputs.length > 0 ? (
+                <ProjectionRow label="Проценты по кредитам" values={projection.map((p) => p.loanInterest)} format="money" />
+              ) : null}
+              {taxOn ? (
                 <>
-                  <ProjectionRow label="Проценты по кредитам" values={projection.map((p) => p.loanInterest)} format="money" />
-                  <ProjectionRow label="Прибыль после процентов" values={projection.map((p) => p.netProfit)} format="money" bold />
+                  <ProjectionRow label="Прибыль до налога" values={projection.map((p) => p.profitBeforeTax)} format="money" bold />
+                  <ProjectionRow label={`${TAX_REGIME_LABELS[tax.regime]} — начислено`} values={projection.map((p) => p.tax)} format="money" />
+                  <ProjectionRow label="Чистая прибыль" values={projection.map((p) => p.netProfit)} format="money" bold />
                 </>
+              ) : loanInputs.length > 0 ? (
+                <ProjectionRow label="Прибыль после процентов" values={projection.map((p) => p.netProfit)} format="money" bold />
               ) : null}
               <ProjectionRow label="Поступления от клиентов" values={projection.map((p) => p.collections)} format="money" />
               <ProjectionRow
@@ -682,11 +773,15 @@ export default async function ScenarioDetailPage({
                 </>
               ) : null}
               <ProjectionRow label="Прочие платежи по кредитам/лизингу" values={projection.map((p) => p.manualLoanPayments)} format="money" />
+              {taxOn ? <ProjectionRow label="Уплата налога" values={projection.map((p) => p.taxPaid)} format="money" /> : null}
               <ProjectionRow label="Остаток денег" values={projection.map((p) => p.cashBalance)} format="money" bold />
               <ProjectionRow label="Дебиторка на конец месяца" values={projection.map((p) => p.receivableEnd)} format="money" />
               <ProjectionRow label="Кредиторка на конец месяца" values={projection.map((p) => p.payableEnd)} format="money" />
               {loanInputs.length > 0 ? (
                 <ProjectionRow label="Долг по кредитам на конец месяца" values={projection.map((p) => p.loanDebt)} format="money" />
+              ) : null}
+              {taxOn ? (
+                <ProjectionRow label="Налог к уплате на конец месяца" values={projection.map((p) => p.taxPayableEnd)} format="money" />
               ) : null}
             </tbody>
           </table>

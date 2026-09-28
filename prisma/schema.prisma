@@ -1272,6 +1272,9 @@ model FinancialScenario {
   id          String   @id @default(cuid())
   name        String
   type        String   // base / optimistic / pessimistic / custom
+  /// Налог в прогнозе: none / usn_income / usn_income_expense / profit (см. src/lib/financial-model/taxes.ts); ставка — пусто = стандартная.
+  taxRegime   String   @default("none")
+  taxRatePct  Decimal? @db.Decimal(5, 2)
   isArchived  Boolean  @default(false)
   createdAt   DateTime @default(now())
 
@@ -1328,6 +1331,12 @@ model FinancialScenarioLoan {
   annualRatePct Decimal  @db.Decimal(6, 3)
   termMonths    Int
   repayment     String
+  /// Льготный период: первые graceMonths месяцев платятся только проценты.
+  graceMonths   Int      @default(0)
+  /// Досрочное погашение части долга в указанный месяц (с сохранением срока, платёж уменьшается).
+  prepaymentYear   Int?
+  prepaymentMonth  Int?
+  prepaymentAmount Decimal? @db.Decimal(18, 2)
   createdAt     DateTime @default(now())
 
   scenario FinancialScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
@@ -1358,6 +1367,8 @@ model FinancialScenarioNewService {
   /// Постоянные расходы услуги в месяц (с запуска) и разовые расходы на запуск (в месяц запуска).
   monthlyFixedCosts Decimal? @db.Decimal(18, 2)
   launchCosts       Decimal? @db.Decimal(18, 2)
+  /// Своя отсрочка оплаты клиентов услуги в днях; пусто — как у сценария.
+  customerPaymentDays Int?
   createdAt        DateTime @default(now())
 
   scenario       FinancialScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)

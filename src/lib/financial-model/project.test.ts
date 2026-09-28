@@ -236,3 +236,47 @@ describe("cash timing in the forecast", () => {
     expect(p[0].loanDebt.toNumber()).toBe(1000000);
   });
 });
+
+describe("projectScenario — terms, own service lags and taxes", () => {
+  const start = 2027 * 12;
+  const service = (over: Partial<NewServiceInput> = {}): NewServiceInput => ({
+    id: "s",
+    name: "Услуга",
+    launchYear: 2027,
+    launchMonth: 1,
+    avgCheck: 1000,
+    salesPerMonth: 100,
+    rampUpMonths: 0,
+    variableCostPct: 0,
+    ...over,
+  });
+
+  it("repays the current receivable by the documents' due dates", () => {
+    const p = projectScenario(2027, 1, 12, [], 0, [], {
+      openingReceivable: new Decimal(220),
+      openingReceivableDue: [
+        { index: start - 2, amount: new Decimal(100) }, // overdue: first month
+        { index: start + 1, amount: new Decimal(50) },
+        { index: start + 20, amount: new Decimal(70) }, // after the horizon: still owed
+      ],
+    });
+    expect(p.slice(0, 3).map((m) => m.openingReceivableCollected.toNumber())).toEqual([100, 50, 0]);
+    expect(p[11].receivableEnd.toNumber()).toBe(70);
+    expect(p[11].cashBalance.toNumber()).toBe(150);
+  });
+
+  it("collects a new service's revenue with its own payment terms", () => {
+    const p = projectScenario(2027, 1, 4, [], 0, [service({ customerPaymentDays: 60 })]);
+    expect(p.map((m) => m.collections.toNumber())).toEqual([0, 0, 100000, 100000]);
+    expect(p[3].receivableEnd.toNumber()).toBe(200000);
+  });
+
+  it("charges the tax in the profit and pays it after the quarter", () => {
+    const p = projectScenario(2027, 1, 4, [], 0, [service()], { tax: { regime: "usn_income", ratePct: new Decimal(6) } });
+    expect(p[0].tax.toNumber()).toBe(6000);
+    expect(p[0].netProfit.toNumber()).toBe(94000);
+    expect(p.map((m) => m.taxPaid.toNumber())).toEqual([0, 0, 0, 18000]);
+    expect(p[3].cashBalance.toNumber()).toBe(400000 - 18000);
+    expect(p[3].taxPayableEnd.toNumber()).toBe(6000);
+  });
+});

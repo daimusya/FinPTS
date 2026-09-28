@@ -3,6 +3,7 @@ import { toDecimal } from "@/lib/money";
 import { computeBreakEven, computeMarginOfSafety } from "@/lib/reports/margin";
 import type { DriverCode } from "./drivers";
 import { loanSchedule, shiftByLag, type LoanInput, type LoanMonth } from "./cash-timing";
+import { taxSchedule, type TaxRegime } from "./taxes";
 
 export interface ScenarioValueRow {
   year: number;
@@ -31,6 +32,8 @@ export interface NewServiceInput {
   monthlyFixedCosts?: number | string | Decimal | null;
   /** Разовые расходы на запуск — в месяц запуска. */
   launchCosts?: number | string | Decimal | null;
+  /** Своя отсрочка оплаты клиентов услуги в днях; null — как у сценария. */
+  customerPaymentDays?: number | null;
 }
 
 export interface NewServiceMonth {
@@ -81,13 +84,19 @@ export interface MonthProjection {
   totalHeadcount: number;
   /** Проценты по кредитам из списка кредитов сценария — расход после операционной прибыли. */
   loanInterest: Decimal;
-  /** Прибыль после процентов по кредитам. */
+  /** Прибыль после процентов, до налога. */
+  profitBeforeTax: Decimal;
+  /** Налог, начисленный в месяце (УСН или налог на прибыль, см. taxes.ts). */
+  tax: Decimal;
+  /** Чистая прибыль: после процентов и налога. */
   netProfit: Decimal;
+  taxPaid: Decimal;
+  taxPayableEnd: Decimal;
   /** Деньги от клиентов с учётом отсрочки оплаты. */
   collections: Decimal;
   /** Оплата переменных расходов и комиссии посредников с учётом отсрочки. */
   supplierPayments: Decimal;
-  /** Текущая (фактическая) дебиторка и кредиторка — погашаются в первом месяце прогноза. */
+  /** Текущая (фактическая) дебиторка и кредиторка — погашаются по своим срокам оплаты. */
   openingReceivableCollected: Decimal;
   openingPayablePaid: Decimal;
   loanDrawdown: Decimal;
@@ -108,7 +117,35 @@ export interface ScenarioCashExtras {
   openingReceivable?: number | string | Decimal;
   /** Фактическая кредиторка (включая зарплату к выплате) на сегодня. */
   openingPayable?: number | string | Decimal;
+  /**
+   * Сроки погашения текущей дебиторки и кредиторки: месяц (год × 12 + месяц − 1)
+   * и сумма. Просроченное — в первом месяце, после горизонта — остаётся долгом.
+   * Не задано — всё в первом месяце.
+   */
+  openingReceivableDue?: DueAmount[];
+  openingPayableDue?: DueAmount[];
   loans?: LoanInput[];
+  tax?: { regime: TaxRegime; ratePct: Decimal };
+}
+
+export interface DueAmount {
+  index: number;
+  amount: Decimal;
+}
+
+/** Сумма к погашению в каждом месяце горизонта; просроченное — в первом. */
+export function spreadDue(due: DueAmount[] | undefined, total: Decimal, startIndex: number, months: number): Decimal[] {
+  const byMonth = Array.from({ length: months }, () => new Decimal(0));
+  if (months === 0) return byMonth;
+  if (!due) {
+    byMonth[0] = total;
+    return byMonth;
+  }
+  for (const d of due) {
+    const i = Math.max(0, d.index - startIndex);
+    if (i < months) byMonth[i] = byMonth[i].plus(d.amount);
+  }
+  return byMonth;
 }
 
 const DEFAULT_100_DRIVERS = new Set<DriverCode>(["seasonality_pct", "new_service_activation_pct"]);
@@ -160,6 +197,8 @@ export function projectScenario(
   const lookup = new DriverLookup(rows);
   const results: MonthProjection[] = [];
   const customerLagDays: number[] = [];
+  // Revenue of new services with their own payment terms, by service: collected with that lag.
+  const ownLagRevenue = new Map<string, { lag: number; amounts: Decimal[] }>();
   const supplierLagDays: number[] = [];
   const manualLoanPayments: Decimal[] = [];
 
@@ -207,6 +246,12 @@ export function projectScenario(
         fixedCosts: fixed,
         contribution: serviceRevenue.minus(variable).minus(payroll).minus(fixed),
       });
+    }
+    for (const service of newServices) {
+      if (service.customerPaymentDays === null || service.customerPaymentDays === undefined) continue;
+      const entry = ownLagRevenue.get(service.id) ?? { lag: service.customerPaymentDays, amounts: [] };
+      entry.amounts[i] = serviceMonths.find((m) => m.id === service.id)?.revenue ?? toDecimal(0);
+      ownLagRevenue.set(service.id, entry);
     }
     const newServicesRevenue = serviceMonths.reduce((acc, s) => acc.plus(s.revenue), toDecimal(0));
     const revenue = baseRevenue.plus(newServicesRevenue);
@@ -261,7 +306,11 @@ export function projectScenario(
       departmentHeadcount,
       totalHeadcount,
       loanInterest: zero,
+      profitBeforeTax: operatingProfit,
+      tax: zero,
       netProfit: operatingProfit,
+      taxPaid: zero,
+      taxPayableEnd: zero,
       collections: zero,
       supplierPayments: zero,
       openingReceivableCollected: zero,
@@ -282,6 +331,7 @@ export function projectScenario(
     customerLagDays,
     supplierLagDays,
     manualLoanPayments,
+    ownLagRevenue: [...ownLagRevenue.values()],
   });
   return results;
 }
@@ -291,10 +341,11 @@ const zero = new Decimal(0);
 /**
  * Второй проход: деньги по месяцам. Выручка приходит с отсрочкой оплаты
  * клиентов, переменные расходы и комиссия уходят с отсрочкой оплаты
- * поставщикам, постоянные расходы и ФОТ — в том же месяце. Фактическая
- * дебиторка и кредиторка на сегодня гасятся в первом месяце. Кредиты из
- * списка: получение — приток, проценты — расход (прибыль после процентов) и
- * отток, основной долг — только отток.
+ * поставщикам, постоянные расходы и ФОТ — в том же месяце; у новой услуги
+ * может быть своя отсрочка клиентов. Фактическая дебиторка и кредиторка на
+ * сегодня гасятся по своим срокам оплаты. Кредиты из списка: получение —
+ * приток, проценты — расход и отток, основной долг — только отток. Налог —
+ * по режиму сценария, уплата — по срокам (taxes.ts).
  */
 function applyCashTiming(
   results: MonthProjection[],
@@ -302,12 +353,25 @@ function applyCashTiming(
   startMonth: number,
   startingCash: Decimal,
   extras: ScenarioCashExtras,
-  drivers: { customerLagDays: number[]; supplierLagDays: number[]; manualLoanPayments: Decimal[] },
+  drivers: {
+    customerLagDays: number[];
+    supplierLagDays: number[];
+    manualLoanPayments: Decimal[];
+    ownLagRevenue: Array<{ lag: number; amounts: Decimal[] }>;
+  },
 ) {
+  const ownLagTotal = (i: number) => drivers.ownLagRevenue.reduce((acc, s) => acc.plus(s.amounts[i] ?? zero), zero);
   const collections = shiftByLag(
-    results.map((r) => r.revenue),
+    results.map((r, i) => r.revenue.minus(ownLagTotal(i))),
     drivers.customerLagDays,
   ).byMonth;
+  for (const service of drivers.ownLagRevenue) {
+    const shifted = shiftByLag(
+      results.map((_, i) => service.amounts[i] ?? zero),
+      results.map(() => service.lag),
+    ).byMonth;
+    shifted.forEach((amount, i) => (collections[i] = collections[i].plus(amount)));
+  }
   const supplierPayments = shiftByLag(
     results.map((r) => r.variableCosts.plus(r.intermediaryCommission)),
     drivers.supplierLagDays,
@@ -320,19 +384,39 @@ function applyCashTiming(
     return acc.plus(before.length > 0 ? before[before.length - 1][1].balance : zero);
   }, zero);
 
+  const receivableDue = spreadDue(extras.openingReceivableDue, toDecimal(extras.openingReceivable ?? 0), startIndex, results.length);
+  const payableDue = spreadDue(extras.openingPayableDue, toDecimal(extras.openingPayable ?? 0), startIndex, results.length);
+
   let cash = startingCash;
   let receivable = toDecimal(extras.openingReceivable ?? 0);
   let payable = toDecimal(extras.openingPayable ?? 0);
+  const loanMonths = results.map((_, i) => {
+    const months = schedules.map((s) => s.get(startIndex + i)).filter((m): m is LoanMonth => Boolean(m));
+    return {
+      drawdown: months.reduce((acc, m) => acc.plus(m.drawdown), zero),
+      interest: months.reduce((acc, m) => acc.plus(m.interest), zero),
+      principal: months.reduce((acc, m) => acc.plus(m.principal), zero),
+    };
+  });
+  // USN counts money received and paid; profit tax counts the accrual-basis profit after interest.
+  const taxes = taxSchedule(
+    extras.tax?.regime ?? "none",
+    extras.tax?.ratePct ?? zero,
+    results.map((r, i) => ({
+      year: r.year,
+      month: r.month,
+      income: collections[i].plus(receivableDue[i]),
+      expenses: supplierPayments[i].plus(payableDue[i]).plus(r.fixedCosts).plus(r.payrollCost).plus(loanMonths[i].interest),
+      profit: r.operatingProfit.minus(loanMonths[i].interest),
+    })),
+  );
   results.forEach((r, i) => {
-    const index = startIndex + i;
-    const months = schedules.map((s) => s.get(index)).filter((m): m is LoanMonth => Boolean(m));
-    const drawdown = months.reduce((acc, m) => acc.plus(m.drawdown), zero);
-    const interest = months.reduce((acc, m) => acc.plus(m.interest), zero);
-    const principal = months.reduce((acc, m) => acc.plus(m.principal), zero);
+    const { drawdown, interest, principal } = loanMonths[i];
     loanDebt = loanDebt.plus(drawdown).minus(principal);
 
-    const openingReceivableCollected = i === 0 ? toDecimal(extras.openingReceivable ?? 0) : zero;
-    const openingPayablePaid = i === 0 ? toDecimal(extras.openingPayable ?? 0) : zero;
+    const openingReceivableCollected = receivableDue[i];
+    const openingPayablePaid = payableDue[i];
+    const tax = taxes[i];
     receivable = receivable.plus(r.revenue).minus(collections[i]).minus(openingReceivableCollected);
     payable = payable.plus(r.variableCosts).plus(r.intermediaryCommission).minus(supplierPayments[i]).minus(openingPayablePaid);
 
@@ -346,7 +430,8 @@ function applyCashTiming(
       .minus(drivers.manualLoanPayments[i])
       .plus(drawdown)
       .minus(interest)
-      .minus(principal);
+      .minus(principal)
+      .minus(tax.paid);
 
     r.collections = collections[i];
     r.supplierPayments = supplierPayments[i];
@@ -357,7 +442,11 @@ function applyCashTiming(
     r.loanInterest = interest;
     r.loanPrincipal = principal;
     r.loanDebt = loanDebt;
-    r.netProfit = r.operatingProfit.minus(interest);
+    r.profitBeforeTax = r.operatingProfit.minus(interest);
+    r.tax = tax.accrued;
+    r.netProfit = r.profitBeforeTax.minus(tax.accrued);
+    r.taxPaid = tax.paid;
+    r.taxPayableEnd = tax.payableEnd;
     r.receivableEnd = receivable;
     r.payableEnd = payable;
     r.cashBalance = cash;

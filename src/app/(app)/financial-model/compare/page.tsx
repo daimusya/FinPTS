@@ -6,7 +6,7 @@ import { SCENARIO_TYPE_LABELS } from "@/lib/financial-model/drivers";
 import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
 import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
 import { loadNewServices } from "@/lib/financial-model/new-services";
-import { loadLoans, loadOpeningBalances } from "@/lib/financial-model/loans";
+import { loadLoans, loadOpeningBalances, scenarioTax } from "@/lib/financial-model/loans";
 import { getAccessScope } from "@/lib/access-scope";
 
 const HORIZON_MONTHS = 12;
@@ -61,6 +61,7 @@ export default async function CompareScenariosPage({
     const projection = projectScenario(startYear, startMonth, HORIZON_MONTHS, rows, startingCash, newServices.get(s.id) ?? [], {
       ...opening,
       loans: loans.get(s.id) ?? [],
+      tax: scenarioTax(s),
     });
     return {
       scenario: s,
@@ -69,6 +70,7 @@ export default async function CompareScenariosPage({
       newServicesCount: newServices.get(s.id)?.length ?? 0,
       totalOperatingProfit: sumMoney(projection.map((p) => p.operatingProfit)),
       totalNetProfit: sumMoney(projection.map((p) => p.netProfit)),
+      totalTax: sumMoney(projection.map((p) => p.tax)),
       finalDebt: projection[projection.length - 1]?.loanDebt ?? sumMoney([]),
       finalCash: projection[projection.length - 1]?.cashBalance ?? sumMoney([]),
       avgBreakEven: sumMoney(projection.filter((p) => p.breakEvenRevenue !== null).map((p) => p.breakEvenRevenue!)).dividedBy(
@@ -138,10 +140,18 @@ export default async function CompareScenariosPage({
               ))}
             </tr>
             <tr>
-              <td>Прибыль после процентов по кредитам за 12 месяцев</td>
+              <td>Чистая прибыль (после процентов и налога) за 12 месяцев</td>
               {results.map((r) => (
                 <td key={r.scenario.id} className="mono">
                   {formatMoney(r.totalNetProfit)}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td>Налог за 12 месяцев (начислено)</td>
+              {results.map((r) => (
+                <td key={r.scenario.id} className="mono">
+                  {r.scenario.taxRegime === "none" ? "не считается" : formatMoney(r.totalTax)}
                 </td>
               ))}
             </tr>

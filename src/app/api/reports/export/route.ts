@@ -23,7 +23,8 @@ import { computeManagementBalance } from "@/lib/reports/balance";
 import { computePayrollSummary, type PayrollSummaryLine } from "@/lib/payroll/summary";
 import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
 import { loadNewServices } from "@/lib/financial-model/new-services";
-import { loadLoans, loadOpeningBalances } from "@/lib/financial-model/loans";
+import { loadLoans, loadOpeningBalances, scenarioTax } from "@/lib/financial-model/loans";
+import { TAX_REGIME_LABELS } from "@/lib/financial-model/taxes";
 import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
 import { MONTH_NAMES_SHORT } from "@/lib/financial-model/drivers";
 import { buildWorkbookBuffer, type ExportSheet } from "@/lib/reports/xlsx-export";
@@ -284,9 +285,11 @@ export async function GET(request: NextRequest) {
     const newServices = (await loadNewServices([scenarioId])).get(scenarioId) ?? [];
     const loans = (await loadLoans([scenarioId])).get(scenarioId) ?? [];
     const opening = await loadOpeningBalances(scope);
+    const tax = scenarioTax(scenario);
     const projection = projectScenario(startYear, startMonth, SCENARIO_HORIZON_MONTHS, rows_, startingCash, newServices, {
       ...opening,
       loans,
+      tax,
     });
     const revenueRows: Array<Array<string | number>> =
       newServices.length > 0
@@ -326,7 +329,9 @@ export async function GET(request: NextRequest) {
       ["Точка безубыточности", ...projection.map((p) => (p.breakEvenRevenue ? toNum(p.breakEvenRevenue) : ""))],
       ["Запас прочности, %", ...projection.map((p) => (p.marginOfSafetyPct ? toNum(p.marginOfSafetyPct) : ""))],
       ["Проценты по кредитам", ...projection.map((p) => toNum(p.loanInterest))],
-      ["Прибыль после процентов", ...projection.map((p) => toNum(p.netProfit))],
+      ["Прибыль до налога", ...projection.map((p) => toNum(p.profitBeforeTax))],
+      [`${TAX_REGIME_LABELS[tax!.regime]} — начислено`, ...projection.map((p) => toNum(p.tax))],
+      ["Чистая прибыль", ...projection.map((p) => toNum(p.netProfit))],
       [],
       ["Поступления от клиентов", ...projection.map((p) => toNum(p.collections))],
       ["Погашение текущей дебиторки", ...projection.map((p) => toNum(p.openingReceivableCollected))],
@@ -337,10 +342,12 @@ export async function GET(request: NextRequest) {
       ["Проценты по кредитам (оплата)", ...projection.map((p) => toNum(p.loanInterest))],
       ["Погашение основного долга", ...projection.map((p) => toNum(p.loanPrincipal))],
       ["Прочие платежи по кредитам/лизингу", ...projection.map((p) => toNum(p.manualLoanPayments))],
+      ["Уплата налога", ...projection.map((p) => toNum(p.taxPaid))],
       ["Остаток денег", ...projection.map((p) => toNum(p.cashBalance))],
       ["Дебиторка на конец месяца", ...projection.map((p) => toNum(p.receivableEnd))],
       ["Кредиторка на конец месяца", ...projection.map((p) => toNum(p.payableEnd))],
       ["Долг по кредитам на конец месяца", ...projection.map((p) => toNum(p.loanDebt))],
+      ["Налог к уплате на конец месяца", ...projection.map((p) => toNum(p.taxPayableEnd))],
     ];
     sheets = [{ name: "Прогноз", rows }];
     // Content-Disposition filename must be ASCII (HTTP headers are ByteString) — Cyrillic scenario names get transliterated away.

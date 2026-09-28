@@ -30,3 +30,23 @@ describe("parseLoanForm", () => {
     }
   });
 });
+
+describe("parseLoanForm — grace period and prepayment", () => {
+  it("accepts a grace period shorter than the term and a prepayment within it", () => {
+    const r = parseLoanForm({ ...valid, graceMonths: "3", prepayment: "2027-06", prepaymentAmount: "300 000" });
+    if ("error" in r) throw new Error(r.error);
+    expect([r.data.graceMonths, r.data.prepaymentYear, r.data.prepaymentMonth, r.data.prepaymentAmount?.toNumber()]).toEqual([3, 2027, 6, 300000]);
+  });
+
+  it("rejects a grace period as long as the term, a prepayment outside the payments or a half-filled prepayment", () => {
+    for (const bad of <Array<Record<string, string>>>[
+      { graceMonths: "24" },
+      { prepayment: "2026-11", prepaymentAmount: "1000" }, // the month of the drawdown
+      { prepayment: "2028-12", prepaymentAmount: "1000" }, // after the last payment
+      { prepayment: "2027-06" },
+      { prepaymentAmount: "1000" },
+    ]) {
+      expect("error" in parseLoanForm({ ...valid, ...bad })).toBe(true);
+    }
+  });
+});
