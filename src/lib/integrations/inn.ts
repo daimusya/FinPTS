@@ -66,6 +66,26 @@ export function mapDadataParty(data: DadataParty, fallbackInn: string): PartyReq
   };
 }
 
+/**
+ * Ключ API DaData — латинские буквы и цифры (обычно 40 шестнадцатеричных
+ * знаков). Пробелы и переносы, прихваченные при копировании, убираются. Ключ
+ * с русскими буквами (скопирована подпись из кабинета, набран в русской
+ * раскладке) отклоняется понятным сообщением — иначе HTTP-заголовок с ним не
+ * отправить, и fetch падает невнятной ошибкой про ByteString.
+ */
+export function normalizeApiKey(raw: string): { key: string } | { error: string } {
+  const key = raw.replace(/\s/g, "");
+  if (!key) return { error: "Ключ API пустой" };
+  if (/[^\x21-\x7E]/.test(key)) {
+    return {
+      error:
+        "В ключе есть русские буквы или другие недопустимые символы. Скопируйте из личного кабинета DaData только сам «API-ключ» — он состоит из латинских букв и цифр — и вставьте его без подписи",
+    };
+  }
+  if (key.length < 20) return { error: "Ключ слишком короткий — скопируйте «API-ключ» из личного кабинета DaData целиком" };
+  return { key };
+}
+
 export const DADATA_FIND_PARTY_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party";
 
 export type InnLookupResult = { found: true; requisites: PartyRequisites } | { found: false; error: string };
@@ -78,11 +98,13 @@ export type InnLookupResult = { found: true; requisites: PartyRequisites } | { f
 export async function lookupPartyByInn(inn: string, apiKey: string, fetchImpl: typeof fetch = fetch): Promise<InnLookupResult> {
   const invalid = validateInn(inn);
   if (invalid) return { found: false, error: invalid };
+  const normalized = normalizeApiKey(apiKey);
+  if ("error" in normalized) return { found: false, error: `${normalized.error} (раздел «Реквизиты по ИНН»)` };
   let response: Response;
   try {
     response = await fetchImpl(DADATA_FIND_PARTY_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Token ${apiKey}` },
+      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Token ${normalized.key}` },
       body: JSON.stringify({ query: inn.replace(/\s/g, ""), branch_type: "MAIN", count: 1 }),
       signal: AbortSignal.timeout(10000),
     });

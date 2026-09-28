@@ -8,12 +8,18 @@ import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { encryptSecret } from "@/lib/crypto/secret-box";
 import { INN_PROFILE_SYSTEM, lookupRequisitesByInn } from "@/lib/integrations/inn-service";
-import { validateInn } from "@/lib/integrations/inn";
+import { normalizeApiKey, validateInn } from "@/lib/integrations/inn";
 
 export async function saveInnLookupSettingsAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.INTEGRATIONS_MANAGE);
 
-  const newKey = String(formData.get("apiKey") ?? "").trim();
+  const rawKey = String(formData.get("apiKey") ?? "");
+  let newKey = "";
+  if (rawKey.trim()) {
+    const normalized = normalizeApiKey(rawKey);
+    if ("error" in normalized) redirect(`/integrations/inn?error=${encodeURIComponent(normalized.error)}`);
+    newKey = (normalized as { key: string }).key;
+  }
   const isEnabled = formData.get("isEnabled") === "on";
   const existing = await prisma.integrationProfile.findFirst({ where: { system: INN_PROFILE_SYSTEM } });
   // Empty field = keep the stored key (the form only shows a mask, never the key itself).
