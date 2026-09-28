@@ -6,7 +6,16 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
-import { EmployeeStatus } from "@prisma/client";
+import { EmployeeStatus, Prisma } from "@prisma/client";
+
+/** Страховой стаж до приёма: целое число месяцев 0–720 или пусто. */
+function parsePriorMonths(raw: unknown): { value: number | null } | { error: string } {
+  const s = String(raw ?? "").trim();
+  if (s === "") return { value: null };
+  const n = Number(s);
+  if (!Number.isInteger(n) || n < 0 || n > 720) return { error: "Страховой стаж до приёма — целое число месяцев от 0 до 720" };
+  return { value: n };
+}
 
 export async function hireEmployeeAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
@@ -21,6 +30,7 @@ export async function hireEmployeeAction(formData: FormData) {
   const bankAccount = String(formData.get("bankAccount") ?? "").trim() || null;
   const salaryRaw = String(formData.get("salary") ?? "");
   const personnelNumber = String(formData.get("personnelNumber") ?? "").trim() || null;
+  const prior = parsePriorMonths(formData.get("priorInsuranceMonths"));
 
   if (!fullName || !organizationId || !hireDateRaw) {
     redirect(`/employees/new?error=${encodeURIComponent("Заполните ФИО, организацию и дату приёма")}`);
@@ -38,6 +48,7 @@ export async function hireEmployeeAction(formData: FormData) {
       bankAccount,
       salary: salaryRaw ? salaryRaw : null,
       personnelNumber,
+      priorInsuranceMonths: "error" in prior ? null : prior.value,
       status: EmployeeStatus.ACTIVE,
     },
   });
@@ -49,6 +60,7 @@ export async function hireEmployeeAction(formData: FormData) {
       eventDate: new Date(hireDateRaw),
       toDepartmentId: departmentId,
       toPositionId: positionId,
+      toSalary: salaryRaw ? salaryRaw : null,
     },
   });
 
@@ -74,16 +86,44 @@ export async function updateEmployeeAction(id: string, formData: FormData) {
   const bankAccount = String(formData.get("bankAccount") ?? "").trim() || null;
   const salaryRaw = String(formData.get("salary") ?? "");
   const personnelNumber = String(formData.get("personnelNumber") ?? "").trim() || null;
+  const prior = parsePriorMonths(formData.get("priorInsuranceMonths"));
+  if ("error" in prior) redirect(`/employees/${id}/edit?error=${encodeURIComponent(prior.error)}`);
 
-  const updated = await prisma.employee.update({
-    where: { id },
-    data: {
-      workScheduleId,
-      paymentMethod: paymentMethod as never,
-      bankAccount,
-      salary: salaryRaw ? salaryRaw : null,
-      personnelNumber,
-    },
+  // A changed salary goes into the employment history with its effective date — the average earnings need it.
+  const newSalary = salaryRaw ? new Prisma.Decimal(salaryRaw) : null;
+  const oldSalary = before.salary ? new Prisma.Decimal(before.salary) : null;
+  const salaryChanged = Boolean(newSalary) && (!oldSalary || !newSalary!.equals(oldSalary));
+  const salaryFromRaw = String(formData.get("salaryFrom") ?? "");
+  if (salaryChanged && !/^\d{4}-\d{2}-\d{2}$/.test(salaryFromRaw)) {
+    redirect(`/employees/${id}/edit?error=${encodeURIComponent("Укажите, с какой даты действует новый оклад")}`);
+  }
+
+  const updated = await prisma.$transaction(async (db) => {
+    const saved = await db.employee.update({
+      where: { id },
+      data: {
+        workScheduleId,
+        paymentMethod: paymentMethod as never,
+        bankAccount,
+        salary: salaryRaw ? salaryRaw : null,
+        personnelNumber,
+        priorInsuranceMonths: (prior as { value: number | null }).value,
+      },
+    });
+    if (salaryChanged) {
+      await db.employmentHistory.create({
+        data: {
+          employeeId: id,
+          eventType: "salary_change",
+          eventDate: new Date(`${salaryFromRaw}T00:00:00.000Z`),
+          fromSalary: oldSalary,
+          toSalary: newSalary,
+          toDepartmentId: before.departmentId,
+          toPositionId: before.positionId,
+        },
+      });
+    }
+    return saved;
   });
 
   await logAudit({

@@ -154,6 +154,15 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "kpp", label: "КПП", type: "text" },
       { name: "ogrn", label: "ОГРН / ОГРНИП", type: "text" },
       { name: "legalAddress", label: "Юридический адрес", type: "text" },
+      {
+        name: "districtCoefficient",
+        label: "Районный коэффициент",
+        type: "number",
+        validate: (value) => {
+          const n = Number(value.replace(",", "."));
+          return Number.isNaN(n) || n < 1 || n > 3 ? "от 1 до 3, например 1,15 (пусто — без коэффициента)" : null;
+        },
+      },
     ],
   },
   "bank-accounts": {
@@ -407,6 +416,7 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "subjectToNdfl", label: "Облагается НДФЛ", type: "checkbox" },
       { name: "subjectToInsurance", label: "Облагается страховыми взносами", type: "checkbox" },
       { name: "affectsAvgEarnings", label: "Влияет на средний заработок", type: "checkbox" },
+      { name: "indexable", label: "Индексируется при повышении оклада (зависит от оклада)", type: "checkbox" },
       { name: "paymentMethod", label: "Способ выплаты", type: "select", required: true, options: PAYMENT_METHOD_OPTIONS },
       { name: "pnlArticleId", label: "Статья расходов (ОПиУ)", type: "select", loadOptions: pnlArticleOptions },
     ],

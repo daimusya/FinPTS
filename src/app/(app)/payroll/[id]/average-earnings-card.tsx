@@ -1,4 +1,4 @@
-import { formatMoney, formatNumber } from "@/lib/money";
+import { formatMoney, formatNumber, sumMoney } from "@/lib/money";
 import { MONTH_NAMES_SHORT } from "@/lib/financial-model/drivers";
 import {
   AVERAGE_FIELDS,
@@ -49,8 +49,9 @@ export async function AverageEarningsCard({
       <p className="text-muted" style={{ marginBottom: 12 }}>
         Средний заработок считается по утверждённым и выплаченным расчётам сотрудника. Отпускные — за 12 месяцев до
         месяца начала отпуска (ст. 139 ТК РФ, Положение № 922), дни отпуска, болезни и командировок по табелю
-        исключаются. Больничные — за 2 года до года болезни (ст. 14 Закона № 255-ФЗ) с учётом предельной базы и МРОТ из
-        справочника «Параметры расчёта зарплаты».
+        исключаются; при повышении окладов в организации или подразделении — с индексацией (п. 16). Больничные — за 2
+        года до года болезни (ст. 14 Закона № 255-ФЗ) с учётом предельной базы и МРОТ из справочника «Параметры расчёта
+        зарплаты» и районного коэффициента организации; страховой стаж — по карточке сотрудника.
       </p>
       <form className="form-grid" style={{ alignItems: "flex-end" }}>
         <label className="field">
@@ -81,10 +82,12 @@ export async function AverageEarningsCard({
         </label>
         <label className="field">
           <span>Страховой стаж (для больничных)</span>
-          <select name="avgPct" defaultValue={params.avgPct ?? "100"}>
+          <select name="avgPct" defaultValue={params.avgPct ?? "auto"}>
+            <option value="auto">Автоматически — по карточке сотрудника</option>
             <option value="100">8 лет и больше — 100%</option>
             <option value="80">от 5 до 8 лет — 80%</option>
             <option value="60">до 5 лет — 60%</option>
+            <option value="short">меньше 6 месяцев — 60%, не больше МРОТ за месяц</option>
           </select>
         </label>
         <label className="field">
@@ -94,6 +97,28 @@ export async function AverageEarningsCard({
         <label className="field">
           <span>…за прошлый год</span>
           <input type="text" inputMode="decimal" name="avgOther2" defaultValue={params.avgOther2 ?? ""} placeholder="0" style={{ width: 130 }} />
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, gridColumn: "1 / -1" }}>
+          <input type="checkbox" name="avgIndex" id="avg-index" defaultChecked={params.avgIndex === "on"} />
+          Отпускные: оклады повышены в организации или подразделении — индексировать средний заработок (п. 16 Положения № 922)
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+          <input type="checkbox" name="avgReplace" id="avg-replace" defaultChecked={params.avgReplace === "on"} />
+          Больничные: заменить годы расчётного периода по заявлению сотрудника (был отпуск по беременности и родам или по уходу за ребёнком)
+        </label>
+        <label className="field">
+          <span>Годы расчёта (при замене)</span>
+          <span style={{ display: "flex", gap: 6 }}>
+            <input type="number" name="avgYear1" id="avg-year1" defaultValue={params.avgYear1 ?? ""} placeholder="год" style={{ width: 80 }} />
+            <input type="number" name="avgYear2" id="avg-year2" defaultValue={params.avgYear2 ?? ""} placeholder="год" style={{ width: 80 }} />
+          </span>
+        </label>
+        <label className="field">
+          <span>Заработок у других работодателей за годы замены (по справкам)</span>
+          <span style={{ display: "flex", gap: 6 }}>
+            <input type="text" inputMode="decimal" name="avgOtherR1" id="avg-other-r1" defaultValue={params.avgOtherR1 ?? ""} placeholder="1-й год" style={{ width: 120 }} />
+            <input type="text" inputMode="decimal" name="avgOtherR2" id="avg-other-r2" defaultValue={params.avgOtherR2 ?? ""} placeholder="2-й год" style={{ width: 120 }} />
+          </span>
         </label>
         <button type="submit" className="btn btn-secondary">
           Рассчитать
@@ -109,7 +134,7 @@ export async function AverageEarningsCard({
       {preview ? (
         <div style={{ marginTop: 16 }}>
           {preview.kind === "vacation" ? <VacationBreakdown preview={preview} days={Number(params.avgDays)} /> : null}
-          {preview.kind === "sick" ? <SickBreakdown preview={preview} days={Number(params.avgDays)} pct={Number(params.avgPct ?? 100)} /> : null}
+          {preview.kind === "sick" ? <SickBreakdown preview={preview} days={Number(params.avgDays)} pct={preview.tenure.pct} /> : null}
 
           <form action={addAverageEarningsLineAction.bind(null, runId)} style={{ marginTop: 12 }}>
             {AVERAGE_FIELDS.map((f) => (
@@ -140,6 +165,8 @@ function VacationBreakdown({ preview, days }: { preview: Extract<AverageEarnings
               <th>Исключено (отпуск, болезнь, командировка)</th>
               <th>Дней в расчёт</th>
               <th>Заработок</th>
+              {preview.indexation ? <th>Коэф. индексации</th> : null}
+              {preview.indexation ? <th>После индексации</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -153,6 +180,8 @@ function VacationBreakdown({ preview, days }: { preview: Extract<AverageEarnings
                 <td>{m.excludedDays || "—"}</td>
                 <td className="mono">{formatNumber(m.countedDays)}</td>
                 <td className="mono">{formatMoney(m.earnings)}</td>
+                {preview.indexation ? <td className="mono">{m.indexCoef ? formatNumber(m.indexCoef.toDecimalPlaces(4)) : "—"}</td> : null}
+                {preview.indexation ? <td className="mono">{formatMoney(m.indexedEarnings)}</td> : null}
               </tr>
             ))}
             <tr style={{ background: "var(--color-graphite-50)", fontWeight: 700 }}>
@@ -161,7 +190,9 @@ function VacationBreakdown({ preview, days }: { preview: Extract<AverageEarnings
               <td />
               <td />
               <td className="mono">{formatNumber(v.totalDays)}</td>
-              <td className="mono">{formatMoney(v.totalEarnings)}</td>
+              <td className="mono">{formatMoney(sumMoney(v.months.map((m) => m.earnings)))}</td>
+              {preview.indexation ? <td /> : null}
+              {preview.indexation ? <td className="mono">{formatMoney(v.totalEarnings)}</td> : null}
             </tr>
           </tbody>
         </table>
@@ -178,9 +209,37 @@ function VacationBreakdown({ preview, days }: { preview: Extract<AverageEarnings
           Положения № 922): оклад / {formatNumber(AVG_DAYS_PER_MONTH)} = <strong>{formatMoney(v.avgDaily)}</strong>.
         </p>
       )}
+      {v.afterPeriod ? (
+        <p style={{ marginTop: 4 }}>
+          Оклад повышен {v.afterPeriod.date.toLocaleDateString("ru-RU", { timeZone: "UTC" })} — после расчётного периода, до начала
+          отпуска: средний {formatMoney(v.afterPeriod.avgDailyBefore)} × {formatNumber(v.afterPeriod.coef.toDecimalPlaces(4))} ={" "}
+          {formatMoney(v.avgDaily)}.
+        </p>
+      ) : null}
+      {v.duringVacation.map((d) => (
+        <p key={d.date.toISOString()} style={{ marginTop: 4 }}>
+          Оклад повышен во время отпуска, с {d.date.toLocaleDateString("ru-RU", { timeZone: "UTC" })}: {d.days} дн. оплачены по
+          среднему × {formatNumber(d.coef.toDecimalPlaces(4))}.
+        </p>
+      ))}
       <p style={{ marginTop: 4 }}>
-        Отпускные: {formatMoney(v.avgDaily)} × {days} дн. = <strong>{formatMoney(v.amount)}</strong>.
+        Отпускные{v.duringVacation.length ? "" : `: ${formatMoney(v.avgDaily)} × ${days} дн.`} = <strong>{formatMoney(v.amount)}</strong>.
       </p>
+      {preview.raises.length > 0 && !preview.indexation ? (
+        <p className="text-muted" style={{ marginTop: 4 }}>
+          В расчётном периоде или во время отпуска оклад повышался:{" "}
+          {preview.raises
+            .map((r) => `${r.date.toLocaleDateString("ru-RU", { timeZone: "UTC" })} ${r.from ? `с ${formatMoney(r.from)} ` : ""}до ${formatMoney(r.to)}`)
+            .join("; ")}
+          . Если оклады повышались во всей организации или подразделении, отметьте индексацию (п. 16 Положения № 922).
+        </p>
+      ) : null}
+      {preview.indexation ? (
+        <p className="text-muted" style={{ marginTop: 4 }}>
+          Индексируются только выплаты видов с отметкой «индексируется при повышении оклада» (оклад, аванс); премии
+          фиксированной суммой — нет. Месяц, в котором оклад повысили, не индексируется.
+        </p>
+      ) : null}
     </>
   );
 }
@@ -223,7 +282,7 @@ function SickBreakdown({
       </div>
       <p>
         Средний дневной заработок по факту: сумма за 2 года / {SICK_LEAVE_DIVISOR} = {formatMoney(s.avgDailyActual)}; минимум
-        из МРОТ (МРОТ × 24 / {SICK_LEAVE_DIVISOR}) = {formatMoney(s.minDaily)}. В расчёт:{" "}
+        из МРОТ (МРОТ{s.districtCoef.equals(1) ? "" : " × районный коэффициент"} × 24 / {SICK_LEAVE_DIVISOR}) = {formatMoney(s.minDaily)}. В расчёт:{" "}
         <strong>{formatMoney(s.avgDaily)}</strong> {s.basis === "mrot" ? "(по МРОТ — фактический заработок ниже минимума)" : "(по факту)"}.
       </p>
       <p style={{ marginTop: 4 }}>
@@ -232,10 +291,32 @@ function SickBreakdown({
         <strong>{formatMoney(s.employerAmount)}</strong> (эта сумма попадёт в расчёт); остальное —{" "}
         {formatMoney(s.fundAmount)} — выплачивает Социальный фонд напрямую.
       </p>
+      <p style={{ marginTop: 4 }}>
+        Страховой стаж:{" "}
+        {preview.tenure.mode === "auto"
+          ? `${Math.floor(preview.tenure.months! / 12)} лет ${preview.tenure.months! % 12} мес. по данным системы${preview.tenure.priorKnown ? "" : " (стаж до приёма в карточке сотрудника не указан — считается только работа у нас)"}`
+          : "выбран вручную"}{" "}
+        — {preview.tenure.pct}%{preview.tenure.short ? ", меньше 6 месяцев" : ""}.
+        {s.districtCoef.equals(1) ? "" : ` Районный коэффициент организации — ${formatNumber(s.districtCoef)}.`}
+      </p>
+      {s.monthlyCaps.length > 0 ? (
+        <p style={{ marginTop: 4 }}>
+          Стаж меньше 6 месяцев — пособие не больше МРОТ{s.districtCoef.equals(1) ? "" : " × районный коэффициент"} за полный месяц:{" "}
+          {s.monthlyCaps
+            .map((c) => `${MONTH_NAMES_SHORT[c.month - 1]} ${c.year} — не больше ${formatMoney(c.capDaily)} в день${c.applied ? " (ограничение применено)" : ""}`)
+            .join("; ")}
+          .
+        </p>
+      ) : null}
+      {preview.replacement ? (
+        <p style={{ marginTop: 4 }}>
+          Замена лет по заявлению на {preview.replacement.years.join(" и ")}: пособие {formatMoney(preview.replacement.replacedTotal)} против{" "}
+          {formatMoney(preview.replacement.standardTotal)} без замены —{" "}
+          {preview.replacement.used ? <strong>замена применена</strong> : "замена не увеличивает пособие, поэтому не применяется (ч. 1 ст. 14 Закона № 255-ФЗ)"}.
+        </p>
+      ) : null}
       <p className="text-muted" style={{ marginTop: 4 }}>
-        Не учитываются: ограничение пособия одним МРОТ в месяц при стаже меньше 6 месяцев, районные коэффициенты, замена
-        лет расчётного периода по заявлению сотрудника. Первые {EMPLOYER_PAID_SICK_DAYS} дня за счёт работодателя — общее
-        правило для болезни самого сотрудника.
+        Первые {EMPLOYER_PAID_SICK_DAYS} дня за счёт работодателя — общее правило для болезни самого сотрудника.
       </p>
     </>
   );

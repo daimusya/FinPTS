@@ -156,7 +156,9 @@ export function parseImportRows(fields: SheetField[], headers: string[], rows: C
         else errors.push(`Строка ${lineNo}: «${raw}» — нет такого значения для поля «${field.label}»`);
       } else if (field.type === "number") {
         const num = Number(raw.replace(/\s/g, "").replace(",", "."));
+        const invalid = Number.isNaN(num) ? null : field.validate?.(raw);
         if (Number.isNaN(num)) errors.push(`Строка ${lineNo}: «${raw}» в поле «${field.label}» — не число`);
+        else if (invalid) errors.push(`Строка ${lineNo}: поле «${field.label}»: ${invalid}`);
         else data[field.name] = num;
       } else if (field.type === "date") {
         const date = parseDate(raw);

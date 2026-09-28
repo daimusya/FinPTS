@@ -173,7 +173,8 @@ async function main() {
     await prisma.payrollAccrualType.upsert({
       where: { code: type.code },
       update: {},
-      create: { ...type, pnlArticleId: payrollArticle?.id },
+      // Salary and advance depend on the salary — indexed in the average earnings when salaries are raised.
+      create: { ...type, indexable: type.code === "salary" || type.code === "advance", pnlArticleId: payrollArticle?.id },
     });
   }
 

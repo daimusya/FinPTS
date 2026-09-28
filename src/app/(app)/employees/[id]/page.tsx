@@ -11,7 +11,10 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   hire: "Приём",
   transfer: "Перевод",
   termination: "Увольнение",
+  salary_change: "Изменение оклада",
 };
+
+const rub = (v: unknown) => new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" }).format(Number(v));
 
 export default async function EmployeeDetailPage({
   params,
@@ -197,7 +200,13 @@ export default async function EmployeeDetailPage({
                       ? `${h.fromPosition.name} → ${h.toPosition.name}`
                       : h.toPosition?.name ?? "—"}
                   </td>
-                  <td>{h.comment ?? "—"}</td>
+                  <td>
+                    {h.eventType === "salary_change" && h.toSalary
+                      ? `Оклад ${h.fromSalary ? `${rub(h.fromSalary)} → ` : ""}${rub(h.toSalary)}${h.comment ? `. ${h.comment}` : ""}`
+                      : h.eventType === "hire" && h.toSalary
+                        ? `Оклад ${rub(h.toSalary)}${h.comment ? `. ${h.comment}` : ""}`
+                        : (h.comment ?? "—")}
+                  </td>
                 </tr>
               ))}
             </tbody>

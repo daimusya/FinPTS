@@ -131,6 +131,8 @@ model Organization {
   kpp           String?
   ogrn          String?
   legalAddress  String?
+  /// Районный коэффициент (1,15; 1,5 …) — для минимума больничного из МРОТ. Пусто — 1.
+  districtCoefficient Decimal? @db.Decimal(5, 3)
   isArchived    Boolean          @default(false)
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
@@ -930,6 +932,8 @@ model Employee {
   paymentMethod   PaymentMethod  @default(BANK)
   bankAccount     String?
   salary          Decimal?       @db.Decimal(18, 2)
+  /// Страховой стаж до приёма к нам, месяцев (по трудовой книжке / сведениям СФР) — для процента больничного.
+  priorInsuranceMonths Int?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
@@ -949,8 +953,11 @@ model Employee {
 model EmploymentHistory {
   id         String   @id @default(cuid())
   employeeId String
-  eventType  String   // hire / transfer / termination
+  eventType  String   // hire / transfer / termination / salary_change
   eventDate  DateTime
+  /// Оклад до и после события (приём — только «после»; изменение оклада — оба).
+  fromSalary Decimal? @db.Decimal(18, 2)
+  toSalary   Decimal? @db.Decimal(18, 2)
   fromDepartmentId String?
   toDepartmentId   String?
   fromPositionId   String?
@@ -1005,6 +1012,8 @@ model PayrollAccrualType {
   subjectToNdfl       Boolean  @default(true)
   subjectToInsurance  Boolean  @default(true)
   affectsAvgEarnings  Boolean  @default(true)
+  /// Зависит от оклада — индексируется в среднем заработке при повышении окладов (п. 16 Положения № 922).
+  indexable           Boolean  @default(false)
   paymentMethod       PaymentMethod @default(BANK)
   pnlArticleId        String?
   isArchived          Boolean  @default(false)

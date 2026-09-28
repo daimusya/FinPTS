@@ -196,8 +196,18 @@ export async function addAverageEarningsLineAction(runId: string, formData: Form
         insuranceAmount,
         comment:
           result.kind === "vacation"
-            ? `Средний дневной ${result.vacation.avgDaily.toFixed(2)} × ${request.days} дн. с ${request.startDate.toISOString().slice(0, 10)}`
-            : `Пособие ${result.sick.dailyBenefit.toFixed(2)} в день × ${result.sick.employerDays} дн. за счёт работодателя (всего за ${request.days} дн. — ${result.sick.total.toFixed(2)}, Соцфонд — ${result.sick.fundAmount.toFixed(2)})`,
+            ? `Средний дневной ${result.vacation.avgDaily.toFixed(2)} × ${request.days} дн. с ${request.startDate.toISOString().slice(0, 10)}${
+                result.indexation && (result.vacation.afterPeriod || result.vacation.duringVacation.length || result.vacation.months.some((m) => m.indexCoef))
+                  ? ", с индексацией по п. 16 Положения № 922"
+                  : ""
+              }`
+            : `Пособие ${result.sick.dailyBenefit.toFixed(2)} в день (${result.tenure.pct}%)${
+                result.sick.monthlyCaps.some((c) => c.applied)
+                  ? `, стаж меньше 6 мес. — не больше МРОТ за месяц: ${result.sick.monthlyCaps.map((c) => `${c.capDaily.toFixed(2)} в день за ${c.month}.${c.year}`).join(", ")}`
+                  : ""
+              }; ${result.sick.employerDays} дн. за счёт работодателя: ${result.sick.employerAmount.toFixed(2)} (всего за ${request.days} дн. — ${result.sick.total.toFixed(2)}, Соцфонд — ${result.sick.fundAmount.toFixed(2)})${
+                result.replacement?.used ? `; годы расчёта заменены на ${result.replacement.years.join(" и ")} по заявлению` : ""
+              }`,
       },
     });
     await tx.payrollAllocation.createMany({
@@ -222,12 +232,25 @@ export async function addAverageEarningsLineAction(runId: string, formData: Form
           earnings: result.vacation.totalEarnings.toFixed(2),
           periodDays: result.vacation.totalDays.toFixed(4),
           avgDaily: result.vacation.avgDaily.toFixed(2),
+          indexation: result.indexation
+            ? {
+                months: result.vacation.months.filter((m) => m.indexCoef).map((m) => ({ month: `${m.year}-${m.month}`, coef: m.indexCoef!.toFixed(4) })),
+                afterPeriodCoef: result.vacation.afterPeriod?.coef.toFixed(4) ?? null,
+                duringVacation: result.vacation.duringVacation.map((d) => ({ from: d.date.toISOString().slice(0, 10), days: d.days, coef: d.coef.toFixed(4) })),
+              }
+            : null,
+          amount: result.vacation.amount.toFixed(2),
         }
       : {
           kind: "sick",
           start: request.startDate.toISOString().slice(0, 10),
           days: request.days,
-          tenurePct: request.tenurePct,
+          tenure: result.tenure,
+          calcYears: result.sick.years.map((y) => y.year),
+          replacement: result.replacement
+            ? { ...result.replacement, standardTotal: result.replacement.standardTotal.toFixed(2), replacedTotal: result.replacement.replacedTotal.toFixed(2) }
+            : null,
+          districtCoef: result.sick.districtCoef.toFixed(3),
           basis: result.sick.basis,
           avgDaily: result.sick.avgDaily.toFixed(2),
           dailyBenefit: result.sick.dailyBenefit.toFixed(2),

@@ -5,8 +5,15 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { updateEmployeeAction } from "../../actions";
 
-export default async function EditEmployeePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EditEmployeePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
+}) {
   const { id } = await params;
+  const { error } = await searchParams;
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.PAYROLL_MANAGE)) {
     return (
@@ -32,6 +39,7 @@ export default async function EditEmployeePage({ params }: { params: Promise<{ i
       </div>
 
       <div className="card" style={{ maxWidth: 560 }}>
+        {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
         <form action={updateEmployeeAction.bind(null, id)}>
           <div className="form-grid">
             <label className="field">
@@ -52,6 +60,14 @@ export default async function EditEmployeePage({ params }: { params: Promise<{ i
             <label className="field">
               <span>Оклад</span>
               <input type="number" step="0.01" name="salary" defaultValue={employee.salary ? String(employee.salary) : ""} />
+            </label>
+            <label className="field">
+              <span>Новый оклад действует с (если меняете)</span>
+              <input type="date" name="salaryFrom" defaultValue={new Date().toISOString().slice(0, 10)} />
+            </label>
+            <label className="field">
+              <span>Страховой стаж до приёма, месяцев</span>
+              <input type="number" min={0} max={720} step={1} name="priorInsuranceMonths" defaultValue={employee.priorInsuranceMonths ?? ""} placeholder="для процента больничного" />
             </label>
             <label className="field">
               <span>Способ выплаты</span>

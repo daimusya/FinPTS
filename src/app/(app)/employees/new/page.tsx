@@ -100,6 +100,10 @@ export default async function NewEmployeePage({
               <input type="number" step="0.01" name="salary" />
             </label>
             <label className="field">
+              <span>Страховой стаж до приёма, месяцев</span>
+              <input type="number" min={0} max={720} step={1} name="priorInsuranceMonths" placeholder="для процента больничного" />
+            </label>
+            <label className="field">
               <span>Способ выплаты</span>
               <select name="paymentMethod" defaultValue="BANK">
                 <option value="CASH">Наличный</option>
