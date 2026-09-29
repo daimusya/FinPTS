@@ -207,7 +207,7 @@ export async function importDictionaryAction(slug: string, formData: FormData) {
   redirect(`/master-data/${slug}?importResult=${encodeURIComponent(`Файл «${file.name}» загружен: ${parts.join(", ")}.`)}`);
 }
 
-/** Реквизиты и контакты; у каждого затронутого контрагента после загрузки ровно один основной счёт. */
+/** Реквизиты и контакты; у каждого затронутого контрагента после загрузки ровно один основной счёт и один основной контакт. */
 async function applyDetails(db: Parameters<Parameters<typeof prisma.$transaction>[0]>[0], plan: DetailsPlan, idOf: (ref: string) => string) {
   const touched = new Set<string>();
   const makePrimary = new Map<string, string>();
@@ -233,6 +233,28 @@ async function applyDetails(db: Parameters<Parameters<typeof prisma.$transaction
     const first = await db.counterpartyBankDetail.findFirst({ where: { counterpartyId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
     if (first) await db.counterpartyBankDetail.update({ where: { id: first.id }, data: { isPrimary: true } });
   }
-  for (const c of plan.contactCreates) await db.counterpartyContact.create({ data: { counterpartyId: idOf(c.owner), ...c.data } });
-  for (const u of plan.contactUpdates) await db.counterpartyContact.update({ where: { id: u.id }, data: u.data });
+  const touchedContacts = new Set<string>();
+  const primaryContact = new Map<string, string>();
+  for (const c of plan.contactCreates) {
+    const counterpartyId = idOf(c.owner);
+    const created = await db.counterpartyContact.create({ data: { counterpartyId, ...c.data, isPrimary: false } });
+    touchedContacts.add(counterpartyId);
+    if (c.primary) primaryContact.set(counterpartyId, created.id);
+  }
+  for (const u of plan.contactUpdates) {
+    const counterpartyId = idOf(u.owner);
+    await db.counterpartyContact.update({ where: { id: u.id }, data: u.data });
+    touchedContacts.add(counterpartyId);
+    if (u.primary) primaryContact.set(counterpartyId, u.id);
+  }
+  for (const [counterpartyId, id] of primaryContact) {
+    await db.counterpartyContact.updateMany({ where: { counterpartyId, id: { not: id } }, data: { isPrimary: false } });
+    await db.counterpartyContact.update({ where: { id }, data: { isPrimary: true } });
+  }
+  for (const counterpartyId of touchedContacts) {
+    const hasPrimary = await db.counterpartyContact.count({ where: { counterpartyId, isPrimary: true } });
+    if (hasPrimary) continue;
+    const first = await db.counterpartyContact.findFirst({ where: { counterpartyId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    if (first) await db.counterpartyContact.update({ where: { id: first.id }, data: { isPrimary: true } });
+  }
 }

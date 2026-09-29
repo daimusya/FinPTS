@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BANK_COLUMNS, CONTACT_COLUMNS, buildBankDetailRows, planDetails, type OwnerCandidate } from "./details-sheets";
+import { BANK_COLUMNS, CONTACT_COLUMNS, buildBankDetailRows, buildContactRows, planDetails, type OwnerCandidate } from "./details-sheets";
 
 const owners: OwnerCandidate[] = [
   { ref: "cp1", inn: "7707083893", names: ["ПАО Сбербанк", "Сбербанк"] },
@@ -14,7 +14,7 @@ const plan = (bankRows: Array<Array<string | null>>, contactRows: Array<Array<st
     contactSheet: { headers: [...CONTACT_COLUMNS], rows: contactRows },
     owners,
     bankDetails: [{ id: "b1", counterpartyId: "cp1", bankName: "Сбербанк", account: acc, bik: "044525225", corrAccount: null, isPrimary: true }],
-    contacts: [{ id: "k1", counterpartyId: "cp2", name: "Иванова Мария", position: null, phone: null, email: null }],
+    contacts: [{ id: "k1", counterpartyId: "cp2", name: "Иванова Мария", position: null, phone: null, email: null, isPrimary: true }],
     mode,
   });
 
@@ -45,7 +45,7 @@ describe("planDetails", () => {
   it("updates the bank name / corr. account and contacts; create-only skips existing rows", () => {
     const p = plan([["", "7707083893", "", "ПАО Сбербанк", acc, "044525225", "30101810400000000225", ""]], [["cp2", "", "", "иванова мария", "Бухгалтер", "", "m@example.com"]]);
     expect(p.bankUpdates).toEqual([{ id: "b1", owner: "cp1", data: { bankName: "ПАО Сбербанк", corrAccount: "30101810400000000225" }, primary: false }]);
-    expect(p.contactUpdates).toEqual([{ id: "k1", data: { position: "Бухгалтер", phone: null, email: "m@example.com" } }]);
+    expect(p.contactUpdates).toEqual([{ id: "k1", owner: "cp2", data: { position: "Бухгалтер", phone: null, email: "m@example.com" }, primary: false }]);
     const skipped = plan([["cp1", "", "", "Другое имя", acc, "044525225", "", ""]], [], "create-only");
     expect(skipped).toMatchObject({ bankUpdates: [], skipped: 1 });
   });
@@ -59,7 +59,12 @@ describe("planDetails", () => {
         ["cp2", "", "", "Банк Б", "40702810000000000005", "", "", "да"],
         ["cp2", "", "", "Банк А", "40702810000000000004", "", "", ""],
       ],
-      [["cp2", "", "", "", "", "", ""]],
+      [
+        ["cp2", "", "", "", "", "", "", ""],
+        ["cp1", "", "", "Петров", "", "", "", "да"],
+        ["cp1", "", "", "Сидоров", "", "", "", "да"],
+        ["cp1", "", "", "Кузнецов", "", "", "", "может быть"],
+      ],
     );
     expect(p.errors).toEqual([
       "Лист «Банковские реквизиты», строка 2: контрагент не найден ни в справочнике, ни на основном листе файла",
@@ -67,6 +72,30 @@ describe("planDetails", () => {
       "Лист «Банковские реквизиты», строка 5: основной счёт контрагента уже отмечен в строке 4",
       "Лист «Банковские реквизиты», строка 6: этот счёт уже есть в строке 4",
       "Лист «Контакты», строка 2: Укажите имя контакта",
+      "Лист «Контакты», строка 4: основной контакт контрагента уже отмечен в строке 3",
+      "Лист «Контакты», строка 5: в колонке «Основной» ожидается «да» или «нет»",
     ]);
+  });
+
+  it("exports and imports the primary contact mark", () => {
+    const rows = buildContactRows([
+      { name: "Иванова Мария", position: "Бухгалтер", phone: null, email: null, isPrimary: true, counterparty: { id: "cp2", inn: null, fullName: "ООО Лютик", shortName: null } },
+    ]);
+    expect(rows[0].at(-1)).toBe("Основной");
+    expect(rows[1]).toEqual(["cp2", "", "ООО Лютик", "Иванова Мария", "Бухгалтер", "", "", "да"]);
+
+    // The same primary contact again — unchanged; a new one marked primary — created as primary.
+    const p = plan([], [
+      ["cp2", "", "", "Иванова Мария", "", "", "", "да"],
+      ["cp2", "", "", "Петров Иван", "Директор", "", "", "да"],
+    ]);
+    expect(p.errors).toEqual(["Лист «Контакты», строка 3: основной контакт контрагента уже отмечен в строке 2"]);
+    const q = plan([], [
+      ["cp2", "", "", "Иванова Мария", "", "", "", "нет"],
+      ["cp2", "", "", "Петров Иван", "Директор", "", "", "да"],
+    ]);
+    expect(q.errors).toEqual([]);
+    expect(q.unchanged).toBe(1);
+    expect(q.contactCreates).toEqual([{ owner: "cp2", data: { name: "Петров Иван", position: "Директор", phone: null, email: null }, primary: true }]);
   });
 });

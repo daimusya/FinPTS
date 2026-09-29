@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     const owner = { select: { id: true, inn: true, fullName: true, shortName: true } } as const;
     const [bankDetails, contacts] = await Promise.all([
       prisma.counterpartyBankDetail.findMany({ include: { counterparty: owner }, orderBy: [{ counterpartyId: "asc" }, { isPrimary: "desc" }, { createdAt: "asc" }] }),
-      prisma.counterpartyContact.findMany({ include: { counterparty: owner }, orderBy: [{ counterpartyId: "asc" }, { name: "asc" }] }),
+      prisma.counterpartyContact.findMany({ include: { counterparty: owner }, orderBy: [{ counterpartyId: "asc" }, { isPrimary: "desc" }, { name: "asc" }] }),
     ]);
     sheets.push({ name: BANK_SHEET, rows: buildBankDetailRows(bankDetails) }, { name: CONTACT_SHEET, rows: buildContactRows(contacts) });
   }

@@ -29,6 +29,7 @@ import { scheduleSummary, suggestSplit } from "@/lib/payment-requests/parts";
 import { canPlanRequests } from "@/lib/payment-plan/service";
 import { PaymentScheduleEditor } from "@/components/payment-schedule-editor";
 import { PaymentAccountOptions } from "@/components/payment-account-options";
+import { PrimaryContact } from "@/components/primary-contact";
 import { currentDeciders } from "@/lib/payment-requests/notify";
 
 const STATE_LABELS: Record<TimelineState, string> = {
@@ -70,7 +71,7 @@ export default async function PaymentRequestPage({
     where: { id },
     include: {
       organization: true,
-      counterparty: { include: { bankDetails: { where: { isPrimary: true }, take: 1 } } },
+      counterparty: { include: { bankDetails: { where: { isPrimary: true }, take: 1 }, contacts: { where: { isPrimary: true }, take: 1 } } },
       cashFlowArticle: true,
       createdBy: true,
       route: { include: { steps: { include: { role: true } } } },
@@ -203,6 +204,14 @@ export default async function PaymentRequestPage({
               "—"
             )}
           </dd>
+          {request.counterparty ? (
+            <>
+              <dt>Контакт</dt>
+              <dd>
+                <PrimaryContact contact={request.counterparty.contacts[0] ?? null} counterpartyId={request.counterparty.id} />
+              </dd>
+            </>
+          ) : null}
           <dt>Статья ДДС</dt>
           <dd>{request.cashFlowArticle?.name ?? "—"}</dd>
           <dt>Сумма</dt>

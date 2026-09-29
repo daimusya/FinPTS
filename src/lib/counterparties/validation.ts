@@ -69,9 +69,9 @@ export interface BankDetailOrder {
 }
 
 /**
- * Какой счёт станет основным после удаления: если удаляют не основной —
- * основной не меняется (null); если основной — самый ранний из оставшихся
- * (null, если счетов не осталось).
+ * Какой счёт (или контакт) станет основным после удаления: если удаляют не
+ * основной — основной не меняется (null); если основной — самый ранний из
+ * оставшихся (null, если строк не осталось).
  */
 export function nextPrimaryAfterRemoval(details: BankDetailOrder[], removedId: string): string | null {
   const removed = details.find((d) => d.id === removedId);

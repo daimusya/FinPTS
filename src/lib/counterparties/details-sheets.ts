@@ -11,7 +11,7 @@ export const CONTACT_SHEET = "Контакты";
 
 const OWNER_COLUMNS = ["ID контрагента", "ИНН контрагента", "Контрагент"] as const;
 export const BANK_COLUMNS = [...OWNER_COLUMNS, "Банк", "Расчётный счёт", "БИК", "Корр. счёт", "Основной"] as const;
-export const CONTACT_COLUMNS = [...OWNER_COLUMNS, "Имя", "Должность", "Телефон", "Email"] as const;
+export const CONTACT_COLUMNS = [...OWNER_COLUMNS, "Имя", "Должность", "Телефон", "Email", "Основной"] as const;
 
 type Cell = string | number | null;
 
@@ -41,7 +41,7 @@ export function buildBankDetailRows(
 }
 
 export function buildContactRows(
-  contacts: Array<{ name: string; position: string | null; phone: string | null; email: string | null; counterparty: OwnerInfo }>,
+  contacts: Array<{ name: string; position: string | null; phone: string | null; email: string | null; isPrimary: boolean; counterparty: OwnerInfo }>,
 ): Array<Array<string>> {
   return [
     [...CONTACT_COLUMNS],
@@ -53,6 +53,7 @@ export function buildContactRows(
       c.position ?? "",
       c.phone ?? "",
       c.email ?? "",
+      c.isPrimary ? "да" : "нет",
     ]),
   ];
 }
@@ -81,13 +82,14 @@ export interface ExistingContact {
   position: string | null;
   phone: string | null;
   email: string | null;
+  isPrimary: boolean;
 }
 
 export interface DetailsPlan {
   bankCreates: Array<{ owner: string; data: { bankName: string; account: string; bik: string | null; corrAccount: string | null }; primary: boolean }>;
   bankUpdates: Array<{ id: string; owner: string; data: { bankName: string; corrAccount: string | null }; primary: boolean }>;
-  contactCreates: Array<{ owner: string; data: { name: string; position: string | null; phone: string | null; email: string | null } }>;
-  contactUpdates: Array<{ id: string; data: { position: string | null; phone: string | null; email: string | null } }>;
+  contactCreates: Array<{ owner: string; data: { name: string; position: string | null; phone: string | null; email: string | null }; primary: boolean }>;
+  contactUpdates: Array<{ id: string; owner: string; data: { position: string | null; phone: string | null; email: string | null }; primary: boolean }>;
   unchanged: number;
   skipped: number;
   errors: string[];
@@ -181,6 +183,7 @@ export function planDetails(input: {
   if (input.contactSheet) {
     const cell = indexer(input.contactSheet.headers);
     const seen = new Map<string, number>();
+    const primaryLine = new Map<string, number>();
     input.contactSheet.rows.forEach((row, i) => {
       const line = i + 2;
       if (row.every((c) => norm(c) === "")) return;
@@ -189,18 +192,26 @@ export function planDetails(input: {
       if ("error" in owner) return void plan.errors.push(`${where}: ${owner.error}`);
       const checked = validateContact({ name: cell("Имя", row), position: cell("Должность", row), phone: cell("Телефон", row), email: cell("Email", row) });
       if ("error" in checked) return void plan.errors.push(`${where}: ${checked.error}`);
+      const primaryRaw = lower(cell("Основной", row));
+      if (primaryRaw && !["да", "нет"].includes(primaryRaw)) return void plan.errors.push(`${where}: в колонке «Основной» ожидается «да» или «нет»`);
+      const primary = primaryRaw === "да";
 
       const key = `${owner.ref}|${checked.value.name.toLowerCase()}`;
       if (seen.has(key)) return void plan.errors.push(`${where}: контакт «${checked.value.name}» уже есть в строке ${seen.get(key)}`);
       seen.set(key, line);
+      if (primary) {
+        if (primaryLine.has(owner.ref)) return void plan.errors.push(`${where}: основной контакт контрагента уже отмечен в строке ${primaryLine.get(owner.ref)}`);
+        primaryLine.set(owner.ref, line);
+      }
 
       const existing = input.contacts.find((c) => c.counterpartyId === owner.ref && c.name.toLowerCase() === checked.value.name.toLowerCase());
-      if (!existing) return void plan.contactCreates.push({ owner: owner.ref, data: checked.value });
+      if (!existing) return void plan.contactCreates.push({ owner: owner.ref, data: checked.value, primary });
       if (input.mode === "create-only") return void plan.skipped++;
       const { position, phone, email } = checked.value;
-      const same = (existing.position ?? null) === position && (existing.phone ?? null) === phone && (existing.email ?? null) === email;
+      const same =
+        (existing.position ?? null) === position && (existing.phone ?? null) === phone && (existing.email ?? null) === email && (!primary || existing.isPrimary);
       if (same) plan.unchanged++;
-      else plan.contactUpdates.push({ id: existing.id, data: { position, phone, email } });
+      else plan.contactUpdates.push({ id: existing.id, owner: owner.ref, data: { position, phone, email }, primary });
     });
   }
   return plan;

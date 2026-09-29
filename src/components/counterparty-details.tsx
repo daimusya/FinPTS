@@ -6,6 +6,7 @@ import {
   removeBankDetailAction,
   removeContactAction,
   setPrimaryBankDetailAction,
+  setPrimaryContactAction,
   updateBankDetailAction,
   updateContactAction,
 } from "@/app/(app)/master-data/counterparty-actions";
@@ -23,12 +24,12 @@ export interface CounterpartyDetailsState {
 /**
  * Банковские реквизиты и контакты контрагента: список, правка строки на
  * месте (без JavaScript — режим правки задаётся адресом), удаление,
- * добавление; у реквизитов — отметка «основной счёт».
+ * добавление; отметки «основной счёт» и «основной контакт».
  */
 export async function CounterpartyDetails({ counterpartyId, state = {} }: { counterpartyId: string; state?: CounterpartyDetailsState }) {
   const [bankDetails, contacts] = await Promise.all([
     prisma.counterpartyBankDetail.findMany({ where: { counterpartyId }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] }),
-    prisma.counterpartyContact.findMany({ where: { counterpartyId }, orderBy: { name: "asc" } }),
+    prisma.counterpartyContact.findMany({ where: { counterpartyId }, orderBy: [{ isPrimary: "desc" }, { name: "asc" }] }),
   ]);
   const base = `/master-data/counterparties/${counterpartyId}/edit`;
 
@@ -210,12 +211,26 @@ export async function CounterpartyDetails({ counterpartyId, state = {} }: { coun
                   </tr>
                 ) : (
                   <tr key={c.id}>
-                    <td>{c.name}</td>
+                    <td>
+                      {c.name}
+                      {c.isPrimary ? (
+                        <span className="badge badge-active" style={{ marginLeft: 8 }}>
+                          основной
+                        </span>
+                      ) : null}
+                    </td>
                     <td>{c.position ?? "—"}</td>
                     <td>{c.phone ?? "—"}</td>
                     <td>{c.email ?? "—"}</td>
                     <td>
                       <div className="row-actions">
+                        {!c.isPrimary ? (
+                          <form action={setPrimaryContactAction.bind(null, counterpartyId, c.id)}>
+                            <button type="submit" className="btn btn-ghost btn-sm">
+                              Сделать основным
+                            </button>
+                          </form>
+                        ) : null}
                         <Link href={`${base}?editContact=${c.id}#contacts`} className="btn btn-ghost btn-sm">
                           Изменить
                         </Link>
@@ -256,10 +271,21 @@ export async function CounterpartyDetails({ counterpartyId, state = {} }: { coun
             <span>Email</span>
             <input type="email" name="email" id="new-contact-email" />
           </label>
+          {contacts.length > 0 ? (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <input type="checkbox" name="isPrimary" id="new-contact-primary" />
+              Сделать основным
+            </label>
+          ) : null}
           <button type="submit" className="btn btn-secondary">
             Добавить контакт
           </button>
         </form>
+        <p className="text-muted" style={{ marginTop: 8, fontSize: 12 }}>
+          Основной контакт — к кому обращаться в первую очередь; он показывается в заявках на оплату и документах начисления этого
+          контрагента. Первый добавленный контакт становится основным сам; при удалении основного основным становится следующий по
+          порядку.
+        </p>
       </div>
     </>
   );

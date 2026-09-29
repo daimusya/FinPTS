@@ -150,8 +150,15 @@ export async function addContactAction(counterpartyId: string, formData: FormDat
 
   const result = readContactForm(formData);
   if ("error" in result) back(counterpartyId, "contact", "error", result.error);
-  const created = await prisma.counterpartyContact.create({
-    data: { counterpartyId, ...(result as Extract<typeof result, { value: unknown }>).value },
+
+  // The first contact is primary automatically; a new one becomes primary only when asked.
+  const existingCount = await prisma.counterpartyContact.count({ where: { counterpartyId } });
+  const isPrimary = existingCount === 0 || formData.get("isPrimary") === "on";
+  const created = await prisma.$transaction(async (db) => {
+    if (isPrimary) await db.counterpartyContact.updateMany({ where: { counterpartyId, isPrimary: true }, data: { isPrimary: false } });
+    return db.counterpartyContact.create({
+      data: { counterpartyId, ...(result as Extract<typeof result, { value: unknown }>).value, isPrimary },
+    });
   });
 
   await logAudit({
@@ -163,7 +170,7 @@ export async function addContactAction(counterpartyId: string, formData: FormDat
   });
 
   revalidatePath(editPath(counterpartyId));
-  back(counterpartyId, "contact", "notice", "Контакт добавлен");
+  back(counterpartyId, "contact", "notice", isPrimary ? "Контакт добавлен и отмечен основным" : "Контакт добавлен");
 }
 
 export async function updateContactAction(counterpartyId: string, id: string, formData: FormData) {
@@ -191,12 +198,42 @@ export async function updateContactAction(counterpartyId: string, id: string, fo
   back(counterpartyId, "contact", "notice", "Контакт сохранён");
 }
 
+export async function setPrimaryContactAction(counterpartyId: string, id: string) {
+  const session = await requirePermission(PERMISSIONS.MASTERDATA_MANAGE);
+
+  const target = await prisma.counterpartyContact.findFirst({ where: { id, counterpartyId } });
+  if (!target) back(counterpartyId, "contact", "error", "Контакт не найден — возможно, его уже удалили");
+  const previous = await prisma.counterpartyContact.findFirst({ where: { counterpartyId, isPrimary: true } });
+
+  await prisma.$transaction([
+    prisma.counterpartyContact.updateMany({ where: { counterpartyId, isPrimary: true, id: { not: id } }, data: { isPrimary: false } }),
+    prisma.counterpartyContact.update({ where: { id }, data: { isPrimary: true } }),
+  ]);
+  await logAudit({
+    userId: session.userId,
+    entityType: "counterparty_contact",
+    entityId: id,
+    action: "set_primary",
+    before: { primaryId: previous?.id ?? null } as never,
+    after: { primaryId: id } as never,
+  });
+
+  revalidatePath(editPath(counterpartyId));
+  back(counterpartyId, "contact", "notice", `Основной контакт: ${target!.name}`);
+}
+
 export async function removeContactAction(counterpartyId: string, id: string) {
   const session = await requirePermission(PERMISSIONS.MASTERDATA_MANAGE);
 
-  const before = await prisma.counterpartyContact.findFirst({ where: { id, counterpartyId } });
+  const all = await prisma.counterpartyContact.findMany({ where: { counterpartyId } });
+  const before = all.find((c) => c.id === id);
   if (!before) back(counterpartyId, "contact", "error", "Контакт не найден — возможно, его уже удалили");
-  await prisma.counterpartyContact.delete({ where: { id } });
+  // Removing the primary contact passes the mark to the oldest remaining one.
+  const nextPrimary = nextPrimaryAfterRemoval(all, id);
+  await prisma.$transaction([
+    prisma.counterpartyContact.delete({ where: { id } }),
+    ...(nextPrimary ? [prisma.counterpartyContact.update({ where: { id: nextPrimary }, data: { isPrimary: true } })] : []),
+  ]);
 
   await logAudit({
     userId: session.userId,
@@ -204,8 +241,10 @@ export async function removeContactAction(counterpartyId: string, id: string) {
     entityId: id,
     action: "delete",
     before: before as never,
+    after: nextPrimary ? ({ newPrimaryId: nextPrimary } as never) : undefined,
   });
 
   revalidatePath(editPath(counterpartyId));
-  back(counterpartyId, "contact", "notice", "Контакт удалён");
+  const heir = nextPrimary ? all.find((c) => c.id === nextPrimary) : null;
+  back(counterpartyId, "contact", "notice", heir ? `Контакт удалён. Основным стал ${heir.name}` : "Контакт удалён");
 }

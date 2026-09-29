@@ -398,6 +398,9 @@ model CounterpartyContact {
   phone          String?
   email          String?
   position       String?
+  /// Основной контакт контрагента — ровно один, если контакты есть.
+  isPrimary      Boolean  @default(false)
+  createdAt      DateTime @default(now())
 
   counterparty Counterparty @relation(fields: [counterpartyId], references: [id], onDelete: Cascade)
 

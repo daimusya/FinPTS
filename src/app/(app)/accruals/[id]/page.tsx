@@ -15,6 +15,7 @@ import { cancelAllocationAction } from "../../cash/actions";
 import { postAccrualDocumentAction, cancelAccrualDocumentAction, rescheduleDocumentAction, assignDocumentAccountAction } from "../actions";
 import { PaymentAccountOptions } from "@/components/payment-account-options";
 import { accountKey, localDateKey, showDueDate } from "@/lib/payment-calendar";
+import { PrimaryContact } from "@/components/primary-contact";
 import { canPlanDocuments } from "@/lib/payment-plan/service";
 
 export default async function AccrualDocumentPage({
@@ -40,7 +41,7 @@ export default async function AccrualDocumentPage({
     where: { id },
     include: {
       organization: true,
-      counterparty: true,
+      counterparty: { include: { contacts: { where: { isPrimary: true }, take: 1 } } },
       contract: true,
       responsible: true,
       lines: { include: { department: true, costCenter: true, project: true, productService: true, pnlArticle: true } },
@@ -75,6 +76,10 @@ export default async function AccrualDocumentPage({
           <p>
             {doc.organization.shortName || doc.organization.name} · {doc.counterparty.shortName || doc.counterparty.fullName} ·{" "}
             {ACCRUAL_DIRECTION_LABELS[doc.direction]}
+          </p>
+          <p style={{ fontSize: 13 }}>
+            <span className="text-muted">Контакт: </span>
+            <PrimaryContact contact={doc.counterparty.contacts[0] ?? null} counterpartyId={doc.counterpartyId} />
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
