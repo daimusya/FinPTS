@@ -4,6 +4,7 @@ import type { DictionaryConfig, DictionaryDelegate, FieldOption } from "./types"
 import { acceptsManualEntries } from "@/lib/reports/balance-lines";
 import { validateInn } from "@/lib/integrations/inn";
 import { TAX_SYSTEM_OPTIONS } from "@/lib/organizations/taxes";
+import { CURRENCY_OPTIONS } from "@/lib/currency";
 import { validateCreditAgreementRecord, validateFixedAssetRecord } from "@/lib/reports/non-cash-guards";
 
 function delegate(d: unknown): DictionaryDelegate {
@@ -222,7 +223,7 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "bankName", label: "Банк", type: "text", required: true },
       { name: "accountNumber", label: "Номер счёта", type: "text", required: true },
       { name: "bik", label: "БИК", type: "text" },
-      { name: "currency", label: "Валюта", type: "text", defaultValue: "RUB" },
+      { name: "currency", label: "Валюта", type: "select", required: true, options: CURRENCY_OPTIONS, defaultValue: "RUB" },
     ],
   },
   "cash-accounts": {
@@ -238,7 +239,40 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
     fields: [
       { name: "organizationId", label: "Организация", type: "select", required: true, loadOptions: organizationOptions },
       { name: "name", label: "Название кассы", type: "text", required: true },
-      { name: "currency", label: "Валюта", type: "text", defaultValue: "RUB" },
+      { name: "currency", label: "Валюта", type: "select", required: true, options: CURRENCY_OPTIONS, defaultValue: "RUB" },
+    ],
+  },
+  "currency-rates": {
+    slug: "currency-rates",
+    title: "Курсы валют",
+    singularTitle: "Курс валюты",
+    entityAuditType: "currency_rate",
+    delegate: delegate(prisma.currencyRate),
+    permissionView: PERMISSIONS.MASTERDATA_VIEW,
+    permissionManage: PERMISSIONS.MASTERDATA_MANAGE,
+    orderBy: { date: "desc" },
+    listLimit: 400,
+    listColumns: ["date", "currency", "rate", "source"],
+    fields: [
+      { name: "currency", label: "Валюта", type: "select", required: true, options: CURRENCY_OPTIONS.filter((o) => o.value !== "RUB") },
+      { name: "date", label: "Дата", type: "date", required: true },
+      {
+        name: "rate",
+        label: "Курс: рублей за 1 единицу валюты",
+        type: "number",
+        required: true,
+        validate: (value) => (Number(value.replace(",", ".")) > 0 ? null : "Курс — положительное число"),
+      },
+      {
+        name: "source",
+        label: "Источник",
+        type: "select",
+        options: [
+          { value: "manual", label: "введён вручную" },
+          { value: "cbr", label: "ЦБ РФ" },
+        ],
+        defaultValue: "manual",
+      },
     ],
   },
   departments: {

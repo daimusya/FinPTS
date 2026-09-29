@@ -5,6 +5,8 @@ import type { Prisma } from "@prisma/client";
 import type { ReportFilters } from "./filters";
 import type { ReportPeriod } from "./period";
 import { bankTransactionScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
+import { addNative, BASE_CURRENCY, revalueBalances, transactionCurrency, type RateLookup } from "@/lib/currency";
+import { loadRateLookup } from "@/lib/currency-rates";
 
 function buildWhere(filters: ReportFilters, scope: AccessScope): Prisma.BankTransactionWhereInput {
   const and: Prisma.BankTransactionWhereInput[] = [];
@@ -33,6 +35,12 @@ export interface CashFlowArticleRow {
   transactionIds: string[];
 }
 
+export interface CurrencyBalance {
+  currency: string;
+  opening: Decimal;
+  closing: Decimal;
+}
+
 export interface CashFlowReport {
   openingBalance: Decimal;
   inflowRows: CashFlowArticleRow[];
@@ -41,11 +49,17 @@ export interface CashFlowReport {
   totalOutflow: Decimal;
   transfersNet: Decimal;
   netFlow: Decimal;
+  /** Переоценка валютных остатков: остаток на конец по курсу на конец минус (начало по курсу на начало + движения по курсам своих дат). */
+  fxDifference: Decimal;
   closingBalance: Decimal;
+  /** Остатки валютных счетов в их валюте (без рублёвых). */
+  currencyBalances: CurrencyBalance[];
+  /** «USD на 01.03.2026» — курса нет, сумма взята по ближайшему или как есть. */
+  missingRates: string | null;
 }
 
 function groupByArticle(
-  transactions: Array<{ id: string; amount: Prisma.Decimal; cashFlowArticleId: string | null; cashFlowArticle: { name: string } | null }>,
+  transactions: Array<{ id: string; amount: Decimal; cashFlowArticleId: string | null; cashFlowArticle: { name: string } | null }>,
 ): CashFlowArticleRow[] {
   const map = new Map<string, CashFlowArticleRow>();
   for (const tx of transactions) {
@@ -67,23 +81,40 @@ export async function computeCashFlowReport(
   period: ReportPeriod,
   filters: ReportFilters,
   scope: AccessScope = UNRESTRICTED_SCOPE,
+  rates?: RateLookup,
 ): Promise<CashFlowReport> {
   const where = buildWhere(filters, scope);
+  const accountCurrency = { bankAccount: { select: { currency: true } }, cashAccount: { select: { currency: true } } } as const;
 
-  const [openingTx, periodTx] = await Promise.all([
+  const [openingTx, rawPeriodTx, lookup] = await Promise.all([
     prisma.bankTransaction.findMany({
       where: { ...where, operationDate: { lt: period.from } },
-      select: { amount: true, direction: true },
+      select: { amount: true, direction: true, ...accountCurrency },
     }),
     prisma.bankTransaction.findMany({
       where: { ...where, operationDate: { gte: period.from, lte: period.to } },
-      include: { cashFlowArticle: true },
+      include: { cashFlowArticle: true, ...accountCurrency },
     }),
+    rates ? Promise.resolve(rates) : loadRateLookup(),
   ]);
 
-  const openingInflow = sumMoney(openingTx.filter((t) => t.direction === "INFLOW").map((t) => t.amount));
-  const openingOutflow = sumMoney(openingTx.filter((t) => t.direction === "OUTFLOW").map((t) => t.amount));
-  const openingBalance = openingInflow.minus(openingOutflow);
+  // Opening balances per currency, valued at the rate of the day before the period (the previous period's closing).
+  const openingNative = new Map<string, Decimal>();
+  for (const t of openingTx) {
+    const amount = toDecimal(t.amount);
+    addNative(openingNative, transactionCurrency(t), t.direction === "INFLOW" ? amount : amount.negated());
+  }
+  const dayBefore = new Date(Date.UTC(period.from.getUTCFullYear(), period.from.getUTCMonth(), period.from.getUTCDate() - 1));
+  const openingBalance = revalueBalances(openingNative, dayBefore, lookup);
+
+  // Every operation in rubles at the rate of its own date.
+  const closingNative = new Map(openingNative);
+  const periodTx = rawPeriodTx.map((t) => {
+    const currency = transactionCurrency(t);
+    const native = toDecimal(t.amount);
+    addNative(closingNative, currency, t.direction === "INFLOW" ? native : native.negated());
+    return { ...t, amount: lookup.toRub(native, currency, t.operationDate) };
+  });
 
   const transfers = periodTx.filter((t) => t.isTransfer);
   const operating = periodTx.filter((t) => !t.isTransfer);
@@ -99,7 +130,24 @@ export async function computeCashFlowReport(
   const transfersNet = transfersInflow.minus(transfersOutflow);
 
   const netFlow = totalInflow.minus(totalOutflow).plus(transfersNet);
-  const closingBalance = openingBalance.plus(netFlow);
+  const closingBalance = revalueBalances(closingNative, period.to, lookup);
+  const fxDifference = closingBalance.minus(openingBalance).minus(netFlow);
+  const currencyBalances = [...new Set([...openingNative.keys(), ...closingNative.keys()])]
+    .filter((c) => c !== BASE_CURRENCY)
+    .sort()
+    .map((currency) => ({ currency, opening: openingNative.get(currency) ?? toDecimal(0), closing: closingNative.get(currency) ?? toDecimal(0) }));
 
-  return { openingBalance, inflowRows, outflowRows, totalInflow, totalOutflow, transfersNet, netFlow, closingBalance };
+  return {
+    openingBalance,
+    inflowRows,
+    outflowRows,
+    totalInflow,
+    totalOutflow,
+    transfersNet,
+    netFlow,
+    fxDifference,
+    closingBalance,
+    currencyBalances,
+    missingRates: lookup.missingText(),
+  };
 }

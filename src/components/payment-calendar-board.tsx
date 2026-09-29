@@ -54,6 +54,8 @@ export interface BoardItem {
   unassigned: boolean;
   accountKey: string | null;
   accountName: string | null;
+  /** Часть графика без своего счёта — действует счёт заявки. */
+  accountInherited?: boolean;
 }
 
 export interface AccountOption {
@@ -207,7 +209,7 @@ export function PaymentCalendarBoard({
           setSelectedKey(key === selectedKey ? null : key);
           setPickedDate(dateOf(item) < todayKey ? todayKey : dateOf(item));
           setPickedTime(item.dueTime ?? "");
-          setPickedAccount(item.accountKey ?? "");
+          setPickedAccount(item.accountInherited ? "" : (item.accountKey ?? ""));
         }}
         title={`${item.title} · ${item.amountFull}${item.dueTime ? ` · в ${item.dueTime}` : ""} · ${item.subtitle}${item.counted ? "" : " · не входит в прогноз"}`}
         aria-pressed={selectedKey === key}
@@ -249,6 +251,7 @@ export function PaymentCalendarBoard({
               {selected.article ? ` · ${selected.article}` : ""} · срок {showDate(dateOf(selected))}
               {selected.dueTime ? ` в ${selected.dueTime}` : ""} · счёт оплаты:{" "}
               {selected.accountName ?? "не назначен"}
+              {selected.accountInherited ? " (счёт заявки)" : ""}
             </span>
           </div>
           <div className="pc-selected__actions">
@@ -272,9 +275,9 @@ export function PaymentCalendarBoard({
                   Перенести
                 </button>
                 <label className="field">
-                  <span>Счёт оплаты</span>
+                  <span>{selected.kind === "part" ? "Счёт оплаты этой части" : "Счёт оплаты"}</span>
                   <select id="pc-account" value={pickedAccount} onChange={(e) => setPickedAccount(e.target.value)}>
-                    <option value="">— не назначен —</option>
+                    <option value="">{selected.kind === "part" ? "— как у заявки —" : "— не назначен —"}</option>
                     {selectedAccounts.map((a) => (
                       <option key={a.key} value={a.key}>
                         {a.label}
@@ -285,7 +288,7 @@ export function PaymentCalendarBoard({
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  disabled={isPending || pickedAccount === (selected.accountKey ?? "")}
+                  disabled={isPending || pickedAccount === (selected.accountInherited ? "" : (selected.accountKey ?? ""))}
                   onClick={() => run(() => assignCalendarAccountAction(selected.kind, selected.id, pickedAccount))}
                 >
                   Сохранить счёт

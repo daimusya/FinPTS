@@ -4,6 +4,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { DICTIONARY_REGISTRY, getDictionaryConfig } from "@/lib/dictionaries/registry";
 import { archiveDictionaryItem, restoreDictionaryItem } from "../actions";
 import { CounterpartyCreateByInn } from "@/components/counterparty-inn";
+import { CurrencyRatesLoader } from "@/components/currency-rates-loader";
 
 function formatCell(value: unknown): string {
   if (value === null || value === undefined) return "—";
@@ -55,10 +56,10 @@ export default async function DictionaryListPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ imported?: string; importResult?: string; innError?: string }>;
+  searchParams: Promise<{ imported?: string; importResult?: string; innError?: string; ratesError?: string }>;
 }) {
   const { slug } = await params;
-  const { imported, importResult, innError } = await searchParams;
+  const { imported, importResult, innError, ratesError } = await searchParams;
   if (!DICTIONARY_REGISTRY[slug]) notFound();
   const config = getDictionaryConfig(slug);
 
@@ -74,6 +75,7 @@ export default async function DictionaryListPage({
 
   const items = await config.delegate.findMany({
     orderBy: config.orderBy ?? { name: "asc" },
+    ...(config.listLimit ? { take: config.listLimit } : {}),
   });
 
   const active = items.filter((item) => !item.isArchived);
@@ -104,6 +106,12 @@ export default async function DictionaryListPage({
       </div>
 
       {slug === "counterparties" && canManage ? <CounterpartyCreateByInn error={innError} /> : null}
+      {slug === "currency-rates" && canManage ? <CurrencyRatesLoader error={ratesError} /> : null}
+      {config.listLimit && items.length >= config.listLimit ? (
+        <p className="text-muted" style={{ fontSize: 12 }}>
+          Показаны последние {config.listLimit} записей; все — в выгрузке в Excel.
+        </p>
+      ) : null}
 
       {importResult || imported ? (
         <div className="card" style={{ marginBottom: 16 }}>

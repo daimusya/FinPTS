@@ -2,6 +2,8 @@ import { prisma } from "@/lib/db";
 import { toDecimal } from "@/lib/money";
 import type { PnlType } from "./pnl";
 import { linkedFlowEffect } from "./balance-lines";
+import { loadRateLookup } from "@/lib/currency-rates";
+import { transactionCurrency } from "@/lib/currency";
 import { depreciationSchedule, interestSchedule, type DebtEvent, type MonthCharge } from "./non-cash";
 
 export interface NonCashItem {
@@ -41,19 +43,27 @@ export async function loadNonCashCharges(until: Date, organizationIds: string[] 
 
   if (loans.length > 0) {
     const articleIds = loans.map((l) => l.balanceArticleId);
-    const [flows, entries] = await Promise.all([
+    const [flows, entries, rates] = await Promise.all([
       prisma.bankTransaction.findMany({
         where: { isTransfer: false, operationDate: { lte: until }, cashFlowArticle: { balanceArticleId: { in: articleIds } } },
-        select: { amount: true, direction: true, operationDate: true, cashFlowArticle: { select: { balanceArticleId: true } } },
+        select: {
+          amount: true,
+          direction: true,
+          operationDate: true,
+          cashFlowArticle: { select: { balanceArticleId: true } },
+          bankAccount: { select: { currency: true } },
+          cashAccount: { select: { currency: true } },
+        },
       }),
       prisma.balanceEntry.findMany({
         where: { balanceArticleId: { in: articleIds }, date: { lte: until } },
         select: { balanceArticleId: true, amount: true, date: true },
       }),
+      loadRateLookup(),
     ]);
     const events = new Map<string, DebtEvent[]>(articleIds.map((id) => [id, []]));
     for (const f of flows) {
-      events.get(f.cashFlowArticle!.balanceArticleId!)?.push({ date: f.operationDate, delta: linkedFlowEffect("LIABILITY", f.direction, toDecimal(f.amount)) });
+      events.get(f.cashFlowArticle!.balanceArticleId!)?.push({ date: f.operationDate, delta: linkedFlowEffect("LIABILITY", f.direction, rates.toRub(f.amount, transactionCurrency(f), f.operationDate)) });
     }
     for (const e of entries) events.get(e.balanceArticleId)?.push({ date: e.date, delta: toDecimal(e.amount) });
     for (const l of loans) {

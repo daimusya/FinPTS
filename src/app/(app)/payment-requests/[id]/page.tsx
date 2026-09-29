@@ -76,7 +76,7 @@ export default async function PaymentRequestPage({
       route: { include: { steps: { include: { role: true } } } },
       approvals: { include: { approver: true, onBehalfOf: true }, orderBy: { decidedAt: "asc" } },
       reschedules: { include: { changedBy: true }, orderBy: { changedAt: "asc" } },
-      parts: { include: { paidBy: true }, orderBy: [{ dueDate: "asc" }, { sortOrder: "asc" }] },
+      parts: { include: { paidBy: true, payBankAccount: true, payCashAccount: true }, orderBy: [{ dueDate: "asc" }, { sortOrder: "asc" }] },
       payBankAccount: true,
       payCashAccount: true,
     },
@@ -254,6 +254,14 @@ export default async function PaymentRequestPage({
                     <td>{i + 1}</td>
                     <td className="mono">
                       {showDueDate(part.dueDate, part.dueTime)}
+                      {part.payBankAccount || part.payCashAccount ? (
+                        <div className="text-muted" style={{ fontSize: 11 }}>
+                          счёт:{" "}
+                          {part.payBankAccount
+                            ? `${part.payBankAccount.bankName} · ${part.payBankAccount.accountNumber}`
+                            : `касса «${part.payCashAccount!.name}»`}
+                        </div>
+                      ) : null}
                       {!part.paidAt && part.dueDate.toISOString().slice(0, 10) < todayKey ? (
                         <span className="badge badge-danger" style={{ marginLeft: 6 }}>
                           просрочена

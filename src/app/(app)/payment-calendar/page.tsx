@@ -22,6 +22,9 @@ import { PAYMENT_REQUEST_STATUS_LABELS } from "@/lib/payment-requests/labels";
 import { ACCRUAL_DOCUMENT_TYPE_LABELS } from "@/lib/accruals/labels";
 import { canPlanDocuments, canPlanRequests } from "@/lib/payment-plan/service";
 import { PaymentCalendarBoard, type AccountOption, type BoardDay, type BoardItem } from "@/components/payment-calendar-board";
+import { formatMoneyIn, normalizeCurrency } from "@/lib/currency";
+import { loadRateLookup } from "@/lib/currency-rates";
+import { MissingRatesWarning } from "@/components/missing-rates-warning";
 
 const MONTH_NAMES = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const WEEKDAY_NAMES = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
@@ -73,7 +76,7 @@ export default async function PaymentCalendarPage({
   const { prev, next } = adjacentMonths(month);
   const [year, monthNumber] = month.split("-").map(Number);
 
-  const [organizations, bankAccounts, cashAccounts, flows, unpaidDocuments, requests, calendarDays] = await Promise.all([
+  const [organizations, bankAccounts, cashAccounts, flows, unpaidDocuments, requests, calendarDays, rates] = await Promise.all([
     prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     prisma.bankAccount.findMany({ include: { organization: true }, orderBy: { bankName: "asc" } }),
     prisma.cashAccount.findMany({ include: { organization: true }, orderBy: { name: "asc" } }),
@@ -90,16 +93,18 @@ export default async function PaymentCalendarPage({
     prisma.productionCalendarDay.findMany({
       where: { isArchived: false, date: { gte: new Date(Date.UTC(year, monthNumber - 2, 20)), lte: new Date(Date.UTC(year, monthNumber, 10)) } },
     }),
+    loadRateLookup(),
   ]);
 
   // Accounts: names, organization, current balance from bank and cash operations.
-  const accountInfo = new Map<string, { label: string; organizationId: string; organization: string; archived: boolean }>();
+  const accountInfo = new Map<string, { label: string; organizationId: string; organization: string; archived: boolean; currency: string }>();
   for (const a of bankAccounts) {
     accountInfo.set(`bank:${a.id}`, {
       label: `${a.bankName} · ${a.accountNumber}`,
       organizationId: a.organizationId,
       organization: a.organization.shortName || a.organization.name,
       archived: a.isArchived,
+      currency: normalizeCurrency(a.currency),
     });
   }
   for (const a of cashAccounts) {
@@ -108,15 +113,20 @@ export default async function PaymentCalendarPage({
       organizationId: a.organizationId,
       organization: a.organization.shortName || a.organization.name,
       archived: a.isArchived,
+      currency: normalizeCurrency(a.currency),
     });
   }
-  const balances = new Map<string, Decimal>();
+  // Balance of each account in its own currency, and in rubles at today's rate (the forecast is in rubles).
+  const nativeBalances = new Map<string, Decimal>();
   for (const f of flows) {
     const key = accountKey(f.bankAccountId, f.cashAccountId);
     if (!key) continue;
     const amount = new Decimal(f._sum.amount?.toString() ?? 0);
-    balances.set(key, (balances.get(key) ?? new Decimal(0)).plus(f.direction === "INFLOW" ? amount : amount.negated()));
+    nativeBalances.set(key, (nativeBalances.get(key) ?? new Decimal(0)).plus(f.direction === "INFLOW" ? amount : amount.negated()));
   }
+  const todayDate = new Date(`${todayKey}T00:00:00Z`);
+  const balances = new Map<string, Decimal>();
+  for (const [key, native] of nativeBalances) balances.set(key, rates.toRub(native, accountInfo.get(key)?.currency ?? "RUB", todayDate));
 
   // Forecast slice: one account, one organization or everything.
   const chosenAccount = parseAccountKey(params.account) && accountInfo.has(params.account!) ? params.account! : null;
@@ -171,8 +181,12 @@ export default async function PaymentCalendarPage({
     }
     r.parts.forEach((part, i) => {
       const amount = new Decimal(part.amount.toString());
+      const ownAccount = accountKey(part.payBankAccountId, part.payCashAccountId);
       items.push({
         ...base,
+        // A part may be paid from its own account; otherwise the request's.
+        accountKey: ownAccount ?? base.accountKey,
+        accountInherited: !ownAccount && Boolean(base.accountKey),
         kind: "part",
         id: part.id,
         dueDate: keyOf(part.dueDate),
@@ -265,7 +279,6 @@ export default async function PaymentCalendarPage({
     });
 
   // Future days only: overdue items fall on today, as in the grid.
-  const todayDate = new Date(`${todayKey}T00:00:00Z`);
   const rows = buildCalendarRows(
     currentBalance.toString(),
     movements.map((m) => (keyOf(m.date) < todayKey ? { ...m, date: todayDate } : m)),
@@ -288,6 +301,7 @@ export default async function PaymentCalendarPage({
     return {
       key,
       info,
+      native: nativeBalances.get(key) ?? new Decimal(0),
       balance: balances.get(key) ?? new Decimal(0),
       inflow: sumMoney(own.filter((m) => m.direction === "INFLOW").map((m) => m.amount)),
       outflow: sumMoney(own.filter((m) => m.direction === "OUTFLOW").map((m) => m.amount)),
@@ -338,6 +352,8 @@ export default async function PaymentCalendarPage({
           </p>
         </div>
       </div>
+
+      {rates.missingText() ? <MissingRatesWarning text={rates.missingText()!} /> : null}
 
       <form className="filter-bar" method="get" action="/payment-calendar">
         <input type="hidden" name="month" value={month} />
@@ -459,7 +475,8 @@ export default async function PaymentCalendarPage({
         </h2>
         <p className="text-muted" style={{ fontSize: 12, marginBottom: 10 }}>
           У каждого счёта — только платежи, для которых он назначен счётом оплаты. Платежи без счёта — отдельной строкой: назначьте
-          им счёт в календаре, на странице заявки или документа.
+          им счёт в календаре, на странице заявки или документа. Прогноз — в рублях: остаток валютного счёта пересчитан по курсу ЦБ
+          на сегодня, суммы заявок и документов — рублёвые.
         </p>
         <div className="table-wrap">
           <table>
@@ -483,7 +500,18 @@ export default async function PaymentCalendarPage({
                       {row.info.archived ? " · в архиве" : ""}
                     </div>
                   </td>
-                  <td className="mono">{formatMoney(row.balance)}</td>
+                  <td className="mono">
+                    {row.info.currency === "RUB" ? (
+                      formatMoney(row.balance)
+                    ) : (
+                      <>
+                        {formatMoneyIn(row.native, row.info.currency)}
+                        <div className="text-muted" style={{ fontSize: 11 }}>
+                          ≈ {formatMoney(row.balance)} по курсу ЦБ
+                        </div>
+                      </>
+                    )}
+                  </td>
                   <td className="mono">{row.inflow.greaterThan(0) ? formatMoney(row.inflow) : "—"}</td>
                   <td className="mono">{row.outflow.greaterThan(0) ? formatMoney(row.outflow) : "—"}</td>
                   <td className="mono">{row.monthEnd ? formatMoney(row.monthEnd) : "—"}</td>

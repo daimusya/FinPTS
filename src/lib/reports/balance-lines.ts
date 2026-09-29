@@ -98,6 +98,8 @@ export interface AssembledBalance {
   retainedFromPnl: Decimal;
   /** Остаток нераспределённой прибыли на начало учёта и дивиденды — балансовые операции по этой статье. */
   retainedAdjustments: Decimal;
+  /** Курсовые разницы: переоценка валютных остатков денег на дату баланса. */
+  fxRevaluation: Decimal;
   retainedEarnings: Decimal;
   totalEquity: Decimal;
   equityImpliedByBalance: Decimal;
@@ -119,6 +121,8 @@ export function assembleBalance(input: {
   advancesIssued: Decimal;
   advancesReceived: Decimal;
   netProfitFromPnl: Decimal;
+  /** Курсовые разницы по валютным остаткам (прибыль «+», убыток «−»). */
+  fxRevaluation?: Decimal;
   articles: BalanceArticleInput[];
 }): AssembledBalance {
   const line = (a: BalanceArticleInput): BalanceArticleLine => {
@@ -139,7 +143,8 @@ export function assembleBalance(input: {
     input.payrollPayable,
     ...liabilityArticles.map((a) => a.amount),
   ]);
-  const retainedEarnings = input.netProfitFromPnl.plus(retainedAdjustments);
+  const fxRevaluation = input.fxRevaluation ?? toDecimal(0);
+  const retainedEarnings = input.netProfitFromPnl.plus(retainedAdjustments).plus(fxRevaluation);
   const totalEquity = sumMoney([...equityArticles.map((a) => a.amount), retainedEarnings]);
   const equityImpliedByBalance = totalAssets.minus(totalLiabilities);
   const discrepancy = equityImpliedByBalance.minus(totalEquity);
@@ -158,6 +163,7 @@ export function assembleBalance(input: {
     equityArticles,
     retainedFromPnl: input.netProfitFromPnl,
     retainedAdjustments,
+    fxRevaluation,
     retainedEarnings,
     totalEquity,
     equityImpliedByBalance,

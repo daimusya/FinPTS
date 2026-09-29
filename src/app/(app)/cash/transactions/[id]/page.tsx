@@ -5,6 +5,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney } from "@/lib/money";
 import { ACCRUAL_DOCUMENT_TYPE_LABELS } from "@/lib/accruals/labels";
+import { formatMoneyIn, transactionCurrency } from "@/lib/currency";
 import {
   allocatePaymentAction,
   updateTransactionClassificationAction,
@@ -90,7 +91,7 @@ export default async function CashTransactionDetailPage({
       <div className="page-header">
         <div>
           <h1>
-            Операция от {tx.operationDate.toLocaleDateString("ru-RU")} · {formatMoney(tx.amount)}
+            Операция от {tx.operationDate.toLocaleDateString("ru-RU")} · {formatMoneyIn(tx.amount, transactionCurrency(tx))}
           </h1>
           <p>{tx.bankAccount ? `${tx.bankAccount.bankName} · ${tx.bankAccount.accountNumber}` : tx.cashAccount?.name}</p>
         </div>
@@ -195,7 +196,7 @@ export default async function CashTransactionDetailPage({
                 {linkedTransfer.bankAccount
                   ? `${linkedTransfer.bankAccount.bankName} · ${linkedTransfer.bankAccount.accountNumber}`
                   : linkedTransfer.cashAccount?.name}{" "}
-                · {formatMoney(linkedTransfer.amount)}
+                · {formatMoneyIn(linkedTransfer.amount, transactionCurrency(linkedTransfer))}
               </Link>
             </p>
           ) : null}

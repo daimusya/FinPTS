@@ -12,6 +12,8 @@ import { toDecimal } from "@/lib/money";
 import { loadPlanItems } from "@/lib/budget/load";
 import { mergePlanIntoRows, planFactMetrics, planTotal, resolvePlanAvailability, type PlanFactMetrics } from "@/lib/budget/plan-fact";
 import { PLAN_FACT_HEADERS, PlanFactCells } from "@/components/plan-fact-cells";
+import { formatMoneyIn } from "@/lib/currency";
+import { MissingRatesWarning } from "@/components/missing-rates-warning";
 import type Decimal from "decimal.js";
 
 type PlanFactRow = CashFlowArticleRow & PlanFactMetrics;
@@ -93,6 +95,8 @@ export default async function CashFlowReportPage({
         }}
       />
 
+      {report.missingRates ? <MissingRatesWarning text={report.missingRates} /> : null}
+
       <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label">Остаток на начало периода</div>
@@ -164,6 +168,37 @@ export default async function CashFlowReportPage({
           {formatMoney(report.transfersNet)}
         </p>
       </div>
+
+      {report.currencyBalances.length > 0 || !report.fxDifference.isZero() ? (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Курсовая разница: {formatMoney(report.fxDifference)}</h2>
+          <p className="text-muted" style={{ fontSize: 13, marginBottom: 10 }}>
+            Операции валютных счетов — в рублях по курсу ЦБ на дату операции, остаток на начало — по курсу на день до начала периода, на
+            конец — по курсу на конец периода. Курсовая разница — переоценка валютных остатков из-за изменения курса: остаток на конец =
+            остаток на начало + поступления − выплаты + переводы + курсовая разница.
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Валюта</th>
+                  <th>Остаток на начало, в валюте</th>
+                  <th>Остаток на конец, в валюте</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.currencyBalances.map((c) => (
+                  <tr key={c.currency}>
+                    <td>{c.currency}</td>
+                    <td className="mono">{formatMoneyIn(c.opening, c.currency)}</td>
+                    <td className="mono">{formatMoneyIn(c.closing, c.currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

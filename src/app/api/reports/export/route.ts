@@ -112,7 +112,10 @@ export async function GET(request: NextRequest) {
       totalRow("Итого выплаты", report.totalOutflow, "OUTFLOW"),
       [],
       ["Внутренние переводы (нетто)", toNum(report.transfersNet)],
+      ...(report.fxDifference.isZero() && report.currencyBalances.length === 0 ? [] : [["Курсовая разница", toNum(report.fxDifference)]]),
       ["Остаток на конец периода", toNum(report.closingBalance)],
+      ...report.currencyBalances.map((c) => [`в т. ч. остаток ${c.currency} (в валюте)`, toNum(c.closing)]),
+      ...(report.missingRates ? [[], [`Нет курса ЦБ: ${report.missingRates} — взят ближайший известный курс`]] : []),
     ];
     sheets = [{ name: "ДДС", rows }];
     fileName = `dds_${periodFileSuffix(period)}.xlsx`;
@@ -270,6 +273,7 @@ export async function GET(request: NextRequest) {
       ["Итого обязательства", toNum(balance.totalLiabilities)],
       ...balance.equityArticles.map((a) => [a.name, toNum(a.amount)]),
       ["Нераспределённая прибыль", toNum(balance.retainedEarnings)],
+      ...(balance.fxRevaluation.isZero() ? [] : [["в т. ч. курсовые разницы", toNum(balance.fxRevaluation)]]),
       ["Итого капитал", toNum(balance.totalEquity)],
       [],
       ["Контрольное равенство", balance.isBalanced ? "выполняется" : "расхождение"],

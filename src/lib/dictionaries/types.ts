@@ -39,6 +39,8 @@ export interface DictionaryConfig {
   permissionView: PermissionCode;
   permissionManage: PermissionCode;
   orderBy?: Record<string, "asc" | "desc">;
+  /** Сколько записей показывать в списке (для больших справочников, например курсов валют). */
+  listLimit?: number;
   /**
    * Проверка записи целиком перед сохранением (форма и загрузка из Excel):
    * текст ошибки или null. before — прежняя запись при изменении.

@@ -2,6 +2,7 @@
  * Загрузка выписки по API банков для всех включённых подключений
  * (Интеграции → «Банки: выписка по API»). Запускается Планировщиком Windows
  * (scripts/register-bank-sync-task.ps1) или вручную: npm run bank:sync.
+ * Заодно загружает сегодняшние курсы ЦБ для валютных счетов.
  * Код выхода 2 — хотя бы по одному счёту ошибка (Планировщик покажет её).
  */
 import fs from "node:fs";
@@ -12,12 +13,20 @@ if (fs.existsSync(".env")) process.loadEnvFile(".env");
 async function main() {
   const { syncAllConnections } = await import("@/lib/bank-api/sync");
   const { prisma } = await import("@/lib/db");
+  const { ensureRecentRates } = await import("@/lib/currency-rates");
   try {
     const outcomes = await syncAllConnections();
     const stamp = new Date().toISOString();
     if (outcomes.length === 0) console.log(`${stamp} Подключённых счетов нет`);
     for (const o of outcomes) console.log(`${stamp} [${o.status}] ${o.connectionId}: ${o.message}`);
     process.exitCode = outcomes.some((o) => o.status === "error") ? 2 : 0;
+    // Today's official rates for foreign-currency accounts (reports revalue balances with them).
+    try {
+      const rates = await ensureRecentRates();
+      if (rates) console.log(`${stamp} [ok] ${rates}`);
+    } catch (error) {
+      console.error(`${stamp} [error] курсы ЦБ: ${(error as Error).message}`);
+    }
   } finally {
     await prisma.$disconnect();
   }

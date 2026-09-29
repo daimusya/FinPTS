@@ -4,6 +4,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney } from "@/lib/money";
 import { extractFilters, type ReportSearchParams } from "@/lib/reports/filters";
 import { computeManagementBalance } from "@/lib/reports/balance";
+import { MissingRatesWarning } from "@/components/missing-rates-warning";
 import { acceptsManualEntries, type BalanceArticleLine } from "@/lib/reports/balance-lines";
 import { prisma } from "@/lib/db";
 import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
@@ -104,6 +105,8 @@ export default async function BalanceReportPage({
         </div>
       ) : null}
 
+      {balance.missingRates ? <MissingRatesWarning text={balance.missingRates} /> : null}
+
       <div
         className="card"
         style={{
@@ -134,7 +137,7 @@ export default async function BalanceReportPage({
       <div className="stat-grid">
         <div className="card">
           <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Активы</h2>
-          <BalanceLine label="Денежные средства" value={balance.cash} />
+          <BalanceLine label="Денежные средства" value={balance.cash} note={balance.fxRevaluation.isZero() ? undefined : "валютные — по курсу ЦБ на дату"} />
           <BalanceLine label="Дебиторская задолженность" value={balance.receivable} />
           <BalanceLine label="Авансы выданные" value={balance.advancesIssued} note="платежи контрагентам без документа" />
           {balance.assetArticles.map((a) => (
@@ -157,11 +160,13 @@ export default async function BalanceReportPage({
           <BalanceLine
             label="Нераспределённая прибыль"
             value={balance.retainedEarnings}
-            note={
-              balance.retainedAdjustments.isZero()
-                ? "по ОПиУ"
-                : `по ОПиУ ${formatMoney(balance.retainedFromPnl)} + операции ${formatMoney(balance.retainedAdjustments)}`
-            }
+            note={[
+              balance.retainedAdjustments.isZero() && balance.fxRevaluation.isZero() ? "по ОПиУ" : `по ОПиУ ${formatMoney(balance.retainedFromPnl)}`,
+              balance.retainedAdjustments.isZero() ? null : `операции ${formatMoney(balance.retainedAdjustments)}`,
+              balance.fxRevaluation.isZero() ? null : `курсовые разницы ${formatMoney(balance.fxRevaluation)}`,
+            ]
+              .filter(Boolean)
+              .join(" + ")}
           />
           <BalanceLine label="Итого капитал" value={balance.totalEquity} bold />
         </div>

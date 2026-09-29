@@ -24,6 +24,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/master-data/organizations", label: "Организации и ИП" },
       { href: "/master-data/bank-accounts", label: "Банковские счета" },
       { href: "/master-data/cash-accounts", label: "Кассы" },
+      { href: "/master-data/currency-rates", label: "Курсы валют" },
       { href: "/master-data/departments", label: "Подразделения" },
       { href: "/master-data/cost-centers", label: "ЦФО" },
       { href: "/master-data/projects", label: "Проекты" },

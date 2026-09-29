@@ -16,8 +16,14 @@ import { chargesIn } from "./non-cash";
 import { lineNetAmount, loadInputVatRule } from "@/lib/accruals/vat";
 import { loadNonCashCharges, organizationFilter } from "./non-cash-load";
 import { accrualScopeWhere, bankTransactionScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
+import { addNative, revalueBalances, transactionCurrency } from "@/lib/currency";
+import { loadRateLookup } from "@/lib/currency-rates";
 
-export type ManagementBalance = AssembledBalance & { asOfDate: Date };
+export type ManagementBalance = AssembledBalance & {
+  asOfDate: Date;
+  /** «USD на 01.03.2026» — курса ЦБ нет, взят ближайший. */
+  missingRates: string | null;
+};
 
 /**
  * Управленческий баланс на дату:
@@ -33,6 +39,8 @@ export type ManagementBalance = AssembledBalance & { asOfDate: Date };
  * — нераспределённая прибыль — накопленная чистая прибыль по ОПиУ (включая
  *   амортизацию и проценты) плюс балансовые операции по ней (остаток на
  *   начало учёта, дивиденды).
+ * Валютные операции — в рублях по курсу ЦБ на дату операции, деньги — по
+ * курсу на дату баланса; разница — курсовые разницы в нераспределённой прибыли.
  * Сопоставление платежа с документом действует на дату отчёта, если к ней
  * есть и платёж, и документ (allocatedAsOf): баланс на прошлую дату видит
  * тогдашние долги и авансы, даже если сопоставили их позже.
@@ -64,7 +72,7 @@ export async function computeManagementBalance(
   if (filters.organizationId) entryWhere.organizationId = filters.organizationId;
   else if (scope.organizationIds) entryWhere.organizationId = { in: scope.organizationIds };
 
-  const [transactions, allDocuments, entries, articles, nonCash, vatRule] = await Promise.all([
+  const [transactions, allDocuments, entries, articles, nonCash, vatRule, rates] = await Promise.all([
     prisma.bankTransaction.findMany({
       where: { AND: bankAnd },
       select: {
@@ -73,6 +81,8 @@ export async function computeManagementBalance(
         isTransfer: true,
         counterpartyId: true,
         operationDate: true,
+        bankAccount: { select: { currency: true } },
+        cashAccount: { select: { currency: true } },
         allocations: {
           where: { cancelledAt: null, accrualDocument: { status: "POSTED" } },
           select: { amount: true, accrualDocument: { select: { date: true } } },
@@ -92,15 +102,21 @@ export async function computeManagementBalance(
     prisma.balanceArticle.findMany({ orderBy: { name: "asc" } }),
     loadNonCashCharges(asOfDate, organizationFilter(filters.organizationId, scope.organizationIds)),
     loadInputVatRule(),
+    loadRateLookup(),
   ]);
 
-  let cash = toDecimal(0);
+  // Cash by currency; every operation also in rubles at the rate of its date.
+  const cashNative = new Map<string, Decimal>();
+  let cashAtOperationRates = toDecimal(0);
   let advancesIssued = toDecimal(0);
   let advancesReceived = toDecimal(0);
   const linkedFlows = new Map<string, Decimal>();
   for (const tx of transactions) {
-    const amount = toDecimal(tx.amount);
-    cash = tx.direction === "INFLOW" ? cash.plus(amount) : cash.minus(amount);
+    const currency = transactionCurrency(tx);
+    const native = toDecimal(tx.amount);
+    addNative(cashNative, currency, tx.direction === "INFLOW" ? native : native.negated());
+    const amount = rates.toRub(native, currency, tx.operationDate);
+    cashAtOperationRates = tx.direction === "INFLOW" ? cashAtOperationRates.plus(amount) : cashAtOperationRates.minus(amount);
     const linked = tx.cashFlowArticle?.balanceArticleId ?? null;
     if (linked && tx.cashFlowArticle?.balanceArticle && !tx.isTransfer) {
       const effect = linkedFlowEffect(tx.cashFlowArticle.balanceArticle.category as BalanceCategory, tx.direction, amount);
@@ -120,6 +136,9 @@ export async function computeManagementBalance(
     advancesIssued = advancesIssued.plus(advance.issued);
     advancesReceived = advancesReceived.plus(advance.received);
   }
+
+  const cash = revalueBalances(cashNative, asOfDate, rates);
+  const fxRevaluation = cash.minus(cashAtOperationRates);
 
   let receivable = toDecimal(0);
   let payable = toDecimal(0);
@@ -201,6 +220,7 @@ export async function computeManagementBalance(
     advancesIssued,
     advancesReceived,
     netProfitFromPnl: pnlTotals.netProfit,
+    fxRevaluation,
     articles: visibleArticles.map((a) => ({
       id: a.id,
       name: a.name,
@@ -212,5 +232,5 @@ export async function computeManagementBalance(
     })),
   });
 
-  return { asOfDate, ...assembled };
+  return { asOfDate, ...assembled, missingRates: rates.missingText() };
 }

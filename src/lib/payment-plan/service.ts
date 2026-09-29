@@ -246,8 +246,9 @@ export async function rescheduleDocument(
 export type PlanItemKind = "request" | "part" | "document";
 
 /**
- * Счёт оплаты заявки или документа (для прогноза по счетам). Пустое значение
- * снимает счёт. Счёт должен принадлежать той же организации.
+ * Счёт оплаты заявки, отдельной части графика или документа (для прогноза по
+ * счетам). Пустое значение снимает счёт (у части — возвращает счёт заявки).
+ * Счёт должен принадлежать той же организации.
  */
 export async function assignPaymentAccount(session: SessionPayload, kind: PlanItemKind, id: string, keyRaw: unknown): Promise<PlanResult> {
   const clearing = String(keyRaw ?? "") === "";
@@ -263,7 +264,9 @@ export async function assignPaymentAccount(session: SessionPayload, kind: PlanIt
     organizationId = doc.organizationId;
   } else {
     if (!canPlanRequests(session)) return fail("Назначать счёт оплаты могут согласующие заявки и те, кто ведёт банк и кассу");
-    requestId = kind === "part" ? ((await prisma.paymentRequestPart.findUnique({ where: { id } }))?.paymentRequestId ?? null) : id;
+    const part = kind === "part" ? await prisma.paymentRequestPart.findUnique({ where: { id } }) : null;
+    if (kind === "part" && (!part || part.paidAt)) return fail(part ? "Эта часть уже оплачена" : "Часть оплаты не найдена");
+    requestId = kind === "part" ? part!.paymentRequestId : id;
     const request = requestId ? await prisma.paymentRequest.findUnique({ where: { id: requestId } }) : null;
     if (!request) return fail("Заявка не найдена");
     if (!requestPlacement(request.status, true).movable) return fail("Заявка уже оплачена, отклонена или отменена");
@@ -297,6 +300,20 @@ export async function assignPaymentAccount(session: SessionPayload, kind: PlanIt
       accrualDocumentId: id,
     });
     revalidatePlan([`/accruals/${id}`]);
+  } else if (kind === "part") {
+    await prisma.paymentRequestPart.update({
+      where: { id },
+      data: { payBankAccountId: target.bankAccountId, payCashAccountId: target.cashAccountId },
+    });
+    await logAudit({
+      userId: session.userId,
+      entityType: "payment_request",
+      entityId: requestId!,
+      action: "assign_part_payment_account",
+      after: { partId: id, payBankAccountId: target.bankAccountId, payCashAccountId: target.cashAccountId } as never,
+    });
+    revalidatePlan([`/payment-requests/${requestId}`]);
+    return { ok: true, message: clearing ? "У части снят свой счёт — действует счёт заявки" : `Счёт оплаты части: ${accountName}` };
   } else {
     await prisma.paymentRequest.update({
       where: { id: requestId! },

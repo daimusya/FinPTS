@@ -2,10 +2,10 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
-import { formatMoney } from "@/lib/money";
 import type { Prisma } from "@prisma/client";
 import { bankTransactionScopeWhere, getAccessScope } from "@/lib/access-scope";
 import { deleteBankTransactionsAction } from "../actions";
+import { formatMoneyIn, transactionCurrency } from "@/lib/currency";
 import { SelectAllCheckbox } from "@/components/select-all-checkbox";
 
 const BULK_FORM = "bulk-delete";
@@ -189,7 +189,7 @@ export default async function CashTransactionsPage({
                   </Link>
                 </td>
                 <td>{tx.direction === "INFLOW" ? "Поступление" : "Списание"}</td>
-                <td className="mono">{formatMoney(tx.amount)}</td>
+                <td className="mono">{formatMoneyIn(tx.amount, transactionCurrency(tx))}</td>
                 <td>{tx.counterparty ? tx.counterparty.shortName || tx.counterparty.fullName : "—"}</td>
                 <td>{tx.cashFlowArticle?.name ?? "—"}</td>
                 <td>

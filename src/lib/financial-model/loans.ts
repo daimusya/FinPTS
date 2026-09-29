@@ -22,6 +22,7 @@ import {
 import { computePnlReport } from "@/lib/reports/pnl";
 import { accrualScopeWhere as accrualScope, bankTransactionScopeWhere, UNRESTRICTED_SCOPE } from "@/lib/access-scope";
 import type { Prisma } from "@prisma/client";
+import { flowsRub } from "@/lib/currency-rates";
 import {
   ipFixedInsuranceAt,
   ipIncomeInsuranceAt,
@@ -368,19 +369,18 @@ export async function loadYearOpening(
   const until = new Date(Math.min(startDate.getTime() - 1, now.getTime()));
 
   const [flows, pnl] = await Promise.all([
-    prisma.bankTransaction.groupBy({ by: ["direction"], where: operatingFlowsWhere(from, until, organizationId, scope), _sum: { amount: true } }),
+    flowsRub(operatingFlowsWhere(from, until, organizationId, scope)),
     computePnlReport(
       { from, to: until, year: startYear, month: 1, label: "с начала года", span: "year" },
       organizationId ? { organizationId } : {},
       scope,
     ),
   ]);
-  const sum = (direction: "INFLOW" | "OUTFLOW") => toDecimal(flows.find((f) => f.direction === direction)?._sum.amount?.toString() ?? 0);
   return {
     year: startYear,
     months: startMonth - 1,
-    income: sum("INFLOW"),
-    expenses: sum("OUTFLOW"),
+    income: flows.inflow,
+    expenses: flows.outflow,
     profit: pnl.netProfit.plus(pnl.tax),
   };
 }
@@ -441,13 +441,10 @@ export async function loadVatOpening(
     vatBetween(quarterStart - 3, quarterStart),
     vatBetween(quarterStart, startIndex),
     previousYearFrom > now
-      ? Promise.resolve([])
-      : prisma.bankTransaction.aggregate({
-          where: { AND: [operatingFlowsWhere(previousYearFrom, until(startYear * 12), organizationId, scope), { direction: "INFLOW" }] },
-          _sum: { amount: true },
-        }).then((r) => [r]),
+      ? Promise.resolve(null)
+      : flowsRub({ AND: [operatingFlowsWhere(previousYearFrom, until(startYear * 12), organizationId, scope), { direction: "INFLOW" }] }),
   ]);
-  const previousYearIncome = new Decimal(flows[0]?._sum.amount?.toString() ?? 0);
+  const previousYearIncome = flows?.inflow ?? new Decimal(0);
   return { opening: { previousQuarter, currentQuarter }, previousYearIncome };
 }
 

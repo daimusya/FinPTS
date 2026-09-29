@@ -5,6 +5,8 @@ import { formatMoney, formatNumber, sumMoney } from "@/lib/money";
 import { resolveReportPeriod } from "@/lib/reports/period";
 import { computePnlReport } from "@/lib/reports/pnl";
 import { getSession } from "@/lib/session";
+import { cashBalanceRub } from "@/lib/currency-rates";
+import { formatMoneyIn } from "@/lib/currency";
 import {
   accrualScopeWhere,
   bankTransactionScopeWhere,
@@ -31,7 +33,7 @@ export default async function DashboardPage() {
     projects,
     employees,
     openPeriods,
-    bankTransactions,
+    cash,
     unpaidDocuments,
     unmatchedTransactions,
     upcomingRequests,
@@ -43,7 +45,7 @@ export default async function DashboardPage() {
     prisma.project.count({ where: { isArchived: false, ...projectScopeWhere(scope) } }),
     prisma.employee.count({ where: employeeScopeWhere(scope) }),
     prisma.accountingPeriod.count({ where: { status: PeriodStatus.OPEN } }),
-    prisma.bankTransaction.findMany({ where: bankScope, select: { amount: true, direction: true } }),
+    cashBalanceRub(bankScope),
     prisma.accrualDocument.findMany({
       where: {
         AND: [{ status: "POSTED", paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID"] } }, accrualScope],
@@ -58,9 +60,8 @@ export default async function DashboardPage() {
     computePnlReport(currentPeriod, {}, scope),
   ]);
 
-  const cashInflow = sumMoney(bankTransactions.filter((t) => t.direction === "INFLOW").map((t) => t.amount));
-  const cashOutflow = sumMoney(bankTransactions.filter((t) => t.direction === "OUTFLOW").map((t) => t.amount));
-  const cashBalance = cashInflow.minus(cashOutflow);
+  const cashBalance = cash.total;
+  const foreignCash = [...cash.byCurrency.entries()].filter(([currency, amount]) => currency !== "RUB" && !amount.isZero());
 
   const now = new Date();
   let receivable = sumMoney([]);
@@ -89,7 +90,15 @@ export default async function DashboardPage() {
       </div>
 
       <div className="stat-grid">
-        <StatCard label="Остаток денег (все счета и кассы)" value={formatMoney(cashBalance)} />
+        <StatCard
+          label="Остаток денег (все счета и кассы)"
+          value={formatMoney(cashBalance)}
+          note={
+            foreignCash.length > 0
+              ? `в т. ч. ${foreignCash.map(([currency, amount]) => formatMoneyIn(amount, currency)).join(", ")} по курсу ЦБ${cash.missingRates ? ` (нет курса: ${cash.missingRates})` : ""}`
+              : undefined
+          }
+        />
         <StatCard label="Дебиторская задолженность" value={formatMoney(receivable)} />
         <StatCard label="Кредиторская задолженность" value={formatMoney(payable)} />
         <StatCard label="Просроченная задолженность" value={formatMoney(overdueTotal)} danger={overdueTotal.greaterThan(0)} />
@@ -147,13 +156,18 @@ export default async function DashboardPage() {
   );
 }
 
-function StatCard({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
+function StatCard({ label, value, danger, note }: { label: string; value: string; danger?: boolean; note?: string }) {
   return (
     <div className="stat-card">
       <div className="stat-label">{label}</div>
       <div className="stat-value" style={{ color: danger ? "var(--color-danger)" : undefined, fontSize: 20 }}>
         {value}
       </div>
+      {note ? (
+        <div className="text-muted" style={{ fontSize: 12 }}>
+          {note}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -99,6 +99,14 @@ describe("assembleBalance", () => {
     expect(b.discrepancy.toNumber()).toBe(-500);
     expect(b.isBalanced).toBe(false);
   });
+
+  it("keeps balancing when a currency balance is revalued: the difference goes to retained earnings", () => {
+    // The dollar rose: the same dollars are worth 2 500 more at the report date.
+    const b = assembleBalance({ ...input, cash: d(392500), fxRevaluation: d(2500) });
+    expect(b.fxRevaluation.toNumber()).toBe(2500);
+    expect(b.retainedEarnings.toNumber()).toBe(137400);
+    expect(b.isBalanced).toBe(true);
+  });
 });
 
 describe("allocatedAsOf", () => {
