@@ -69,3 +69,22 @@ describe("organizationTax", () => {
     expect(organizationTax({ name: "ИП", taxSystem: "psn" }, [], 2027).regime).toBe("none");
   });
 });
+
+describe("organizationTax — sole proprietor", () => {
+  const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d));
+  it("adds the contributions from the card, on the income the tax uses; not on AUSN, only fixed ones on a patent", async () => {
+    const { organizationTax } = await import("./loans");
+    const rates = [
+      { taxKind: "ip_insurance_fixed", ratePct: 0, fixedAmount: 57390, validFrom: utc(2026, 1, 1) },
+      { taxKind: "ip_insurance_income", ratePct: 1, thresholdAmount: 300000, maxAmount: 321818, validFrom: utc(2026, 1, 1) },
+    ];
+    const usn = organizationTax({ name: "ИП Петров", taxSystem: "usn_income", type: "SOLE_PROPRIETOR" }, rates, 2026);
+    expect(usn.ipContribution?.base).toBe("income");
+    expect(usn.ipContribution?.forYear(2026).fixed?.toNumber()).toBe(57390);
+    expect(usn.label.endsWith("; взносы ИП за себя")).toBe(true);
+    expect(organizationTax({ name: "ИП", taxSystem: "osn", type: "SOLE_PROPRIETOR" }, rates, 2026).ipContribution?.base).toBe("income_minus_expenses");
+    expect(organizationTax({ name: "ИП", taxSystem: "ausn_income", type: "SOLE_PROPRIETOR" }, rates, 2026).ipContribution).toBeNull();
+    expect(organizationTax({ name: "ИП", taxSystem: "psn", type: "SOLE_PROPRIETOR" }, rates, 2026).ipContribution?.forYear(2026).income).toBeNull();
+    expect(organizationTax({ name: "ООО", taxSystem: "usn_income", type: "LEGAL_ENTITY" }, rates, 2026).ipContribution).toBeNull();
+  });
+});

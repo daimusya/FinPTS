@@ -105,11 +105,14 @@ export default async function ScenarioDetailPage({
     loadScenarioTax(scenario, startYear),
     prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(scope) }, orderBy: { name: "asc" } }),
   ]);
-  const taxOn = tax.regime !== "none";
+  const hasContribution = Boolean(tax.ipContribution);
+  // Taxes or the sole proprietor's contributions — either one brings the profit-after-tax rows.
+  const taxOn = tax.regime !== "none" || hasContribution;
   const projection = projectScenario(startYear, startMonth, HORIZON_MONTHS, rows, startingCash, newServiceInputs, {
     ...opening,
     loans: loanInputs,
     tax,
+    ipContribution: tax.ipContribution,
   });
   const startIndex = startYear * 12 + (startMonth - 1);
   const dueLater = (due: typeof opening.openingReceivableDue) => sumMoney(due.filter((d) => d.index > startIndex).map((d) => d.amount));
@@ -657,7 +660,9 @@ export default async function ScenarioDetailPage({
           нарастающим итогом с начала года в пределах прогноза (убыток уменьшает налог года). Уплата: УСН и налог на
           прибыль — в апреле, июле и октябре за квартал и в марте за год; ЕСХН — в июле и марте; АУСН — каждый месяц
           за предыдущий. Налог уменьшает чистую прибыль и деньги. Своя ставка не указана — стандартная. НДС, патент
-          и налоги прошлых периодов не считаются.
+          и налоги прошлых периодов не считаются. У ИП «как у организации» считаются и взносы за себя из карточки:
+          фиксированные — равными долями по месяцам, уплата в декабре; с дохода свыше порога — нарастающим итогом за год,
+          не больше максимума, уплата в июле следующего года. Уменьшение налога на взносы не учитывается.
         </p>
         <form action={saveScenarioTaxAction.bind(null, id)} className="form-grid" style={{ alignItems: "flex-end" }}>
           {keepStart}
@@ -767,7 +772,12 @@ export default async function ScenarioDetailPage({
               {taxOn ? (
                 <>
                   <ProjectionRow label="Прибыль до налога" values={projection.map((p) => p.profitBeforeTax)} format="money" bold />
-                  <ProjectionRow label={`${TAX_REGIME_LABELS[tax.regime]} — начислено`} values={projection.map((p) => p.tax)} format="money" />
+                  {tax.regime !== "none" ? (
+                    <ProjectionRow label={`${TAX_REGIME_LABELS[tax.regime]} — начислено`} values={projection.map((p) => p.tax)} format="money" />
+                  ) : null}
+                  {hasContribution ? (
+                    <ProjectionRow label="Взносы ИП за себя — начислено" values={projection.map((p) => p.ipContribution)} format="money" />
+                  ) : null}
                   <ProjectionRow label="Чистая прибыль" values={projection.map((p) => p.netProfit)} format="money" bold />
                 </>
               ) : loanInputs.length > 0 ? (
@@ -792,15 +802,21 @@ export default async function ScenarioDetailPage({
                 </>
               ) : null}
               <ProjectionRow label="Прочие платежи по кредитам/лизингу" values={projection.map((p) => p.manualLoanPayments)} format="money" />
-              {taxOn ? <ProjectionRow label="Уплата налога" values={projection.map((p) => p.taxPaid)} format="money" /> : null}
+              {tax.regime !== "none" ? <ProjectionRow label="Уплата налога" values={projection.map((p) => p.taxPaid)} format="money" /> : null}
+              {hasContribution ? (
+                <ProjectionRow label="Уплата взносов ИП за себя" values={projection.map((p) => p.ipContributionPaid)} format="money" />
+              ) : null}
               <ProjectionRow label="Остаток денег" values={projection.map((p) => p.cashBalance)} format="money" bold />
               <ProjectionRow label="Дебиторка на конец месяца" values={projection.map((p) => p.receivableEnd)} format="money" />
               <ProjectionRow label="Кредиторка на конец месяца" values={projection.map((p) => p.payableEnd)} format="money" />
               {loanInputs.length > 0 ? (
                 <ProjectionRow label="Долг по кредитам на конец месяца" values={projection.map((p) => p.loanDebt)} format="money" />
               ) : null}
-              {taxOn ? (
+              {tax.regime !== "none" ? (
                 <ProjectionRow label="Налог к уплате на конец месяца" values={projection.map((p) => p.taxPayableEnd)} format="money" />
+              ) : null}
+              {hasContribution ? (
+                <ProjectionRow label="Взносы ИП к уплате на конец месяца" values={projection.map((p) => p.ipContributionPayableEnd)} format="money" />
               ) : null}
             </tbody>
           </table>

@@ -3,7 +3,7 @@ import { toDecimal } from "@/lib/money";
 import { computeBreakEven, computeMarginOfSafety } from "@/lib/reports/margin";
 import type { DriverCode } from "./drivers";
 import { loanSchedule, shiftByLag, type LoanInput, type LoanMonth } from "./cash-timing";
-import { taxSchedule, type TaxRateInput, type TaxRegime } from "./taxes";
+import { ipContributionSchedule, taxSchedule, type IpContributionParams, type TaxRateInput, type TaxRegime } from "./taxes";
 
 export interface ScenarioValueRow {
   year: number;
@@ -92,6 +92,10 @@ export interface MonthProjection {
   netProfit: Decimal;
   taxPaid: Decimal;
   taxPayableEnd: Decimal;
+  /** Страховые взносы ИП за себя: начислено, уплачено, к уплате на конец месяца. */
+  ipContribution: Decimal;
+  ipContributionPaid: Decimal;
+  ipContributionPayableEnd: Decimal;
   /** Деньги от клиентов с учётом отсрочки оплаты. */
   collections: Decimal;
   /** Оплата переменных расходов и комиссии посредников с учётом отсрочки. */
@@ -126,6 +130,8 @@ export interface ScenarioCashExtras {
   openingPayableDue?: DueAmount[];
   loans?: LoanInput[];
   tax?: { regime: TaxRegime; ratePct: TaxRateInput };
+  /** Взносы ИП за себя — у прогноза «как у организации» для ИП. */
+  ipContribution?: IpContributionParams | null;
 }
 
 export interface DueAmount {
@@ -311,6 +317,9 @@ export function projectScenario(
       netProfit: operatingProfit,
       taxPaid: zero,
       taxPayableEnd: zero,
+      ipContribution: zero,
+      ipContributionPaid: zero,
+      ipContributionPayableEnd: zero,
       collections: zero,
       supplierPayments: zero,
       openingReceivableCollected: zero,
@@ -399,17 +408,15 @@ function applyCashTiming(
     };
   });
   // USN counts money received and paid; profit tax counts the accrual-basis profit after interest.
-  const taxes = taxSchedule(
-    extras.tax?.regime ?? "none",
-    extras.tax?.ratePct ?? zero,
-    results.map((r, i) => ({
-      year: r.year,
-      month: r.month,
-      income: collections[i].plus(receivableDue[i]),
-      expenses: supplierPayments[i].plus(payableDue[i]).plus(r.fixedCosts).plus(r.payrollCost).plus(loanMonths[i].interest),
-      profit: r.operatingProfit.minus(loanMonths[i].interest),
-    })),
-  );
+  const taxBase = results.map((r, i) => ({
+    year: r.year,
+    month: r.month,
+    income: collections[i].plus(receivableDue[i]),
+    expenses: supplierPayments[i].plus(payableDue[i]).plus(r.fixedCosts).plus(r.payrollCost).plus(loanMonths[i].interest),
+    profit: r.operatingProfit.minus(loanMonths[i].interest),
+  }));
+  const taxes = taxSchedule(extras.tax?.regime ?? "none", extras.tax?.ratePct ?? zero, taxBase);
+  const contributions = extras.ipContribution ? ipContributionSchedule(extras.ipContribution, taxBase) : null;
   results.forEach((r, i) => {
     const { drawdown, interest, principal } = loanMonths[i];
     loanDebt = loanDebt.plus(drawdown).minus(principal);
@@ -417,6 +424,7 @@ function applyCashTiming(
     const openingReceivableCollected = receivableDue[i];
     const openingPayablePaid = payableDue[i];
     const tax = taxes[i];
+    const contribution = contributions?.[i] ?? { accrued: zero, paid: zero, payableEnd: zero };
     receivable = receivable.plus(r.revenue).minus(collections[i]).minus(openingReceivableCollected);
     payable = payable.plus(r.variableCosts).plus(r.intermediaryCommission).minus(supplierPayments[i]).minus(openingPayablePaid);
 
@@ -431,7 +439,8 @@ function applyCashTiming(
       .plus(drawdown)
       .minus(interest)
       .minus(principal)
-      .minus(tax.paid);
+      .minus(tax.paid)
+      .minus(contribution.paid);
 
     r.collections = collections[i];
     r.supplierPayments = supplierPayments[i];
@@ -444,9 +453,12 @@ function applyCashTiming(
     r.loanDebt = loanDebt;
     r.profitBeforeTax = r.operatingProfit.minus(interest);
     r.tax = tax.accrued;
-    r.netProfit = r.profitBeforeTax.minus(tax.accrued);
+    r.netProfit = r.profitBeforeTax.minus(tax.accrued).minus(contribution.accrued);
     r.taxPaid = tax.paid;
     r.taxPayableEnd = tax.payableEnd;
+    r.ipContribution = contribution.accrued;
+    r.ipContributionPaid = contribution.paid;
+    r.ipContributionPayableEnd = contribution.payableEnd;
     r.receivableEnd = receivable;
     r.payableEnd = payable;
     r.cashBalance = cash;

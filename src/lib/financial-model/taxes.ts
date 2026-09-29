@@ -116,3 +116,54 @@ export function taxSchedule(regime: TaxRegime, ratePct: TaxRateInput, months: Ta
     return { accrued, paid, payableEnd: payable };
   });
 }
+
+/**
+ * Взносы ИП за себя (только в прогнозе «как у организации» для ИП):
+ * фиксированные — сумма года равными долями по месяцам, уплата в декабре
+ * (срок — 28 декабря); с дохода свыше порога — ставка × (доход с начала
+ * года − порог), не больше максимума года, нарастающим итогом, уплата в
+ * июле следующего года (срок — 1 июля). Доход — как у налога: при УСН
+ * «доходы» — полученные деньги, иначе полученное минус оплаченные расходы.
+ * Уменьшение налога на взносы не учитывается.
+ */
+export interface IpContributionParams {
+  base: "income" | "income_minus_expenses";
+  forYear: (year: number) => {
+    fixed: Decimal | null;
+    income: { ratePct: Decimal; threshold: Decimal; max: Decimal | null } | null;
+  };
+}
+
+export function ipContributionSchedule(params: IpContributionParams, months: TaxMonthInput[]): TaxMonth[] {
+  const years = new Map<number, { base: Decimal; incomeCum: Decimal; fixedAccrued: Decimal }>();
+  let payable = zero;
+  return months.map((m) => {
+    const y = years.get(m.year) ?? { base: zero, incomeCum: zero, fixedAccrued: zero };
+    years.set(m.year, y);
+    const settings = params.forYear(m.year);
+
+    // Fixed: the amount of the year spread evenly, so twelve months add up to it exactly.
+    const fixed = settings.fixed
+      ? round2(settings.fixed.times(m.month).dividedBy(12)).minus(round2(settings.fixed.times(m.month - 1).dividedBy(12)))
+      : zero;
+    y.fixedAccrued = y.fixedAccrued.plus(fixed);
+
+    // On income above the threshold: since the start of the year, up to the annual maximum.
+    y.base = y.base.plus(params.base === "income" ? m.income : m.income.minus(m.expenses));
+    let incomeCum = zero;
+    if (settings.income) {
+      incomeCum = round2(Decimal.max(0, y.base.minus(settings.income.threshold)).times(settings.income.ratePct).dividedBy(100));
+      if (settings.income.max) incomeCum = Decimal.min(incomeCum, settings.income.max);
+    }
+    const accrued = fixed.plus(incomeCum.minus(y.incomeCum));
+    y.incomeCum = incomeCum;
+
+    // Fixed ones are paid for the year in December, the ones on income — in July of the next year.
+    let paid = m.month === 12 ? y.fixedAccrued : zero;
+    const previous = years.get(m.year - 1);
+    if (m.month === 7 && previous) paid = paid.plus(previous.incomeCum);
+
+    payable = payable.plus(accrued).minus(paid);
+    return { accrued, paid, payableEnd: payable };
+  });
+}

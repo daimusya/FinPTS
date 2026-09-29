@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { formatNumber } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import {
   addTaxRateAction,
   fillStandardTaxRatesAction,
@@ -8,14 +8,18 @@ import {
   updateTaxRateAction,
 } from "@/app/(app)/master-data/organization-tax-actions";
 import {
+  describeRate,
+  IP_INCOME_THRESHOLD,
   isTaxKind,
   isTaxSystem,
   missingStandardRates,
-  rateAt,
+  recordAt,
+  SOLE_PROPRIETOR_KINDS,
   TAX_KIND_LABELS,
   TAX_KINDS,
   TAX_SYSTEM_OPTIONS,
   validUntil,
+  type TaxRateRecord,
 } from "@/lib/organizations/taxes";
 
 export interface OrganizationTaxesState {
@@ -34,21 +38,24 @@ const ru = (d: Date) => d.toLocaleDateString("ru-RU", { timeZone: "UTC" });
  */
 export async function OrganizationTaxes({ organizationId, state = {} }: { organizationId: string; state?: OrganizationTaxesState }) {
   const [organization, rates] = await Promise.all([
-    prisma.organization.findUnique({ where: { id: organizationId }, select: { taxSystem: true } }),
+    prisma.organization.findUnique({ where: { id: organizationId }, select: { taxSystem: true, type: true } }),
     prisma.organizationTaxRate.findMany({ where: { organizationId }, orderBy: [{ taxKind: "asc" }, { validFrom: "desc" }] }),
   ]);
   const system = organization && isTaxSystem(organization.taxSystem) ? organization.taxSystem : "osn";
   const systemLabel = TAX_SYSTEM_OPTIONS.find((o) => o.value === system)?.label ?? system;
-  const missing = missingStandardRates(system, rates);
+  const isSoleProprietor = organization?.type === "SOLE_PROPRIETOR";
   const today = new Date();
+  const missing = missingStandardRates(system, rates, organization?.type, today.getFullYear());
+  const kinds = TAX_KINDS.filter((k) => isSoleProprietor || !SOLE_PROPRIETOR_KINDS.has(k));
+  const describe = (r: TaxRateRecord) => describeRate(r, (n) => formatMoney(n));
   const yearStart = `${today.getFullYear()}-01-01`;
   const base = `/master-data/organizations/${organizationId}/edit`;
-  const current = TAX_KINDS.map((kind) => ({ kind, rate: rateAt(rates, kind, today) })).filter((c) => c.rate !== null);
+  const current = TAX_KINDS.map((kind) => ({ kind, record: recordAt(rates, kind, today) })).filter((c) => c.record !== null);
 
   const kindSelect = (id: string, value?: string) => (
     <select name="taxKind" id={id} required defaultValue={value ?? ""}>
       <option value="">— выбрать —</option>
-      {TAX_KINDS.map((k) => (
+      {kinds.map((k) => (
         <option key={k} value={k}>
           {TAX_KIND_LABELS[k]}
         </option>
@@ -64,11 +71,14 @@ export async function OrganizationTaxes({ organizationId, state = {} }: { organi
         следующей ставки того же налога: чтобы поменять ставку с нового года, добавьте запись с новой датой — прежние
         периоды посчитаются по старой ставке. Ставки используются в финансовых сценариях (налог «как у организации»);
         «Страховые взносы — единый тариф» и «Взносы на травматизм» заменяют общие ставки из справочника «Налоговые и
-        страховые правила» в расчёте зарплаты этой организации.
+        страховые правила» в расчёте зарплаты этой организации.{" "}
+        {isSoleProprietor
+          ? "Для ИП есть взносы за себя: фиксированные (сумма за год, срок уплаты — 28 декабря) и с дохода свыше порога (обычно 1% с дохода свыше 300 000 ₽ за год, не больше максимума года, срок — 1 июля следующего года)."
+          : ""}
       </p>
       {current.length > 0 ? (
         <p style={{ marginBottom: 10 }}>
-          Сейчас действуют: {current.map((c) => `${TAX_KIND_LABELS[c.kind]} — ${formatNumber(c.rate!)}%`).join("; ")}.
+          Сейчас действуют: {current.map((c) => `${TAX_KIND_LABELS[c.kind]} — ${describe(c.record!)}`).join("; ")}.
         </p>
       ) : null}
       {state.taxError ? <p className="form-error" style={{ marginBottom: 10 }}>{state.taxError}</p> : null}
@@ -95,9 +105,25 @@ export async function OrganizationTaxes({ organizationId, state = {} }: { organi
                         {kindSelect(`tax-kind-${r.id}`, r.taxKind)}
                       </label>
                       <label className="field">
-                        <span>Ставка, % *</span>
-                        <input type="text" inputMode="decimal" name="ratePct" id={`tax-rate-${r.id}`} defaultValue={r.ratePct.toString()} required style={{ width: 100 }} />
+                        <span>Ставка, %</span>
+                        <input type="text" inputMode="decimal" name="ratePct" id={`tax-rate-${r.id}`} defaultValue={r.ratePct.toString()} style={{ width: 100 }} />
                       </label>
+                      {isSoleProprietor ? (
+                        <>
+                          <label className="field">
+                            <span>Сумма за год, ₽ (фиксированные взносы)</span>
+                            <input type="text" inputMode="decimal" name="fixedAmount" id={`tax-fixed-${r.id}`} defaultValue={r.fixedAmount?.toString() ?? ""} style={{ width: 130 }} />
+                          </label>
+                          <label className="field">
+                            <span>Порог дохода, ₽ (взносы с дохода)</span>
+                            <input type="text" inputMode="decimal" name="thresholdAmount" id={`tax-threshold-${r.id}`} defaultValue={r.thresholdAmount?.toString() ?? ""} style={{ width: 130 }} />
+                          </label>
+                          <label className="field">
+                            <span>Максимум за год, ₽</span>
+                            <input type="text" inputMode="decimal" name="maxAmount" id={`tax-max-${r.id}`} defaultValue={r.maxAmount?.toString() ?? ""} placeholder="без максимума" style={{ width: 130 }} />
+                          </label>
+                        </>
+                      ) : null}
                       <label className="field">
                         <span>Действует с *</span>
                         <input type="date" name="validFrom" id={`tax-from-${r.id}`} defaultValue={day(r.validFrom)} required />
@@ -120,7 +146,7 @@ export async function OrganizationTaxes({ organizationId, state = {} }: { organi
               ) : (
                 <tr key={r.id}>
                   <td>{isTaxKind(r.taxKind) ? TAX_KIND_LABELS[r.taxKind] : r.taxKind}</td>
-                  <td className="mono">{formatNumber(r.ratePct)}%</td>
+                  <td className="mono">{describe(r)}</td>
                   <td>
                     {(() => {
                       const until = validUntil(rates, r);
@@ -159,9 +185,25 @@ export async function OrganizationTaxes({ organizationId, state = {} }: { organi
           {kindSelect("tax-kind-new")}
         </label>
         <label className="field">
-          <span>Ставка, % *</span>
-          <input type="text" inputMode="decimal" name="ratePct" id="tax-rate-new" required style={{ width: 100 }} />
+          <span>Ставка, %</span>
+          <input type="text" inputMode="decimal" name="ratePct" id="tax-rate-new" style={{ width: 100 }} />
         </label>
+        {isSoleProprietor ? (
+          <>
+            <label className="field">
+              <span>Сумма за год, ₽ (фиксированные взносы)</span>
+              <input type="text" inputMode="decimal" name="fixedAmount" id="tax-fixed-new" style={{ width: 130 }} />
+            </label>
+            <label className="field">
+              <span>Порог дохода, ₽ (взносы с дохода)</span>
+              <input type="text" inputMode="decimal" name="thresholdAmount" id="tax-threshold-new" defaultValue={IP_INCOME_THRESHOLD} style={{ width: 130 }} />
+            </label>
+            <label className="field">
+              <span>Максимум за год, ₽</span>
+              <input type="text" inputMode="decimal" name="maxAmount" id="tax-max-new" placeholder="без максимума" style={{ width: 130 }} />
+            </label>
+          </>
+        ) : null}
         <label className="field">
           <span>Действует с *</span>
           <input type="date" name="validFrom" id="tax-from-new" required defaultValue={yearStart} />
@@ -177,11 +219,15 @@ export async function OrganizationTaxes({ organizationId, state = {} }: { organi
       {missing.length > 0 ? (
         <form action={fillStandardTaxRatesAction.bind(null, organizationId)} className="form-grid" style={{ alignItems: "flex-end" }}>
           <label className="field">
-            <span>Стандартные ставки с даты</span>
+            <span>Стандартные ставки с даты{isSoleProprietor ? " (взносы ИП — суммы этого года)" : ""}</span>
             <input type="date" name="validFrom" id="tax-standard-from" required defaultValue={yearStart} />
           </label>
           <button type="submit" className="btn btn-ghost">
-            Заполнить стандартными: {missing.map((m) => `${TAX_KIND_LABELS[m.kind]} ${m.ratePct}%`).join(", ")}
+            Заполнить стандартными:{" "}
+            {missing
+              // Contribution amounts depend on the year of the chosen date, so they are not shown here.
+              .map((m) => (SOLE_PROPRIETOR_KINDS.has(m.kind) ? TAX_KIND_LABELS[m.kind] : `${TAX_KIND_LABELS[m.kind]} — ${describe({ taxKind: m.kind, ratePct: m.ratePct, validFrom: today })}`))
+              .join("; ")}
           </button>
         </form>
       ) : null}

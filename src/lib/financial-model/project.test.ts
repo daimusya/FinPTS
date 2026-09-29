@@ -280,3 +280,17 @@ describe("projectScenario — terms, own service lags and taxes", () => {
     expect(p[3].taxPayableEnd.toNumber()).toBe(6000);
   });
 });
+
+describe("projectScenario — sole proprietor's contributions", () => {
+  it("lower the net profit as accrued and the cash when paid in December", () => {
+    const service: NewServiceInput = { id: "s", name: "Услуга", launchYear: 2026, launchMonth: 1, avgCheck: 1000, salesPerMonth: 100, rampUpMonths: 0, variableCostPct: 0 };
+    const p = projectScenario(2026, 1, 12, [], 0, [service], {
+      ipContribution: { base: "income", forYear: () => ({ fixed: new Decimal(12000), income: null }) },
+    });
+    expect(p[0].ipContribution.toNumber()).toBe(1000);
+    expect(p[0].netProfit.toNumber()).toBe(99000);
+    expect(p[10].cashBalance.toNumber()).toBe(1100000);
+    expect(p[11].ipContributionPaid.toNumber()).toBe(12000);
+    expect(p[11].cashBalance.toNumber()).toBe(1200000 - 12000);
+  });
+});

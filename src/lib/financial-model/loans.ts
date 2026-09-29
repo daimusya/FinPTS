@@ -5,8 +5,17 @@ import { allocatedAsOf } from "@/lib/reports/balance-lines";
 import { accrualScopeWhere, type AccessScope } from "@/lib/access-scope";
 import type { LoanInput, LoanRepayment } from "./cash-timing";
 import type { DueAmount, ScenarioCashExtras } from "./project";
-import { DEFAULT_TAX_RATES, TAX_REGIME_LABELS, TAX_REGIMES, taxRate, type TaxRateInput, type TaxRegime } from "./taxes";
-import { isTaxSystem, rateAt, TAX_SYSTEM_OPTIONS, type TaxKind, type TaxRateRecord, type TaxSystem } from "@/lib/organizations/taxes";
+import { DEFAULT_TAX_RATES, TAX_REGIME_LABELS, TAX_REGIMES, taxRate, type IpContributionParams, type TaxRateInput, type TaxRegime } from "./taxes";
+import {
+  ipFixedInsuranceAt,
+  ipIncomeInsuranceAt,
+  isTaxSystem,
+  rateAt,
+  TAX_SYSTEM_OPTIONS,
+  type TaxKind,
+  type TaxRateRecord,
+  type TaxSystem,
+} from "@/lib/organizations/taxes";
 
 export const MAX_LOAN_TERM_MONTHS = 360;
 const REPAYMENTS: LoanRepayment[] = ["annuity", "linear", "bullet"];
@@ -150,6 +159,8 @@ export interface ScenarioTax {
   regime: TaxRegime;
   ratePct: TaxRateInput;
   label: string;
+  /** Взносы ИП за себя — только «как у организации» для ИП с такими ставками в карточке. */
+  ipContribution: IpContributionParams | null;
 }
 
 /** Как система налогообложения организации считается в прогнозе и по какому налогу из её ставок. */
@@ -169,7 +180,11 @@ export const SYSTEM_REGIME: Record<TaxSystem, { regime: TaxRegime; kind: TaxKind
  * на каждый год — действующая на 1 января этого года по её ставкам (нет
  * ставки — стандартная для режима).
  */
-export function organizationTax(organization: { name: string; taxSystem: string }, rates: TaxRateRecord[], year: number): ScenarioTax {
+export function organizationTax(
+  organization: { name: string; taxSystem: string; type?: string },
+  rates: TaxRateRecord[],
+  year: number,
+): ScenarioTax {
   const system: TaxSystem = isTaxSystem(organization.taxSystem) ? organization.taxSystem : "osn";
   const { regime, kind } = SYSTEM_REGIME[system];
   const ratePct = (y: number) => (kind ? rateAt(rates, kind, new Date(Date.UTC(y, 0, 1))) : null) ?? new Decimal(DEFAULT_TAX_RATES[regime]);
@@ -178,7 +193,26 @@ export function organizationTax(organization: { name: string; taxSystem: string 
     regime === "none"
       ? `как у «${organization.name}»: ${systemLabel} — налог в прогнозе не считается (стоимость патента задайте постоянными расходами)`
       : `как у «${organization.name}»: ${systemLabel}, ${ratePct(year).toString().replace(".", ",")}% в ${year} году`;
-  return { regime, ratePct, label };
+  const ipContribution = soleProprietorContributions(system, organization.type, rates);
+  return { regime, ratePct, label: ipContribution ? `${label}; взносы ИП за себя` : label, ipContribution };
+}
+
+/**
+ * Взносы ИП за себя из карточки: фиксированные и с дохода свыше порога —
+ * действующие на 1 января каждого года. На АУСН взносов за себя нет; на
+ * патенте доход для взносов — потенциальный, его прогноз не знает, поэтому
+ * там считаются только фиксированные.
+ */
+function soleProprietorContributions(system: TaxSystem, type: string | undefined, rates: TaxRateRecord[]): IpContributionParams | null {
+  if (type !== "SOLE_PROPRIETOR" || system === "ausn_income" || system === "ausn_income_expense") return null;
+  if (!rates.some((r) => r.taxKind === "ip_insurance_fixed" || r.taxKind === "ip_insurance_income")) return null;
+  return {
+    base: system === "usn_income" ? "income" : "income_minus_expenses",
+    forYear: (y) => {
+      const jan1 = new Date(Date.UTC(y, 0, 1));
+      return { fixed: ipFixedInsuranceAt(rates, jan1), income: system === "psn" ? null : ipIncomeInsuranceAt(rates, jan1) };
+    },
+  };
 }
 
 /** Налог сценария для projectScenario: свой режим и ставка или «как у организации». */
@@ -189,11 +223,22 @@ export async function loadScenarioTax(
   if (scenario.taxRegime === "organization" && scenario.taxOrganizationId) {
     const organization = await prisma.organization.findUnique({
       where: { id: scenario.taxOrganizationId },
-      select: { name: true, shortName: true, taxSystem: true, taxRates: true },
+      select: { name: true, shortName: true, taxSystem: true, type: true, taxRates: true },
     });
-    if (organization) return organizationTax({ name: organization.shortName || organization.name, taxSystem: organization.taxSystem }, organization.taxRates, startYear);
+    if (organization) {
+      return organizationTax(
+        { name: organization.shortName || organization.name, taxSystem: organization.taxSystem, type: organization.type },
+        organization.taxRates,
+        startYear,
+      );
+    }
   }
   const regime = (TAX_REGIMES as string[]).includes(scenario.taxRegime) ? (scenario.taxRegime as TaxRegime) : "none";
   const rate = taxRate(regime, scenario.taxRatePct?.toString() ?? null);
-  return { regime, ratePct: rate, label: regime === "none" ? TAX_REGIME_LABELS.none : `${TAX_REGIME_LABELS[regime]}, ${rate.toString().replace(".", ",")}%` };
+  return {
+    regime,
+    ratePct: rate,
+    label: regime === "none" ? TAX_REGIME_LABELS.none : `${TAX_REGIME_LABELS[regime]}, ${rate.toString().replace(".", ",")}%`,
+    ipContribution: null,
+  };
 }

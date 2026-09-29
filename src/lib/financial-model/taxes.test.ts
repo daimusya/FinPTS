@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import Decimal from "decimal.js";
-import { taxRate, taxSchedule, type TaxMonthInput } from "./taxes";
+import { ipContributionSchedule, taxRate, taxSchedule, type TaxMonthInput } from "./taxes";
 
 const d = (v: number) => new Decimal(v);
 const month = (year: number, m: number, income: number, expenses = 0, profit = 0): TaxMonthInput => ({
@@ -69,5 +69,34 @@ describe("taxSchedule — AUSN, ESHN and rates by year", () => {
   it("uses each year's own rate", () => {
     const s = taxSchedule("usn_income", (y) => d(y === 2026 ? 6 : 4), [month(2026, 12, 100000), month(2027, 1, 100000)]);
     expect(nums(s.map((x) => x.accrued))).toEqual([6000, 4000]);
+  });
+});
+
+describe("ipContributionSchedule — sole proprietor's own contributions", () => {
+  it("fixed ones: evenly by month, paid in December; 1 % above 300 000 a year: paid next July", () => {
+    const months = [...Array.from({ length: 12 }, (_, i) => month(2026, i + 1, 100000)), ...[1, 2, 3, 4, 5, 6, 7].map((m) => month(2027, m, 0))];
+    const s = ipContributionSchedule(
+      {
+        base: "income",
+        forYear: (y) => ({ fixed: y === 2026 ? d(57390) : null, income: { ratePct: d(1), threshold: d(300000), max: d(321818) } }),
+      },
+      months,
+    );
+    const accrued2026 = s.slice(0, 12).reduce((a, x) => a.plus(x.accrued), d(0));
+    // 57 390 fixed + 1 % of (1 200 000 − 300 000).
+    expect(accrued2026.toNumber()).toBe(57390 + 9000);
+    expect(nums(s.slice(2, 4).map((x) => x.accrued))).toEqual([4782.5, 5782.5]); // the 1 % starts once the income passes 300 000
+    expect(s[11].paid.toNumber()).toBe(57390);
+    expect(s[18].paid.toNumber()).toBe(9000); // July 2027
+    expect(s[18].payableEnd.toNumber()).toBe(0);
+  });
+
+  it("the 1 % stops at the annual maximum and counts income minus expenses where the tax does", () => {
+    const params = (base: "income" | "income_minus_expenses") => ({
+      base,
+      forYear: () => ({ fixed: null, income: { ratePct: d(1), threshold: d(300000), max: d(321818) } }),
+    });
+    expect(ipContributionSchedule(params("income"), [month(2026, 1, 50000000)])[0].accrued.toNumber()).toBe(321818);
+    expect(ipContributionSchedule(params("income_minus_expenses"), [month(2026, 1, 1000000, 600000)])[0].accrued.toNumber()).toBe(1000);
   });
 });

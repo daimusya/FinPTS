@@ -163,12 +163,19 @@ model Organization {
 
 // Ставка налога организации с даты: действует до даты следующей записи того
 // же налога. taxKind — profit / vat / usn / ausn / eshn / property /
-// insurance (единый тариф взносов вместо общих правил) / injury.
+// insurance (единый тариф взносов вместо общих правил) / injury /
+// ip_insurance_income (взносы ИП за себя с дохода свыше порога) /
+// ip_insurance_fixed (фиксированные взносы ИП за себя, сумма за год).
 model OrganizationTaxRate {
   id             String   @id @default(cuid())
   organizationId String
   taxKind        String
   ratePct        Decimal  @db.Decimal(6, 3)
+  /// Взносы ИП 1 %: доход за год, свыше которого считаются взносы, и максимум взносов за год.
+  thresholdAmount Decimal? @db.Decimal(18, 2)
+  maxAmount       Decimal? @db.Decimal(18, 2)
+  /// Фиксированные взносы ИП за себя: сумма за год (ставка не используется).
+  fixedAmount     Decimal? @db.Decimal(18, 2)
   validFrom      DateTime @db.Date
   comment        String?
   createdAt      DateTime @default(now())

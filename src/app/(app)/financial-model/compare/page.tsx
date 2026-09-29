@@ -63,6 +63,7 @@ export default async function CompareScenariosPage({
       ...opening,
       loans: loans.get(s.id) ?? [],
       tax: taxes[index],
+      ipContribution: taxes[index].ipContribution,
     });
     return {
       scenario: s,
@@ -71,8 +72,8 @@ export default async function CompareScenariosPage({
       newServicesCount: newServices.get(s.id)?.length ?? 0,
       totalOperatingProfit: sumMoney(projection.map((p) => p.operatingProfit)),
       totalNetProfit: sumMoney(projection.map((p) => p.netProfit)),
-      totalTax: sumMoney(projection.map((p) => p.tax)),
-      taxOn: taxes[index].regime !== "none",
+      totalTax: sumMoney(projection.map((p) => p.tax.plus(p.ipContribution))),
+      taxOn: taxes[index].regime !== "none" || Boolean(taxes[index].ipContribution),
       finalDebt: projection[projection.length - 1]?.loanDebt ?? sumMoney([]),
       finalCash: projection[projection.length - 1]?.cashBalance ?? sumMoney([]),
       avgBreakEven: sumMoney(projection.filter((p) => p.breakEvenRevenue !== null).map((p) => p.breakEvenRevenue!)).dividedBy(
@@ -150,7 +151,7 @@ export default async function CompareScenariosPage({
               ))}
             </tr>
             <tr>
-              <td>Налог за 12 месяцев (начислено)</td>
+              <td>Налог и взносы ИП за себя за 12 месяцев (начислено)</td>
               {results.map((r) => (
                 <td key={r.scenario.id} className="mono">
                   {r.taxOn ? formatMoney(r.totalTax) : "не считается"}

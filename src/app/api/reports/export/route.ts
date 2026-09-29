@@ -290,6 +290,7 @@ export async function GET(request: NextRequest) {
       ...opening,
       loans,
       tax,
+      ipContribution: tax.ipContribution,
     });
     const revenueRows: Array<Array<string | number>> =
       newServices.length > 0
@@ -331,6 +332,7 @@ export async function GET(request: NextRequest) {
       ["Проценты по кредитам", ...projection.map((p) => toNum(p.loanInterest))],
       ["Прибыль до налога", ...projection.map((p) => toNum(p.profitBeforeTax))],
       [`${TAX_REGIME_LABELS[tax.regime]} — начислено`, ...projection.map((p) => toNum(p.tax))],
+      ["Взносы ИП за себя — начислено", ...projection.map((p) => toNum(p.ipContribution))],
       ["Чистая прибыль", ...projection.map((p) => toNum(p.netProfit))],
       [],
       ["Поступления от клиентов", ...projection.map((p) => toNum(p.collections))],
@@ -343,11 +345,13 @@ export async function GET(request: NextRequest) {
       ["Погашение основного долга", ...projection.map((p) => toNum(p.loanPrincipal))],
       ["Прочие платежи по кредитам/лизингу", ...projection.map((p) => toNum(p.manualLoanPayments))],
       ["Уплата налога", ...projection.map((p) => toNum(p.taxPaid))],
+      ["Уплата взносов ИП за себя", ...projection.map((p) => toNum(p.ipContributionPaid))],
       ["Остаток денег", ...projection.map((p) => toNum(p.cashBalance))],
       ["Дебиторка на конец месяца", ...projection.map((p) => toNum(p.receivableEnd))],
       ["Кредиторка на конец месяца", ...projection.map((p) => toNum(p.payableEnd))],
       ["Долг по кредитам на конец месяца", ...projection.map((p) => toNum(p.loanDebt))],
       ["Налог к уплате на конец месяца", ...projection.map((p) => toNum(p.taxPayableEnd))],
+      ["Взносы ИП к уплате на конец месяца", ...projection.map((p) => toNum(p.ipContributionPayableEnd))],
     ];
     sheets = [{ name: "Прогноз", rows }];
     // Content-Disposition filename must be ASCII (HTTP headers are ByteString) — Cyrillic scenario names get transliterated away.
