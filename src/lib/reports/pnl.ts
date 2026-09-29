@@ -139,20 +139,12 @@ export async function computePnlReport(
     }
   }
 
-  // Depreciation and loan interest have no documents: they belong to no counterparty, cost center,
-  // project or product, and a loan to no department — such filters leave them out.
-  if (!filters.counterpartyId && !filters.costCenterId && !filters.projectId && !filters.productServiceId) {
-    const items = await loadNonCashCharges(period.to, organizationFilter(filters.organizationId, scope.organizationIds));
-    for (const item of items) {
-      if (filters.departmentId && item.departmentId !== filters.departmentId) continue;
-      const amount = chargesIn(item.schedule, period.from, period.to);
-      if (amount.isZero()) continue;
-      const map = rowMaps[item.pnlArticle.type];
-      const row = map.get(item.pnlArticle.id) ?? { articleId: item.pnlArticle.id, articleName: item.pnlArticle.name, amount: toDecimal(0), documentIds: [] };
-      row.amount = row.amount.plus(amount);
-      row.nonCash = (row.nonCash ?? toDecimal(0)).plus(amount);
-      map.set(item.pnlArticle.id, row);
-    }
+  for (const { article, amount } of await nonCashByArticle(period, filters, scope)) {
+    const map = rowMaps[article.type];
+    const row = map.get(article.id) ?? { articleId: article.id, articleName: article.name, amount: toDecimal(0), documentIds: [] };
+    row.amount = row.amount.plus(amount);
+    row.nonCash = (row.nonCash ?? toDecimal(0)).plus(amount);
+    map.set(article.id, row);
   }
 
   for (const type of PNL_TYPE_ORDER) {
@@ -171,6 +163,28 @@ export async function computePnlReport(
   });
 
   return { byType, ...totals };
+}
+
+/**
+ * Амортизация и проценты по займам за период по статьям ОПиУ (без
+ * документов, по реестрам). У них нет контрагента, ЦФО, проекта и продукта,
+ * а у займа — подразделения: такие фильтры их исключают. Одни правила для
+ * ОПиУ и маржинальности.
+ */
+export async function nonCashByArticle(
+  period: ReportPeriod,
+  filters: ReportFilters,
+  scope: AccessScope = UNRESTRICTED_SCOPE,
+): Promise<Array<{ article: { id: string; name: string; type: PnlType }; amount: Decimal }>> {
+  if (filters.counterpartyId || filters.costCenterId || filters.projectId || filters.productServiceId) return [];
+  const items = await loadNonCashCharges(period.to, organizationFilter(filters.organizationId, scope.organizationIds));
+  const result: Array<{ article: { id: string; name: string; type: PnlType }; amount: Decimal }> = [];
+  for (const item of items) {
+    if (filters.departmentId && item.departmentId !== filters.departmentId) continue;
+    const amount = chargesIn(item.schedule, period.from, period.to);
+    if (!amount.isZero()) result.push({ article: item.pnlArticle, amount });
+  }
+  return result;
 }
 
 export interface PnlTypeTotals {

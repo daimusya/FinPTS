@@ -3,9 +3,10 @@ import { sumMoney, toDecimal } from "@/lib/money";
 import Decimal from "decimal.js";
 import type { ReportFilters } from "./filters";
 import type { ReportPeriod } from "./period";
-import { derivePnlTotals, type PnlType } from "./pnl";
+import { nonCashByArticle, type PnlType } from "./pnl";
 import { accrualScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
 import { lineNetAmount, loadInputVatRule, type InputVatRule } from "@/lib/accruals/vat";
+import type { PlanItem } from "@/lib/budget/plan-fact";
 
 /**
  * Точка безубыточности: выручка, при которой операционная прибыль равна нулю.
@@ -26,6 +27,46 @@ export function computeBreakEven(fixedCosts: Decimal, revenue: Decimal, variable
 export function computeMarginOfSafety(revenue: Decimal, breakEven: Decimal | null): Decimal | null {
   if (breakEven === null || revenue.lessThanOrEqualTo(0)) return null;
   return revenue.minus(breakEven).dividedBy(revenue).times(100);
+}
+
+/** Итоги маржинальности: выручка, прямые и косвенные расходы, прибыль, маржинальность, точка безубыточности. */
+export interface MarginTotals {
+  revenue: Decimal;
+  directVariable: Decimal;
+  directFixed: Decimal;
+  grossProfit: Decimal;
+  indirect: Decimal;
+  operatingProfit: Decimal;
+  grossMarginPct: Decimal | null;
+  operatingMarginPct: Decimal | null;
+  breakEvenRevenue: Decimal | null;
+  marginOfSafetyPct: Decimal | null;
+}
+
+/** Итоги из сумм по разделам ОПиУ; постоянные для точки безубыточности — прямые постоянные и косвенные. */
+export function marginTotals(t: { revenue: Decimal; directVariable: Decimal; directFixed: Decimal; indirect: Decimal }): MarginTotals {
+  const grossProfit = t.revenue.minus(t.directVariable).minus(t.directFixed);
+  const operatingProfit = grossProfit.minus(t.indirect);
+  const breakEvenRevenue = computeBreakEven(t.directFixed.plus(t.indirect), t.revenue, t.directVariable);
+  const pct = (v: Decimal) => (t.revenue.greaterThan(0) ? v.dividedBy(t.revenue).times(100) : null);
+  return {
+    ...t,
+    grossProfit,
+    operatingProfit,
+    grossMarginPct: pct(grossProfit),
+    operatingMarginPct: pct(operatingProfit),
+    breakEvenRevenue,
+    marginOfSafetyPct: computeMarginOfSafety(t.revenue, breakEvenRevenue),
+  };
+}
+
+/** Плановые итоги маржинальности из плана ОПиУ (бюджета); null — плана по этим разделам нет. */
+export function marginPlanTotals(planItems: PlanItem[]): MarginTotals | null {
+  const groups = ["REVENUE", "DIRECT_VARIABLE", "DIRECT_FIXED", "INDIRECT"];
+  const relevant = planItems.filter((p) => groups.includes(p.group));
+  if (relevant.length === 0) return null;
+  const sum = (group: string) => relevant.filter((p) => p.group === group).reduce((acc, p) => acc.plus(p.amount), new Decimal(0));
+  return marginTotals({ revenue: sum("REVENUE"), directVariable: sum("DIRECT_VARIABLE"), directFixed: sum("DIRECT_FIXED"), indirect: sum("INDIRECT") });
 }
 
 export interface DimensionMarginRow {
@@ -177,17 +218,7 @@ async function aggregateByDimension(
   return rows.sort((a, b) => b.revenue.comparedTo(a.revenue));
 }
 
-export interface MarginReport {
-  revenue: Decimal;
-  directVariable: Decimal;
-  directFixed: Decimal;
-  grossProfit: Decimal;
-  indirect: Decimal;
-  operatingProfit: Decimal;
-  grossMarginPct: Decimal | null;
-  operatingMarginPct: Decimal | null;
-  breakEvenRevenue: Decimal | null;
-  marginOfSafetyPct: Decimal | null;
+export interface MarginReport extends MarginTotals {
   byProject: DimensionMarginRow[];
   byProductService: DimensionMarginRow[];
   byCounterparty: DimensionMarginRow[];
@@ -238,20 +269,18 @@ export async function computeMarginReport(
       byType[type] = byType[type].plus(lineNetAmount(line, doc.direction, vatRule(doc.organizationId, doc.date)));
     }
   }
+  // Depreciation and interest — as in the P&L; they have no project, product or client, so they
+  // reach the dimension tables only through the allocation of indirect costs.
+  for (const { article, amount } of await nonCashByArticle(period, filters, scope)) {
+    byType[article.type] = byType[article.type].plus(amount);
+  }
 
-  const totals = derivePnlTotals({
+  const totals = marginTotals({
     revenue: byType.REVENUE,
     directVariable: byType.DIRECT_VARIABLE,
     directFixed: byType.DIRECT_FIXED,
     indirect: byType.INDIRECT,
-    otherIncome: toDecimal(0),
-    otherExpense: toDecimal(0),
-    tax: toDecimal(0),
   });
-
-  const fixedCosts = totals.directFixed.plus(totals.indirect);
-  const breakEvenRevenue = computeBreakEven(fixedCosts, totals.revenue, totals.directVariable);
-  const marginOfSafetyPct = computeMarginOfSafety(totals.revenue, breakEvenRevenue);
 
   const [byProject, byProductService, byCounterparty] = await Promise.all([
     aggregateByDimension(period, filters, "project", scope, totals.indirect, driver, vatRule),
@@ -260,16 +289,7 @@ export async function computeMarginReport(
   ]);
 
   return {
-    revenue: totals.revenue,
-    directVariable: totals.directVariable,
-    directFixed: totals.directFixed,
-    grossProfit: totals.grossProfit,
-    indirect: totals.indirect,
-    operatingProfit: totals.operatingProfit,
-    grossMarginPct: totals.grossMarginPct,
-    operatingMarginPct: totals.revenue.greaterThan(0) ? totals.operatingProfit.dividedBy(totals.revenue).times(100) : null,
-    breakEvenRevenue,
-    marginOfSafetyPct,
+    ...totals,
     byProject,
     byProductService,
     byCounterparty,

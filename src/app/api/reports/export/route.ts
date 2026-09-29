@@ -31,6 +31,9 @@ import { buildWorkbookBuffer, type ExportSheet } from "@/lib/reports/xlsx-export
 import { getAccessScope, payrollRunScopeWhere } from "@/lib/access-scope";
 import { prisma } from "@/lib/db";
 import { toDecimal } from "@/lib/money";
+import { computeMarginReport, INDIRECT_DRIVER_LABELS, INDIRECT_DRIVER_OPTIONS, marginPlanTotals, type IndirectDriver, type MarginTotals } from "@/lib/reports/margin";
+import { mergeProjectPlan } from "@/lib/reports/margin-plan";
+import { loadPlanByProject } from "@/lib/budget/load";
 
 function toNum(d: { toNumber: () => number }) {
   return d.toNumber();
@@ -153,6 +156,68 @@ export async function GET(request: NextRequest) {
     );
     sheets = [{ name: "ОПиУ", rows }];
     fileName = `opiu_${periodFileSuffix(period)}.xlsx`;
+  } else if (type === "margin") {
+    const period = resolveReportPeriod(sp);
+    const driver: IndirectDriver = INDIRECT_DRIVER_OPTIONS.includes(sp.driver as IndirectDriver) ? (sp.driver as IndirectDriver) : "revenue";
+    const report = await computeMarginReport(period, filters, scope, driver);
+    const availability = resolvePlanAvailability(filters, scope);
+    const comparePlan = sp.compare === "plan" && availability.available;
+    const plan = comparePlan ? marginPlanTotals(await loadAvailablePlan("PNL", period, filters, scope)) : null;
+    const projectPlan =
+      comparePlan && availability.available && (!availability.slice.dimension || availability.slice.dimension.field === "projectId")
+        ? await loadPlanByProject(periodMonths(period), availability.slice.organizationIds)
+        : null;
+    const money = (d: Decimal | null) => (d ? toNum(d) : "");
+    const pctCell = (d: Decimal | null) => (d ? Number(d.toFixed(2)) : "");
+    const summary: Array<[string, keyof MarginTotals, "money" | "pct"]> = [
+      ["Выручка", "revenue", "money"],
+      ["Прямые переменные расходы", "directVariable", "money"],
+      ["Прямые постоянные расходы", "directFixed", "money"],
+      ["Валовая прибыль", "grossProfit", "money"],
+      ["Косвенные расходы", "indirect", "money"],
+      ["Операционная прибыль", "operatingProfit", "money"],
+      ["Валовая маржинальность, %", "grossMarginPct", "pct"],
+      ["Операционная маржинальность, %", "operatingMarginPct", "pct"],
+      ["Точка безубыточности", "breakEvenRevenue", "money"],
+      ["Запас финансовой прочности, %", "marginOfSafetyPct", "pct"],
+    ];
+    const cell = (v: Decimal | null, kind: "money" | "pct") => (kind === "money" ? money(v) : pctCell(v));
+    const dimension = (title: string, rows: Array<{ label: string; revenue: Decimal; directCost: Decimal; grossProfit: Decimal; grossMarginPct: Decimal | null; allocatedIndirect: Decimal; operatingProfit: Decimal; operatingMarginPct: Decimal | null; plan?: { revenue: Decimal; grossProfit: Decimal } | null }>, withPlan: boolean) => [
+      [title],
+      ["Название", "Выручка", ...(withPlan ? ["План выручки"] : []), "Прямые затраты", "Валовая прибыль", ...(withPlan ? ["План валовой прибыли", "Отклонение"] : []), "Маржинальность, %", "Косвенные (аллокация)", "Операционная прибыль", "Опер. маржинальность, %"],
+      ...rows.map((r) => [
+        r.label,
+        toNum(r.revenue),
+        ...(withPlan ? [money(r.plan?.revenue ?? null)] : []),
+        toNum(r.directCost),
+        toNum(r.grossProfit),
+        ...(withPlan ? [money(r.plan?.grossProfit ?? null), r.plan ? toNum(r.grossProfit.minus(r.plan.grossProfit)) : ""] : []),
+        pctCell(r.grossMarginPct),
+        toNum(r.allocatedIndirect),
+        toNum(r.operatingProfit),
+        pctCell(r.operatingMarginPct),
+      ]),
+      [],
+    ];
+    const withProjectPlan = Boolean(projectPlan && projectPlan.size > 0);
+    const rows: Array<Array<string | number>> = [
+      ["Маржинальность", period.label],
+      ["Драйвер косвенных расходов", INDIRECT_DRIVER_LABELS[driver]],
+      ["Суммы без НДС; амортизация и проценты — как в ОПиУ"],
+      [],
+      plan ? ["Показатель", "Факт", "План", "Отклонение"] : ["Показатель", "Факт"],
+      ...summary.map(([label, key, kind]) => {
+        const f = report[key] as Decimal | null;
+        const pl = plan ? (plan[key] as Decimal | null) : null;
+        return plan ? [label, cell(f, kind), cell(pl, kind), f && pl ? cell(f.minus(pl), kind) : ""] : [label, cell(f, kind)];
+      }),
+      [],
+      ...dimension("По проектам", mergeProjectPlan(report.byProject, projectPlan, filters.projectId ?? null), withProjectPlan),
+      ...dimension("По продуктам и услугам", report.byProductService, false),
+      ...dimension("По клиентам", report.byCounterparty, false),
+    ];
+    sheets = [{ name: "Маржинальность", rows }];
+    fileName = `marzhinalnost_${periodFileSuffix(period)}.xlsx`;
   } else if (type === "debts") {
     const report = await computeDebtsReport(filters, scope);
     const receivableRows: Array<Array<string | number>> = [

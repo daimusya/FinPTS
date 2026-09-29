@@ -3,6 +3,36 @@ import { toDecimal } from "@/lib/money";
 import type { BudgetKind } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import type { PlanItem, PlanSlice } from "./plan-fact";
+import type Decimal from "decimal.js";
+
+/**
+ * План ОПиУ по проектам за период: выручка и прямые расходы каждого проекта
+ * (записи плана с разрезом «проект»), по компании в целом и по организациям
+ * среза — для сравнения в маржинальности по проектам.
+ */
+export async function loadPlanByProject(
+  months: Array<{ year: number; month: number }>,
+  organizationIds: string[] | null,
+): Promise<Map<string, { name: string; revenue: Decimal; directCost: Decimal }>> {
+  const where: Prisma.BudgetEntryWhereInput = {
+    kind: "PNL",
+    projectId: { not: null },
+    OR: months.map((m) => ({ year: m.year, month: m.month })),
+  };
+  if (organizationIds) where.AND = [{ OR: [{ organizationId: { in: organizationIds } }, { organizationId: null }] }];
+  const entries = await prisma.budgetEntry.findMany({ where, include: { pnlArticle: true, project: true } });
+  const byProject = new Map<string, { name: string; revenue: Decimal; directCost: Decimal }>();
+  for (const e of entries) {
+    if (!e.project || !e.pnlArticle) continue;
+    const type = e.pnlArticle.type;
+    if (type !== "REVENUE" && type !== "DIRECT_VARIABLE" && type !== "DIRECT_FIXED") continue;
+    const item = byProject.get(e.project.id) ?? { name: e.project.name, revenue: toDecimal(0), directCost: toDecimal(0) };
+    if (type === "REVENUE") item.revenue = item.revenue.plus(toDecimal(e.amount));
+    else item.directCost = item.directCost.plus(toDecimal(e.amount));
+    byProject.set(e.project.id, item);
+  }
+  return byProject;
+}
 
 /**
  * План за период (один или несколько месяцев) по статьям, просуммированный
