@@ -91,3 +91,59 @@ export function checkTransactionDeletion(legs: Array<{ allocated: string }>): st
   }
   return null;
 }
+
+/** Операция для массового удаления: сопоставлено, в закрытом ли периоде и подпись для сообщения. */
+export interface BulkDeletionLeg {
+  id: string;
+  transferGroupId: string | null;
+  batchId: string | null;
+  allocated: string;
+  periodClosed: boolean;
+  label: string;
+}
+
+/**
+ * Что удалить из отмеченных в списке операций: перевод — только целиком
+ * (обе операции, даже если отмечена одна); операции с действующими
+ * сопоставлениями и в закрытом периоде пропускаются с причиной. legs — все
+ * отмеченные и вторые операции их переводов.
+ */
+export function planBulkDeletion(
+  selectedIds: string[],
+  legs: BulkDeletionLeg[],
+): { deleteLegs: BulkDeletionLeg[]; skipped: string[]; transfers: number } {
+  const byId = new Map(legs.map((l) => [l.id, l]));
+  const units = new Map<string, BulkDeletionLeg[]>();
+  for (const id of selectedIds) {
+    const leg = byId.get(id);
+    if (!leg) continue;
+    const key = leg.transferGroupId ?? leg.id;
+    if (units.has(key)) continue;
+    units.set(key, leg.transferGroupId ? legs.filter((l) => l.transferGroupId === leg.transferGroupId) : [leg]);
+  }
+  const deleteLegs: BulkDeletionLeg[] = [];
+  const skipped: string[] = [];
+  let transfers = 0;
+  for (const unit of units.values()) {
+    const what = unit.length > 1 ? `перевод ${unit[0].label}` : unit[0].label;
+    if (unit.some((l) => l.periodClosed)) {
+      skipped.push(`${what} — период закрыт`);
+      continue;
+    }
+    const problem = checkTransactionDeletion(unit.map((l) => ({ allocated: l.allocated })));
+    if (problem) {
+      skipped.push(`${what} — есть сопоставления с начислениями`);
+      continue;
+    }
+    if (unit.length > 1) transfers += 1;
+    deleteLegs.push(...unit);
+  }
+  return { deleteLegs, skipped, transfers };
+}
+
+/** Сколько операций удаляется из каждой загрузки выписки — чтобы уменьшить её «загружено» и увеличить «удалено». */
+export function deletedByBatch(legs: Array<{ batchId: string | null }>): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const leg of legs) if (leg.batchId) counts.set(leg.batchId, (counts.get(leg.batchId) ?? 0) + 1);
+  return counts;
+}

@@ -666,6 +666,8 @@ model BankImportBatch {
   importedRows  Int      @default(0)
   duplicateRows Int      @default(0)
   errorRows     Int      @default(0)
+  /// Сколько операций этой загрузки удалено потом (importedRows уменьшается на столько же).
+  deletedRows   Int      @default(0)
   createdAt     DateTime @default(now())
 
   bankAccount  BankAccount       @relation(fields: [bankAccountId], references: [id])

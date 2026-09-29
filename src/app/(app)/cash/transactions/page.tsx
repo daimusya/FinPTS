@@ -5,6 +5,10 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney } from "@/lib/money";
 import type { Prisma } from "@prisma/client";
 import { bankTransactionScopeWhere, getAccessScope } from "@/lib/access-scope";
+import { deleteBankTransactionsAction } from "../actions";
+import { SelectAllCheckbox } from "@/components/select-all-checkbox";
+
+const BULK_FORM = "bulk-delete";
 
 const MATCH_STATUS_LABELS: Record<string, string> = {
   UNMATCHED: "Не сопоставлено",
@@ -27,7 +31,9 @@ export default async function CashTransactionsPage({
     cashFlowArticleId?: string;
     from?: string;
     to?: string;
+    batchId?: string;
     notice?: string;
+    error?: string;
   }>;
 }) {
   const session = await getSession();
@@ -39,7 +45,8 @@ export default async function CashTransactionsPage({
     );
   }
   const canManage = hasPermission(session, PERMISSIONS.CASH_MANAGE);
-  const { matchStatus, direction, cashFlowArticleId, from, to, notice } = await searchParams;
+  const sp = await searchParams;
+  const { matchStatus, direction, cashFlowArticleId, from, to, batchId, notice, error } = sp;
 
   const scope = await getAccessScope(session);
   const scopeWhere = bankTransactionScopeWhere(scope);
@@ -48,6 +55,7 @@ export default async function CashTransactionsPage({
   if (matchStatus) where.matchStatus = matchStatus as never;
   if (direction) where.direction = direction as never;
   if (cashFlowArticleId) where.cashFlowArticleId = cashFlowArticleId;
+  if (batchId) where.batchId = batchId;
   if (from || to) {
     where.operationDate = {
       ...(from ? { gte: new Date(from) } : {}),
@@ -55,7 +63,7 @@ export default async function CashTransactionsPage({
     };
   }
 
-  const [transactions, unmatchedCount] = await Promise.all([
+  const [transactions, unmatchedCount, batch] = await Promise.all([
     prisma.bankTransaction.findMany({
       where,
       orderBy: { operationDate: "desc" },
@@ -63,7 +71,13 @@ export default async function CashTransactionsPage({
       include: { bankAccount: true, cashAccount: true, counterparty: true, cashFlowArticle: true },
     }),
     prisma.bankTransaction.count({ where: { matchStatus: "UNMATCHED", ...scopeWhere } }),
+    batchId ? prisma.bankImportBatch.findUnique({ where: { id: batchId }, include: { bankAccount: true } }) : null,
   ]);
+  // Back to the same filtered list after a bulk delete.
+  const query = new URLSearchParams(
+    Object.entries({ matchStatus, direction, cashFlowArticleId, from, to, batchId }).filter((e): e is [string, string] => Boolean(e[1])),
+  ).toString();
+  const returnTo = query ? `/cash/transactions?${query}` : "/cash/transactions";
 
   return (
     <div className="page">
@@ -74,6 +88,12 @@ export default async function CashTransactionsPage({
             Операции загружаются из выписок или вводятся вручную. Несопоставленных операций:{" "}
             <strong>{unmatchedCount}</strong>.
           </p>
+          {batch ? (
+            <p className="text-muted">
+              Операции загрузки «{batch.fileName}» от {batch.createdAt.toLocaleDateString("ru-RU")} ({batch.bankAccount.bankName}{" "}
+              {batch.bankAccount.accountNumber}). <Link href="/cash/transactions">Все операции</Link>
+            </p>
+          ) : null}
           {cashFlowArticleId || from || to ? (
             <p className="text-muted">
               Фильтр из отчёта применён.{" "}
@@ -94,6 +114,7 @@ export default async function CashTransactionsPage({
       </div>
 
       {notice ? <p className="form-success" style={{ marginBottom: 14 }}>{notice}</p> : null}
+      {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
 
       <form className="filter-bar">
         <label className="field">
@@ -113,15 +134,37 @@ export default async function CashTransactionsPage({
             <option value="OUTFLOW">Списание</option>
           </select>
         </label>
+        {batchId ? <input type="hidden" name="batchId" value={batchId} /> : null}
         <button type="submit" className="btn btn-secondary">
           Применить
         </button>
       </form>
 
+      {canManage && transactions.length > 0 ? (
+        <form id={BULK_FORM} action={deleteBankTransactionsAction} className="filter-bar" style={{ alignItems: "center" }}>
+          <input type="hidden" name="returnTo" value={returnTo} />
+          <span className="text-muted">
+            Отметьте операции в таблице (флажок в заголовке — все {transactions.length} на странице). Переводы удаляются
+            целиком; операции с сопоставлениями и в закрытых периодах пропускаются.
+          </span>
+          <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+            <input type="checkbox" name="confirm" /> Да, удалить
+          </label>
+          <button type="submit" className="btn btn-secondary">
+            Удалить отмеченные
+          </button>
+        </form>
+      ) : null}
+
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
+              {canManage ? (
+                <th style={{ width: 32 }}>
+                  <SelectAllCheckbox formId={BULK_FORM} name="ids" label="Отметить все операции на странице" />
+                </th>
+              ) : null}
               <th>Дата</th>
               <th>Счёт / касса</th>
               <th>Направление</th>
@@ -134,6 +177,11 @@ export default async function CashTransactionsPage({
           <tbody>
             {transactions.map((tx) => (
               <tr key={tx.id}>
+                {canManage ? (
+                  <td>
+                    <input type="checkbox" name="ids" value={tx.id} form={BULK_FORM} aria-label={`Отметить операцию от ${tx.operationDate.toLocaleDateString("ru-RU")}`} />
+                  </td>
+                ) : null}
                 <td className="mono">{tx.operationDate.toLocaleDateString("ru-RU")}</td>
                 <td>
                   <Link href={`/cash/transactions/${tx.id}`}>
@@ -153,7 +201,7 @@ export default async function CashTransactionsPage({
             ))}
             {transactions.length === 0 ? (
               <tr>
-                <td colSpan={7} className="empty-state">
+                <td colSpan={canManage ? 8 : 7} className="empty-state">
                   Операций пока нет.
                 </td>
               </tr>

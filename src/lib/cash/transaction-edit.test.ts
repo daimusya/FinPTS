@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { checkTransactionDeletion, checkTransactionEdit, parseTransactionEdit, type EditableLeg, type TransactionEditInput } from "./transaction-edit";
+import {
+  checkTransactionDeletion,
+  checkTransactionEdit,
+  deletedByBatch,
+  parseTransactionEdit,
+  planBulkDeletion,
+  type BulkDeletionLeg,
+  type EditableLeg,
+  type TransactionEditInput,
+} from "./transaction-edit";
 
 const form = (values: Record<string, string>) => (name: string) => values[name];
 
@@ -82,5 +91,40 @@ describe("checkTransactionDeletion", () => {
     expect(checkTransactionDeletion([{ allocated: "0" }, { allocated: "0" }])).toBeNull();
     expect(checkTransactionDeletion([{ allocated: "10" }])).toMatch(/сопоставления/);
     expect(checkTransactionDeletion([{ allocated: "0" }, { allocated: "0.01" }])).toMatch(/перевода/);
+  });
+});
+
+describe("bulk deletion", () => {
+  const leg = (id: string, over: Partial<BulkDeletionLeg> = {}) => ({
+    id,
+    transferGroupId: null,
+    batchId: null,
+    allocated: "0",
+    periodClosed: false,
+    label: id,
+    ...over,
+  });
+
+  it("deletes a transfer whole even if one leg is ticked, and skips matched or closed operations with a reason", () => {
+    const legs = [
+      leg("a"),
+      leg("t1", { transferGroupId: "g" }),
+      leg("t2", { transferGroupId: "g" }),
+      leg("m", { allocated: "150.00" }),
+      leg("c", { periodClosed: true }),
+    ];
+    const plan = planBulkDeletion(["a", "t1", "m", "c", "unknown"], legs);
+    expect(plan.deleteLegs.map((l) => l.id)).toEqual(["a", "t1", "t2"]);
+    expect(plan.transfers).toBe(1);
+    expect(plan.skipped).toEqual(["m — есть сопоставления с начислениями", "c — период закрыт"]);
+    // Both legs ticked — still one transfer.
+    expect(planBulkDeletion(["t1", "t2"], legs).deleteLegs.map((l) => l.id)).toEqual(["t1", "t2"]);
+  });
+
+  it("counts the deleted operations of each statement import", () => {
+    expect([...deletedByBatch([{ batchId: "b1" }, { batchId: "b1" }, { batchId: null }, { batchId: "b2" }])]).toEqual([
+      ["b1", 2],
+      ["b2", 1],
+    ]);
   });
 });

@@ -13,6 +13,8 @@ import { computeFingerprint } from "@/lib/bank-import/fingerprint";
 import { oppositeDirection, validateTransferAccounts } from "@/lib/cash/transfer";
 import {
   checkTransactionDeletion,
+  deletedByBatch,
+  planBulkDeletion,
   checkTransactionEdit,
   parseTransactionEdit,
   type TransactionEditInput,
@@ -354,11 +356,7 @@ export async function deleteBankTransactionAction(id: string, formData: FormData
     await assertPeriodOpenForDate(leg.operationDate).catch((e) => back((e as Error).message));
   }
 
-  const ids = legs.map((leg) => leg.id);
-  await prisma.$transaction([
-    prisma.paymentAllocation.deleteMany({ where: { bankTransactionId: { in: ids } } }),
-    prisma.bankTransaction.deleteMany({ where: { id: { in: ids } } }),
-  ]);
+  await removeTransactions(legs);
   for (const leg of legs) {
     await logAudit({
       userId: session.userId,
@@ -376,6 +374,85 @@ export async function deleteBankTransactionAction(id: string, formData: FormData
       pair ? `Перевод от ${date} удалён — обе операции` : `Операция от ${date} на ${formatMoney(tx.amount)} удалена`,
     )}`,
   );
+}
+
+/**
+ * Удаляет операции одной транзакцией БД: их отменённые сопоставления, сами
+ * операции и счётчики загрузок выписки («загружено» уменьшается, «удалено»
+ * растёт).
+ */
+async function removeTransactions(legs: Array<{ id: string; batchId: string | null }>) {
+  const ids = legs.map((leg) => leg.id);
+  await prisma.$transaction([
+    prisma.paymentAllocation.deleteMany({ where: { bankTransactionId: { in: ids } } }),
+    prisma.bankTransaction.deleteMany({ where: { id: { in: ids } } }),
+    ...[...deletedByBatch(legs)].map(([batchId, count]) =>
+      prisma.bankImportBatch.update({ where: { id: batchId }, data: { importedRows: { decrement: count }, deletedRows: { increment: count } } }),
+    ),
+  ]);
+}
+
+const MAX_BULK_DELETE = 500;
+
+/**
+ * Удаление отмеченных в списке операций: по тем же правилам, что и одной —
+ * перевод целиком, операции с действующими сопоставлениями и в закрытом
+ * периоде пропускаются (с причиной в сообщении), только в зоне видимости
+ * пользователя; каждая удалённая операция — в журнале аудита.
+ */
+export async function deleteBankTransactionsAction(formData: FormData) {
+  const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
+  const returnTo = String(formData.get("returnTo") ?? "/cash/transactions");
+  const safeReturn = returnTo.startsWith("/cash/transactions") ? returnTo : "/cash/transactions";
+  const withParam = (key: string, message: string) => `${safeReturn}${safeReturn.includes("?") ? "&" : "?"}${key}=${encodeURIComponent(message)}`;
+  const ids = [...new Set(formData.getAll("ids").map(String).filter(Boolean))];
+  if (ids.length === 0) redirect(withParam("error", "Отметьте операции, которые нужно удалить"));
+  if (ids.length > MAX_BULK_DELETE) redirect(withParam("error", `За один раз — не больше ${MAX_BULK_DELETE} операций`));
+  if (formData.get("confirm") !== "on") redirect(withParam("error", "Отметьте «Да, удалить», чтобы подтвердить удаление"));
+
+  const scope = await getAccessScope(session);
+  const include = { allocations: { where: { cancelledAt: null } } } as const;
+  const selected = await prisma.bankTransaction.findMany({ where: { id: { in: ids }, ...bankTransactionScopeWhere(scope) }, include });
+  const groups = [...new Set(selected.map((t) => t.transferGroupId).filter((g): g is string => Boolean(g)))];
+  const pairLegs = groups.length
+    ? await prisma.bankTransaction.findMany({ where: { transferGroupId: { in: groups }, id: { notIn: selected.map((t) => t.id) } }, include })
+    : [];
+  const all = [...selected, ...pairLegs];
+  const closed = new Set(
+    (await prisma.accountingPeriod.findMany({ where: { status: "CLOSED" }, select: { year: true, month: true } })).map((p) => `${p.year}-${p.month}`),
+  );
+  const plan = planBulkDeletion(
+    selected.map((t) => t.id),
+    all.map((t) => ({
+      id: t.id,
+      transferGroupId: t.transferGroupId,
+      batchId: t.batchId,
+      allocated: allocatedSum(t),
+      periodClosed: closed.has(`${t.operationDate.getUTCFullYear()}-${t.operationDate.getUTCMonth() + 1}`),
+      label: `${t.operationDate.toLocaleDateString("ru-RU", { timeZone: "UTC" })} на ${formatMoney(t.amount)}`,
+    })),
+  );
+  const toDelete = all.filter((t) => plan.deleteLegs.some((l) => l.id === t.id));
+  if (toDelete.length > 0) await removeTransactions(toDelete);
+  for (const leg of toDelete) {
+    await logAudit({
+      userId: session.userId,
+      entityType: "bank_transaction",
+      entityId: leg.id,
+      action: leg.transferGroupId ? "delete_transfer" : "delete",
+      before: leg as never,
+    });
+  }
+
+  revalidatePath("/cash/transactions");
+  revalidatePath("/cash/import");
+  const parts = [`Удалено операций: ${toDelete.length}${plan.transfers ? ` (в том числе переводов целиком: ${plan.transfers})` : ""}`];
+  const invisible = ids.length - selected.length;
+  if (invisible > 0) parts.push(`Не найдено или вне вашей зоны видимости: ${invisible}`);
+  if (plan.skipped.length > 0) {
+    parts.push(`Пропущено ${plan.skipped.length}: ${plan.skipped.slice(0, 5).join("; ")}${plan.skipped.length > 5 ? " …" : ""}`);
+  }
+  redirect(withParam(plan.skipped.length > 0 && toDelete.length === 0 ? "error" : "notice", parts.join(". ")));
 }
 
 export async function allocatePaymentAction(transactionId: string, formData: FormData) {
