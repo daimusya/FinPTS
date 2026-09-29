@@ -16,6 +16,8 @@ import {
   cancelPaymentRequestAction,
   markPaymentRequestPaidAction,
   rejectPaymentRequestAction,
+  returnPaymentRequestAction,
+  resubmitPaymentRequestAction,
   reschedulePaymentRequestAction,
   savePaymentScheduleAction,
   removePaymentScheduleAction,
@@ -27,10 +29,12 @@ import { scheduleSummary, suggestSplit } from "@/lib/payment-requests/parts";
 import { canPlanRequests } from "@/lib/payment-plan/service";
 import { PaymentScheduleEditor } from "@/components/payment-schedule-editor";
 import { PaymentAccountOptions } from "@/components/payment-account-options";
+import { currentDeciders } from "@/lib/payment-requests/notify";
 
 const STATE_LABELS: Record<TimelineState, string> = {
   approved: "Согласовано",
   rejected: "Отклонено",
+  returned: "Возвращено на доработку",
   current: "Ждёт решения",
   waiting: "Впереди",
   not_reached: "Не понадобилось",
@@ -39,6 +43,7 @@ const STATE_LABELS: Record<TimelineState, string> = {
 const STATE_BADGE: Record<TimelineState, string> = {
   approved: "badge-active",
   rejected: "badge-danger",
+  returned: "badge-warning",
   current: "badge-warning",
   waiting: "badge-archived",
   not_reached: "badge-archived",
@@ -70,7 +75,7 @@ export default async function PaymentRequestPage({
       cashFlowArticle: true,
       createdBy: true,
       route: { include: { steps: { include: { role: true } } } },
-      approvals: { include: { approver: true } },
+      approvals: { include: { approver: true, onBehalfOf: true }, orderBy: { decidedAt: "asc" } },
       reschedules: { include: { changedBy: true }, orderBy: { changedAt: "asc" } },
       parts: { include: { paidBy: true }, orderBy: [{ dueDate: "asc" }, { sortOrder: "asc" }] },
       payBankAccount: true,
@@ -101,29 +106,41 @@ export default async function PaymentRequestPage({
   const firstDueKey = request.dueDate.toISOString().slice(0, 10);
 
   const steps = request.route?.steps ?? [];
-  const currentStepRow = steps.find((s) => s.stepOrder === request.currentStep);
   const pending = request.status === "PENDING_APPROVAL";
-  const canDecide =
-    pending &&
-    (!request.route
-      ? canApprove
-      : isAdmin ||
-        (currentStepRow
-          ? Boolean(await prisma.userRole.findFirst({ where: { userId: session.userId, roleId: currentStepRow.roleId } }))
-          : false));
+  // Members of the step's role (or holders of the approve permission) and their deputies for today.
+  const deciders = pending ? await currentDeciders(request.id) : [];
+  const myAuthority = deciders.find((d) => d.userId === session.userId && d.onBehalfOfId === null) ?? deciders.find((d) => d.userId === session.userId);
+  const canDecide = pending && (isAdmin || Boolean(myAuthority) || (!request.route && canApprove));
+  const onBehalfOfName =
+    myAuthority?.onBehalfOfId && !isAdmin ? (await prisma.user.findUnique({ where: { id: myAuthority.onBehalfOfId } }))?.fullName ?? null : null;
 
+  // The step timeline shows the current round; earlier rounds are in the full history below.
+  const recorded = request.approvals.map((a) => ({
+    stepOrder: a.stepOrder,
+    decision: a.decision,
+    approverName: a.approver.fullName,
+    decidedAt: a.decidedAt,
+    comment: a.comment,
+    onBehalfOfName: a.onBehalfOf?.fullName ?? null,
+    round: a.round,
+  }));
   const timeline = buildApprovalTimeline({
     steps: steps.map((s) => ({ stepOrder: s.stepOrder, roleName: s.role.name })),
-    decisions: request.approvals.map((a) => ({
-      stepOrder: a.stepOrder,
-      decision: a.decision,
-      approverName: a.approver.fullName,
-      decidedAt: a.decidedAt,
-      comment: a.comment,
-    })),
+    decisions: recorded.filter((d) => d.round === request.round),
     currentStep: request.currentStep,
     status: request.status,
   });
+  const reworkable = request.status === "RETURNED" || request.status === "REJECTED";
+  const canRework = reworkable && (request.createdById === session.userId || isAdmin);
+  const lastVerdict = [...recorded].reverse().find((d) => d.decision === "returned" || d.decision === "rejected");
+  const [reworkCounterparties, reworkArticles] = canRework
+    ? await Promise.all([
+        prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
+        prisma.cashFlowArticle.findMany({ where: { isArchived: false, direction: "OUTFLOW" }, orderBy: { name: "asc" } }),
+      ])
+    : [[], []];
+  const decisionVerb = (d: { decision: string }) =>
+    d.decision === "rejected" ? "Отклонил" : d.decision === "returned" ? "Вернул на доработку" : d.decision === "resubmitted" ? "Отправил заново" : "Согласовал";
 
   const counterpartyName = request.counterparty ? request.counterparty.shortName || request.counterparty.fullName : "—";
   const primaryAccount = request.counterparty?.bankDetails[0] ?? null;
@@ -149,6 +166,21 @@ export default async function PaymentRequestPage({
 
       {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
       {notice ? <p className="form-success" style={{ marginBottom: 14 }}>{notice}</p> : null}
+
+      {reworkable && lastVerdict ? (
+        <div className="card" style={{ borderColor: "var(--color-warning)" }}>
+          <p>
+            <strong>{request.status === "RETURNED" ? "Возвращена на доработку" : "Отклонена"}</strong> — {lastVerdict.approverName}
+            {lastVerdict.onBehalfOfName ? ` (за ${lastVerdict.onBehalfOfName})` : ""}, {dateTime(lastVerdict.decidedAt)}
+          </p>
+          {lastVerdict.comment ? <blockquote className="approval-comment">{lastVerdict.comment}</blockquote> : null}
+          {canRework ? (
+            <p className="text-muted" style={{ fontSize: 13 }}>
+              Исправьте заявку в блоке «Доработка» ниже и отправьте её на согласование заново — отдельную заявку создавать не нужно.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="card">
         <dl className="detail-list">
@@ -361,7 +393,8 @@ export default async function PaymentRequestPage({
               {entry.decisions.map((d, i) => (
                 <div key={i} className="approval-step__decision">
                   <div className="text-muted" style={{ fontSize: 12 }}>
-                    {d.decision === "rejected" ? "Отклонил" : "Согласовал"}: {d.approverName}, {dateTime(d.decidedAt)}
+                    {decisionVerb(d)}: {d.approverName}
+                    {d.onBehalfOfName ? ` (за ${d.onBehalfOfName})` : ""}, {dateTime(d.decidedAt)}
                   </div>
                   {d.comment ? <blockquote className="approval-comment">{d.comment}</blockquote> : null}
                 </div>
@@ -374,23 +407,98 @@ export default async function PaymentRequestPage({
             </li>
           ))}
         </ol>
+        {request.round > 1 ? (
+          <details style={{ marginTop: 12 }}>
+            <summary>Все решения по заявке — кругов согласования: {request.round}</summary>
+            <ul className="reschedule-list" style={{ marginTop: 8 }}>
+              {recorded.map((d, i) => (
+                <li key={i}>
+                  <span className="text-muted">
+                    круг {d.round}
+                    {d.stepOrder ? `, шаг ${d.stepOrder}` : ""}:
+                  </span>{" "}
+                  {decisionVerb(d)} — {d.approverName}
+                  {d.onBehalfOfName ? ` (за ${d.onBehalfOfName})` : ""}, <span className="text-muted">{dateTime(d.decidedAt)}</span>
+                  {d.comment ? <div className="approval-comment" style={{ marginTop: 4 }}>{d.comment}</div> : null}
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
       </div>
+
+      {canRework ? (
+        <div className="card" id="rework">
+          <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Доработка</h2>
+          <form action={resubmitPaymentRequestAction.bind(null, request.id)} className="form-grid" style={{ alignItems: "flex-end" }}>
+            <label className="field">
+              <span>Контрагент</span>
+              <select name="counterpartyId" id="rework-counterparty" defaultValue={request.counterpartyId ?? ""}>
+                <option value="">—</option>
+                {reworkCounterparties.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.shortName || c.fullName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Статья ДДС</span>
+              <select name="cashFlowArticleId" id="rework-article" defaultValue={request.cashFlowArticleId ?? ""}>
+                <option value="">—</option>
+                {reworkArticles.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Сумма, ₽ *</span>
+              <input type="text" inputMode="decimal" name="amount" id="rework-amount" required defaultValue={request.amount.toFixed(2)} style={{ width: 140 }} />
+            </label>
+            <label className="field">
+              <span>Срок оплаты *</span>
+              <input type="date" name="dueDate" id="rework-due" required defaultValue={firstDueKey} />
+            </label>
+            <label className="field" style={{ gridColumn: "span 2" }}>
+              <span>Комментарий к заявке</span>
+              <textarea name="comment" id="rework-comment" rows={2} defaultValue={request.comment ?? ""} />
+            </label>
+            <label className="field" style={{ gridColumn: "span 2" }}>
+              <span>Что исправлено (увидят согласующие)</span>
+              <textarea name="resubmitNote" id="rework-note" rows={2} maxLength={1000} />
+            </label>
+            <button type="submit" className="btn btn-primary">
+              Отправить на согласование заново
+            </button>
+          </form>
+          <p className="text-muted" style={{ fontSize: 12, marginTop: 8 }}>
+            Согласование начнётся с первого шага, маршрут подберётся под новую сумму. Если сумма изменится, график оплаты
+            частями удалится — его нужно будет задать заново.
+          </p>
+        </div>
+      ) : null}
 
       {canDecide ? (
         <div className="card" id="decision">
           <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
             Ваше решение{request.route ? ` — шаг ${request.currentStep}` : ""}
+            {onBehalfOfName ? ` (вы замещаете: ${onBehalfOfName})` : ""}
           </h2>
           <form action={approvePaymentRequestAction.bind(null, request.id)}>
             <input type="hidden" name="expectedStep" value={request.currentStep} />
             <input type="hidden" name="returnTo" value="detail" />
             <label className="field">
-              <span>Комментарий (при отклонении обязателен)</span>
+              <span>Комментарий (при отклонении и возврате на доработку обязателен)</span>
               <textarea name="comment" rows={3} maxLength={DECISION_COMMENT_MAX_LENGTH} />
             </label>
             <div className="form-actions">
               <button type="submit" className="btn btn-primary">
                 Согласовать
+              </button>
+              <button type="submit" className="btn btn-secondary" formAction={returnPaymentRequestAction.bind(null, request.id)}>
+                Вернуть на доработку
               </button>
               <button type="submit" className="btn btn-danger" formAction={rejectPaymentRequestAction.bind(null, request.id)}>
                 Отклонить
@@ -400,7 +508,7 @@ export default async function PaymentRequestPage({
         </div>
       ) : null}
 
-      {(canPay && request.status === "APPROVED") || (canApprove && (pending || request.status === "APPROVED")) ? (
+      {(canPay && request.status === "APPROVED") || (canApprove && (pending || request.status === "APPROVED" || request.status === "RETURNED")) ? (
         <div className="card" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {canPay && request.status === "APPROVED" ? (
             <form action={markPaymentRequestPaidAction.bind(null, request.id)}>
@@ -410,7 +518,7 @@ export default async function PaymentRequestPage({
               </button>
             </form>
           ) : null}
-          {canApprove && (pending || request.status === "APPROVED") ? (
+          {canApprove && (pending || request.status === "APPROVED" || request.status === "RETURNED") ? (
             <form action={cancelPaymentRequestAction.bind(null, request.id)}>
               <input type="hidden" name="returnTo" value="detail" />
               <button type="submit" className="btn btn-ghost">

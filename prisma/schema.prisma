@@ -35,8 +35,51 @@ model User {
   reopenedPeriods    AccountingPeriod[]       @relation("PeriodReopenedBy")
   employee           Employee?
   importBatches      BankImportBatch[]
+  approvalsOnBehalf  PaymentRequestApproval[] @relation("ApprovalOnBehalfOf")
+  notifications      Notification[]
+  delegationsFrom    ApprovalDelegation[]     @relation("DelegationFrom")
+  delegationsTo      ApprovalDelegation[]     @relation("DelegationTo")
+  delegationsCreated ApprovalDelegation[]     @relation("DelegationCreatedBy")
 
   @@map("users")
+}
+
+// Уведомление пользователю в самой системе (колокольчик в меню, страница
+// «Уведомления»): решения по его заявкам, заявки, ждущие его решения.
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  title     String
+  body      String?
+  /// Куда ведёт уведомление, например /payment-requests/…
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+// Замещение согласующего: в период validFrom–validTo (включительно)
+// toUser может принимать решения по шагам маршрутов, положенным fromUser.
+model ApprovalDelegation {
+  id          String   @id @default(cuid())
+  fromUserId  String
+  toUserId    String
+  validFrom   DateTime @db.Date
+  validTo     DateTime @db.Date
+  comment     String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  fromUser  User @relation("DelegationFrom", fields: [fromUserId], references: [id])
+  toUser    User @relation("DelegationTo", fields: [toUserId], references: [id])
+  createdBy User @relation("DelegationCreatedBy", fields: [createdById], references: [id])
+
+  @@index([toUserId, validFrom, validTo])
+  @@map("approval_delegations")
 }
 
 model Role {
@@ -787,6 +830,8 @@ enum PaymentRequestStatus {
   REJECTED
   PAID
   CANCELLED
+  /// Возвращена на доработку: автор правит и отправляет заново (новый круг согласования).
+  RETURNED
 }
 
 model PaymentRequest {
@@ -804,6 +849,8 @@ model PaymentRequest {
   /// маршрута не нашлось, действует старое одноступенчатое согласование.
   routeId           String?
   currentStep       Int                   @default(1)
+  /// Круг согласования: после возврата на доработку и повторной отправки — следующий.
+  round             Int                   @default(1)
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
 
@@ -831,8 +878,12 @@ model PaymentRequestApproval {
   id               String   @id @default(cuid())
   paymentRequestId String
   approverId       String
-  decision         String   // approved / rejected
+  decision         String   // approved / rejected / returned / resubmitted
   comment          String?
+  /// Круг согласования заявки, к которому относится решение.
+  round            Int      @default(1)
+  /// Решение принял заместитель — за этого согласующего.
+  onBehalfOfId     String?
   /// Номер шага маршрута, к которому относится решение. Null — старое
   /// одноступенчатое согласование (заявка без маршрута).
   stepOrder        Int?
@@ -840,6 +891,7 @@ model PaymentRequestApproval {
 
   paymentRequest PaymentRequest @relation(fields: [paymentRequestId], references: [id], onDelete: Cascade)
   approver       User           @relation(fields: [approverId], references: [id])
+  onBehalfOf     User?          @relation("ApprovalOnBehalfOf", fields: [onBehalfOfId], references: [id])
 
   @@map("payment_request_approvals")
 }

@@ -6,6 +6,7 @@ import { formatMoney } from "@/lib/money";
 import { roleForStep, totalSteps, type ApprovalRouteCandidate } from "@/lib/payment-requests/approval";
 import { approvePaymentRequestAction, cancelPaymentRequestAction, markPaymentRequestPaidAction } from "./actions";
 import { PAYMENT_REQUEST_STATUS_BADGE as STATUS_BADGE, PAYMENT_REQUEST_STATUS_LABELS as STATUS_LABELS } from "@/lib/payment-requests/labels";
+import { isDelegationActive } from "@/lib/payment-requests/delegation";
 
 export default async function PaymentRequestsPage({
   searchParams,
@@ -20,7 +21,8 @@ export default async function PaymentRequestsPage({
   const canCreate = hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_CREATE);
   const isAdmin = hasPermission(session, PERMISSIONS.ADMIN_FULL);
 
-  const [requests, myRoleRows] = await Promise.all([
+  const today = new Date();
+  const [requests, myRoleRows, myDelegations] = await Promise.all([
     prisma.paymentRequest.findMany({
       orderBy: { dueDate: "asc" },
       include: {
@@ -35,8 +37,24 @@ export default async function PaymentRequestsPage({
       },
     }),
     prisma.userRole.findMany({ where: { userId: session.userId }, select: { roleId: true } }),
+    prisma.approvalDelegation.findMany({
+      where: { toUserId: session.userId },
+      include: {
+        fromUser: {
+          select: {
+            fullName: true,
+            roles: { select: { roleId: true, role: { select: { permissions: { select: { permission: { select: { code: true } } } } } } } },
+          },
+        },
+      },
+    }),
   ]);
-  const myRoleIds = new Set(myRoleRows.map((r) => r.roleId));
+  // Whom I stand in for today: their step roles count as mine, and their right to approve single-step requests.
+  const activeDelegations = myDelegations.filter((d) => isDelegationActive(d, today));
+  const myRoleIds = new Set([...myRoleRows.map((r) => r.roleId), ...activeDelegations.flatMap((d) => d.fromUser.roles.map((r) => r.roleId))]);
+  const approvesByDelegation = activeDelegations.some((d) =>
+    d.fromUser.roles.some((r) => r.role.permissions.some((p) => p.permission.code === PERMISSIONS.PAYMENT_REQUEST_APPROVE)),
+  );
 
   function toRouteCandidate(route: NonNullable<(typeof requests)[number]["route"]>): ApprovalRouteCandidate {
     return {
@@ -78,6 +96,13 @@ export default async function PaymentRequestsPage({
           <p className="form-error">{error}</p>
         </div>
       ) : null}
+      {activeDelegations.length > 0 ? (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <p>
+            Сегодня вы замещаете: {activeDelegations.map((d) => d.fromUser.fullName).join(", ")} — их шаги согласования доступны вам.
+          </p>
+        </div>
+      ) : null}
 
       <div className="table-wrap">
         <table>
@@ -102,7 +127,7 @@ export default async function PaymentRequestsPage({
                 req.status !== "PENDING_APPROVAL"
                   ? false
                   : !req.route
-                    ? canApprove
+                    ? canApprove || approvesByDelegation
                     : isAdmin || (requiredRoleId !== null && myRoleIds.has(requiredRoleId));
               const currentStepRoleName = req.route?.steps.find((s) => s.stepOrder === req.currentStep)?.role.name;
 
@@ -156,9 +181,9 @@ export default async function PaymentRequestsPage({
                               Согласовать
                             </button>
                           </form>
-                          {/* Rejection needs a reason, so it is done on the request page. */}
+                          {/* Rejection and return for rework need a reason, so they are done on the request page. */}
                           <Link href={`/payment-requests/${req.id}#decision`} className="btn btn-danger btn-sm">
-                            Отклонить…
+                            Вернуть / отклонить…
                           </Link>
                         </>
                       ) : null}
@@ -169,12 +194,17 @@ export default async function PaymentRequestsPage({
                           </button>
                         </form>
                       ) : null}
-                      {canApprove && (req.status === "PENDING_APPROVAL" || req.status === "APPROVED") ? (
+                      {canApprove && (req.status === "PENDING_APPROVAL" || req.status === "APPROVED" || req.status === "RETURNED") ? (
                         <form action={cancelPaymentRequestAction.bind(null, req.id)}>
                           <button type="submit" className="btn btn-ghost btn-sm">
                             Отменить
                           </button>
                         </form>
+                      ) : null}
+                      {(req.status === "RETURNED" || req.status === "REJECTED") && (req.createdById === session.userId || isAdmin) ? (
+                        <Link href={`/payment-requests/${req.id}#rework`} className="btn btn-secondary btn-sm">
+                          Доработать
+                        </Link>
                       ) : null}
                       <Link href={`/payment-requests/${req.id}`} className="btn btn-ghost btn-sm">
                         История

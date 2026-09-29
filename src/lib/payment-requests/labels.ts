@@ -5,6 +5,7 @@ export const PAYMENT_REQUEST_STATUS_LABELS: Record<string, string> = {
   REJECTED: "Отклонена",
   PAID: "Оплачена",
   CANCELLED: "Отменена",
+  RETURNED: "На доработке",
 };
 
 export const PAYMENT_REQUEST_STATUS_BADGE: Record<string, string> = {
@@ -14,4 +15,5 @@ export const PAYMENT_REQUEST_STATUS_BADGE: Record<string, string> = {
   REJECTED: "badge-danger",
   PAID: "badge-orange",
   CANCELLED: "badge-archived",
+  RETURNED: "badge-warning",
 };

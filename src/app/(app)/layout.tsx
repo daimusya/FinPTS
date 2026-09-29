@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
+import Link from "next/link";
 import { Sidebar } from "@/components/sidebar";
+import { unreadNotificationCount } from "@/lib/notifications";
 import { logoutAction } from "./actions";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -8,6 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!session) {
     redirect("/login");
   }
+  const unread = await unreadNotificationCount(session.userId);
 
   return (
     <div className="app-shell">
@@ -16,6 +19,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <header className="topbar">
           <div />
           <div className="topbar-user">
+            <Link href="/notifications" className="topbar-bell" aria-label={unread ? `Уведомления: непрочитанных ${unread}` : "Уведомления"}>
+              Уведомления
+              {unread ? <span className="topbar-bell__count">{unread > 99 ? "99+" : unread}</span> : null}
+            </Link>
             <div>
               <div className="topbar-user-name">{session.fullName}</div>
               <div className="topbar-user-email">{session.email}</div>

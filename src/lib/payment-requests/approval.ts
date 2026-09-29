@@ -53,17 +53,19 @@ export function isFinalStep(route: ApprovalRouteCandidate, stepOrder: number): b
   return stepOrder >= totalSteps(route);
 }
 
-export type ApprovalDecision = "approved" | "rejected";
+export type ApprovalDecision = "approved" | "rejected" | "returned";
 
 export const DECISION_COMMENT_MAX_LENGTH = 1000;
 
 /**
  * Комментарий согласующего: необязателен при согласовании, обязателен при
- * отклонении — автор заявки должен понимать, что исправить.
+ * отклонении и возврате на доработку — автор заявки должен понимать, что
+ * исправить.
  */
 export function parseDecisionComment(decision: ApprovalDecision, raw: unknown): { comment: string | null } | { error: string } {
   const comment = String(raw ?? "").trim().replace(/\r\n/g, "\n");
   if (decision === "rejected" && !comment) return { error: "Укажите причину отклонения — автор заявки увидит её в истории согласования" };
+  if (decision === "returned" && !comment) return { error: "Напишите, что доработать, — автор увидит это в заявке" };
   if (comment.length > DECISION_COMMENT_MAX_LENGTH) {
     return { error: `Комментарий длиннее ${DECISION_COMMENT_MAX_LENGTH} символов — сократите его` };
   }
@@ -76,9 +78,11 @@ export interface RecordedDecision {
   approverName: string;
   decidedAt: Date;
   comment: string | null;
+  /** Решение принял заместитель — за этого согласующего. */
+  onBehalfOfName?: string | null;
 }
 
-export type TimelineState = "approved" | "rejected" | "current" | "waiting" | "not_reached";
+export type TimelineState = "approved" | "rejected" | "returned" | "current" | "waiting" | "not_reached";
 
 export interface TimelineEntry {
   /** Null — одноступенчатое согласование заявки без маршрута. */
@@ -103,10 +107,11 @@ export function buildApprovalTimeline(input: {
   status: string;
 }): TimelineEntry[] {
   const pending = input.status === "PENDING_APPROVAL";
-  const byTime = [...input.decisions].sort((a, b) => a.decidedAt.getTime() - b.decidedAt.getTime());
+  // Step decisions only: a resubmission after rework opens a new round and is shown in the full history.
+  const byTime = input.decisions.filter((d) => d.decision !== "resubmitted").sort((a, b) => a.decidedAt.getTime() - b.decidedAt.getTime());
   const stateOf = (decisions: RecordedDecision[], isCurrent: boolean, isAhead: boolean): TimelineState => {
     const last = decisions.at(-1);
-    if (last) return last.decision === "rejected" ? "rejected" : "approved";
+    if (last) return last.decision === "rejected" ? "rejected" : last.decision === "returned" ? "returned" : "approved";
     if (pending && isCurrent) return "current";
     if (pending && isAhead) return "waiting";
     return "not_reached";

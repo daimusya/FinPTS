@@ -27,6 +27,8 @@ import {
   type ApprovalDecision,
   type ApprovalRouteCandidate,
 } from "@/lib/payment-requests/approval";
+import { stepAuthority } from "@/lib/payment-requests/delegation";
+import { currentDeciders, notifyAuthor, notifyDeciders } from "@/lib/payment-requests/notify";
 
 async function loadActiveRoutes(): Promise<ApprovalRouteCandidate[]> {
   const routes = await prisma.paymentApprovalRoute.findMany({
@@ -96,6 +98,7 @@ export async function createPaymentRequestAction(formData: FormData) {
     action: "create",
     after: created as never,
   });
+  await notifyDeciders(created.id, session.userId);
 
   revalidatePath("/payment-requests");
   redirect("/payment-requests");
@@ -107,7 +110,7 @@ const TRANSITION_PERMISSION: Record<string, (typeof PERMISSIONS)[keyof typeof PE
 };
 
 const TRANSITION_FROM: Partial<Record<PaymentRequestStatus, PaymentRequestStatus[]>> = {
-  [PaymentRequestStatus.CANCELLED]: [PaymentRequestStatus.PENDING_APPROVAL, PaymentRequestStatus.APPROVED],
+  [PaymentRequestStatus.CANCELLED]: [PaymentRequestStatus.PENDING_APPROVAL, PaymentRequestStatus.APPROVED, PaymentRequestStatus.RETURNED],
   [PaymentRequestStatus.PAID]: [PaymentRequestStatus.APPROVED],
 };
 
@@ -136,6 +139,7 @@ async function transition(id: string, status: PaymentRequestStatus, action: stri
     before: before as never,
     after: updated as never,
   });
+  await notifyAuthor(id, status === PaymentRequestStatus.PAID ? "Заявка оплачена" : "Заявка отменена", null, session.userId);
 
   revalidatePath("/payment-requests");
   revalidatePath(`/payment-requests/${id}`);
@@ -177,10 +181,14 @@ async function decideStep(id: string, decision: ApprovalDecision, formData: Form
 
   const isAdmin = hasPermission(session, PERMISSIONS.ADMIN_FULL);
   let stepOrder: number | null = null;
+  // A deputy decides for the approver they stand in for (the decision records both).
+  let onBehalfOfId: string | null = null;
 
   if (!request.route) {
     if (!isAdmin && !hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE)) {
-      fail("Недостаточно прав для согласования этой заявки");
+      const deputy = (await currentDeciders(id)).find((d) => d.userId === session.userId && d.onBehalfOfId);
+      if (!deputy) fail("Недостаточно прав для согласования этой заявки");
+      onBehalfOfId = deputy!.onBehalfOfId;
     }
   } else {
     stepOrder = request.currentStep;
@@ -196,12 +204,11 @@ async function decideStep(id: string, decision: ApprovalDecision, formData: Form
       request.currentStep,
     );
     if (!isAdmin) {
-      const hasRole = requiredRoleId
-        ? await prisma.userRole.findFirst({ where: { userId: session.userId, roleId: requiredRoleId } })
-        : null;
-      if (!hasRole) {
-        fail("Вы не назначены согласующим на этом шаге маршрута");
+      const authority = requiredRoleId ? await stepAuthority(session.userId, requiredRoleId) : { allowed: false, onBehalfOfId: null };
+      if (!authority.allowed) {
+        fail("Вы не назначены согласующим на этом шаге маршрута и никого на нём сейчас не замещаете");
       }
+      onBehalfOfId = authority.onBehalfOfId;
     }
   }
 
@@ -221,7 +228,13 @@ async function decideStep(id: string, decision: ApprovalDecision, formData: Form
     );
 
   const nextStatus =
-    decision === "rejected" ? PaymentRequestStatus.REJECTED : isFinal ? PaymentRequestStatus.APPROVED : PaymentRequestStatus.PENDING_APPROVAL;
+    decision === "rejected"
+      ? PaymentRequestStatus.REJECTED
+      : decision === "returned"
+        ? PaymentRequestStatus.RETURNED
+        : isFinal
+          ? PaymentRequestStatus.APPROVED
+          : PaymentRequestStatus.PENDING_APPROVAL;
 
   // Conditional update: only if the request is still on this step, so two approvers
   // pressing the button at once cannot both decide it. The decision is written in the same transaction.
@@ -235,7 +248,7 @@ async function decideStep(id: string, decision: ApprovalDecision, formData: Form
     });
     if (moved.count === 0) return null;
     await db.paymentRequestApproval.create({
-      data: { paymentRequestId: id, approverId: session.userId, decision, stepOrder, comment },
+      data: { paymentRequestId: id, approverId: session.userId, decision, stepOrder, comment, round: request.round, onBehalfOfId },
     });
     return db.paymentRequest.findUniqueOrThrow({ where: { id } });
   });
@@ -246,10 +259,19 @@ async function decideStep(id: string, decision: ApprovalDecision, formData: Form
     userId: session.userId,
     entityType: "payment_request",
     entityId: id,
-    action: decision === "approved" ? "approve_step" : "reject_step",
+    action: decision === "approved" ? "approve_step" : decision === "returned" ? "return_for_rework" : "reject_step",
     before: before as never,
-    after: { ...updated, decisionComment: comment, decidedStep: stepOrder } as never,
+    after: { ...updated, decisionComment: comment, decidedStep: stepOrder, onBehalfOfId } as never,
   });
+
+  const note = comment ? `Комментарий: ${comment}` : null;
+  if (decision === "rejected") await notifyAuthor(id, "Заявка отклонена", note, session.userId);
+  else if (decision === "returned") await notifyAuthor(id, "Заявка возвращена на доработку", note, session.userId);
+  else if (updated.status === PaymentRequestStatus.APPROVED) await notifyAuthor(id, "Заявка согласована", note, session.userId);
+  else {
+    await notifyAuthor(id, `Заявка согласована на шаге ${stepOrder}`, note, session.userId);
+    await notifyDeciders(id, session.userId);
+  }
 
   revalidatePath("/payment-requests");
   revalidatePath(`/payment-requests/${id}`);
@@ -263,6 +285,80 @@ export async function approvePaymentRequestAction(id: string, formData: FormData
 
 export async function rejectPaymentRequestAction(id: string, formData: FormData) {
   await decideStep(id, "rejected", formData);
+}
+
+export async function returnPaymentRequestAction(id: string, formData: FormData) {
+  await decideStep(id, "returned", formData);
+}
+
+/**
+ * Доработка и повторная отправка: автор (или администратор) правит
+ * возвращённую или отклонённую заявку и отправляет её заново — начинается
+ * новый круг согласования с первого шага, маршрут подбирается под новую
+ * сумму. Прежние решения остаются в истории. Если сумма изменилась, график
+ * оплаты частями удаляется — его нужно задать заново.
+ */
+export async function resubmitPaymentRequestAction(id: string, formData: FormData) {
+  const session = await requireSession();
+  const fail = (message: string): never => redirect(`/payment-requests/${id}?error=${encodeURIComponent(message)}`);
+  const request = await prisma.paymentRequest.findUniqueOrThrow({ where: { id }, include: { parts: true } });
+  if (request.createdById !== session.userId && !hasPermission(session, PERMISSIONS.ADMIN_FULL)) fail("Дорабатывать заявку может её автор");
+  const reworkable: PaymentRequestStatus[] = [PaymentRequestStatus.RETURNED, PaymentRequestStatus.REJECTED];
+  if (!reworkable.includes(request.status)) fail("Заявку можно доработать, только если её вернули на доработку или отклонили");
+
+  const counterpartyId = String(formData.get("counterpartyId") ?? "") || null;
+  const cashFlowArticleId = String(formData.get("cashFlowArticleId") ?? "") || null;
+  const amountRaw = String(formData.get("amount") ?? "").replace(/\s/g, "").replace(",", ".");
+  const dueDateRaw = String(formData.get("dueDate") ?? "");
+  const comment = String(formData.get("comment") ?? "").trim() || null;
+  const note = String(formData.get("resubmitNote") ?? "").trim().slice(0, 1000) || null;
+  if (!/^\d+(\.\d{1,2})?$/.test(amountRaw) || Number(amountRaw) <= 0) fail("Сумма — положительное число");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDateRaw)) fail("Укажите срок оплаты");
+
+  const route = selectApprovalRoute(await loadActiveRoutes(), { amount: amountRaw, organizationId: request.organizationId });
+  const amountChanged = Number(request.amount.toString()) !== Number(amountRaw);
+  const updated = await prisma.$transaction(async (db) => {
+    const moved = await db.paymentRequest.updateMany({
+      where: { id, status: { in: reworkable } },
+      data: {
+        counterpartyId,
+        cashFlowArticleId,
+        amount: amountRaw,
+        dueDate: new Date(`${dueDateRaw}T00:00:00Z`),
+        comment,
+        status: PaymentRequestStatus.PENDING_APPROVAL,
+        routeId: route?.id ?? null,
+        currentStep: 1,
+        round: request.round + 1,
+      },
+    });
+    if (moved.count === 0) return null;
+    if (amountChanged && request.parts.length > 0) await db.paymentRequestPart.deleteMany({ where: { paymentRequestId: id } });
+    await db.paymentRequestApproval.create({
+      data: { paymentRequestId: id, approverId: session.userId, decision: "resubmitted", stepOrder: null, comment: note, round: request.round + 1 },
+    });
+    return db.paymentRequest.findUniqueOrThrow({ where: { id } });
+  });
+  if (!updated) fail("Заявку уже изменили — обновите страницу");
+
+  await logAudit({
+    userId: session.userId,
+    entityType: "payment_request",
+    entityId: id,
+    action: "resubmit",
+    before: request as never,
+    after: { ...updated, resubmitNote: note, scheduleRemoved: amountChanged && request.parts.length > 0 } as never,
+  });
+  await notifyDeciders(id, session.userId);
+
+  revalidatePath("/payment-requests");
+  revalidatePath(`/payment-requests/${id}`);
+  revalidatePath("/payment-calendar");
+  redirect(
+    `/payment-requests/${id}?notice=${encodeURIComponent(
+      `Заявка отправлена на согласование заново (круг ${request.round + 1})${amountChanged && request.parts.length > 0 ? "; сумма изменилась — график оплаты частями удалён, задайте его заново" : ""}`,
+    )}`,
+  );
 }
 
 export async function markPaymentRequestPaidAction(id: string, formData?: FormData) {

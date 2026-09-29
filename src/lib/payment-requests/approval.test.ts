@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isDelegationActive, validateDelegation } from "./delegation";
 import {
   buildApprovalTimeline,
   isFinalStep,
@@ -146,5 +147,54 @@ describe("buildApprovalTimeline", () => {
     const t = buildApprovalTimeline({ steps: [], decisions: [decision(null, "approved", 1, "Да")], currentStep: 1, status: "PAID" });
     expect(t[0]).toMatchObject({ state: "approved", decisions: [{ comment: "Да" }] });
     expect(buildApprovalTimeline({ steps: [], decisions: [], currentStep: 1, status: "CANCELLED" })[0].state).toBe("not_reached");
+  });
+});
+
+describe("return for rework", () => {
+  it("needs a comment, like a rejection", () => {
+    expect(parseDecisionComment("returned", "  ")).toEqual({ error: "Напишите, что доработать, — автор увидит это в заявке" });
+    expect(parseDecisionComment("returned", "Приложите счёт")).toEqual({ comment: "Приложите счёт" });
+  });
+
+  it("shows the step as returned and ignores the resubmission in the step timeline", () => {
+    const at = (h: number) => new Date(Date.UTC(2026, 8, 29, h));
+    const timeline = buildApprovalTimeline({
+      steps: [
+        { stepOrder: 1, roleName: "Руководитель" },
+        { stepOrder: 2, roleName: "Финансовый директор" },
+      ],
+      decisions: [
+        { stepOrder: 1, decision: "returned", approverName: "Петров", decidedAt: at(10), comment: "Уточните сумму", onBehalfOfName: "Иванов" },
+        { stepOrder: null, decision: "resubmitted", approverName: "Автор", decidedAt: at(11), comment: "Исправил" },
+      ],
+      currentStep: 1,
+      status: "RETURNED",
+    });
+    expect(timeline.map((e) => [e.stepOrder, e.state, e.decisions.length])).toEqual([
+      [1, "returned", 1],
+      [2, "not_reached", 0],
+    ]);
+    expect(timeline[0].decisions[0].onBehalfOfName).toBe("Иванов");
+  });
+});
+
+describe("delegation of approvals", () => {
+  const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d));
+
+  it("is active on the days of its period, inclusive", () => {
+    const period = { validFrom: utc(2026, 10, 1), validTo: utc(2026, 10, 14) };
+    expect(isDelegationActive(period, new Date("2026-10-01T15:00:00Z"))).toBe(true);
+    expect(isDelegationActive(period, new Date("2026-10-14T20:00:00Z"))).toBe(true);
+    expect(isDelegationActive(period, new Date("2026-10-15T00:00:00Z"))).toBe(false);
+    expect(isDelegationActive(period, new Date("2026-09-30T23:00:00Z"))).toBe(false);
+  });
+
+  it("checks the people and the dates", () => {
+    const base = { fromUserId: "a", toUserId: "b", validFrom: utc(2026, 10, 1), validTo: utc(2026, 10, 14) };
+    expect(validateDelegation(base)).toBeNull();
+    expect(validateDelegation({ ...base, toUserId: "a" })).toMatch(/другим пользователем/);
+    expect(validateDelegation({ ...base, validTo: utc(2026, 9, 30) })).toMatch(/раньше даты начала/);
+    expect(validateDelegation({ ...base, validTo: utc(2027, 11, 1) })).toMatch(/не дольше года/);
+    expect(validateDelegation({ ...base, validFrom: null })).toMatch(/даты/);
   });
 });

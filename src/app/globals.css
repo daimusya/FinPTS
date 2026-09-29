@@ -1144,3 +1144,77 @@ tbody tr:hover {
   gap: 16px;
   margin-top: 16px;
 }
+
+/* Notifications: the bell in the top bar and the list page. */
+.topbar-bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-graphite-150);
+  border-radius: var(--radius-sm);
+  color: var(--color-graphite-800);
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.topbar-bell:hover {
+  background: var(--color-graphite-50);
+}
+
+.topbar-bell__count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-orange);
+  color: var(--color-white);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.notification-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.notification__open {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-graphite-150);
+  border-radius: var(--radius-sm);
+  background: var(--color-white);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.notification__open:hover,
+.notification__open:focus-visible {
+  border-color: var(--color-orange);
+}
+
+.notification--read .notification__open {
+  background: var(--color-graphite-50);
+  color: var(--color-graphite-700);
+}
+
+.notification__title {
+  font-weight: 600;
+}
+
+.notification__body {
+  font-size: 13px;
+}
+
+.notification__time {
+  font-size: 12px;
+  color: var(--color-graphite-500);
+}
