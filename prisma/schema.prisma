@@ -505,7 +505,34 @@ model BankAccount {
 
   plannedPaymentRequests PaymentRequest[]  @relation("PaymentRequestBankAccount")
   plannedAccrualDocuments AccrualDocument[] @relation("AccrualPlannedBankAccount")
+  apiConnection BankConnection?
   @@map("bank_accounts")
+}
+
+// Подключение счёта к API банка для автоматической загрузки выписки
+// (src/lib/bank-api). provider — tbank / tochka / sber / alfa. Токены и
+// ключи — зашифрованный JSON (src/lib/crypto/secret-box, ключ из
+// AUTH_SECRET); на экран не выводятся.
+model BankConnection {
+  id                   String    @id @default(cuid())
+  bankAccountId        String    @unique
+  provider             String
+  credentialsEncrypted String
+  /// Загружать операции с этой даты (первая загрузка); дальше — с последней успешной минус 3 дня.
+  syncFrom             DateTime  @db.Date
+  isActive             Boolean   @default(true)
+  lastSyncAt           DateTime?
+  lastSuccessAt        DateTime?
+  /// ok / error
+  lastStatus           String?
+  lastMessage          String?
+  lastImported         Int?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  @@map("bank_connections")
 }
 
 model CashAccount {
