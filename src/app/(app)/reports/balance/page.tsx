@@ -268,7 +268,7 @@ export default async function BalanceReportPage({
           <Link href="/master-data/balance-articles">«Статьи баланса»</Link>. Амортизация считается по справочнику{" "}
           <Link href="/master-data/fixed-assets">«Основные средства»</Link> (строка «Накопленная амортизация»), проценты — по
           справочнику <Link href="/master-data/credit-agreements">«Займы и кредиты»</Link> (строка «Проценты к уплате»; уплату
-          процентов проводите по статье ДДС, привязанной к ней).
+          процентов проводите по статье ДДС, привязанной к ней). Дебиторка и кредиторка — с НДС, прибыль — без него; разница — строка «НДС к уплате»: НДС с продаж минус входящий НДС к вычету; уплату НДС в бюджет проводите по статье ДДС, привязанной к этой строке.
         </p>
       </div>
     </div>
@@ -277,7 +277,7 @@ export default async function BalanceReportPage({
 
 function ArticleLine({ line }: { line: BalanceArticleLine }) {
   const parts = [
-    !line.accrued.isZero() ? `начислено по реестру ${formatMoney(line.accrued)}` : null,
+    !line.accrued.isZero() ? `начислено ${formatMoney(line.accrued)}` : null,
     !line.linkedFlows.isZero() ? `по ДДС ${formatMoney(line.linkedFlows)}` : null,
     !line.entries.isZero() ? `операции ${formatMoney(line.entries)}` : null,
   ].filter(Boolean);

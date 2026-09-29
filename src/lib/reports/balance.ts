@@ -13,6 +13,7 @@ import {
   type BalanceCategory,
 } from "./balance-lines";
 import { chargesIn } from "./non-cash";
+import { lineNetAmount, loadInputVatRule } from "@/lib/accruals/vat";
 import { loadNonCashCharges, organizationFilter } from "./non-cash-load";
 import { accrualScopeWhere, bankTransactionScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
 
@@ -63,7 +64,7 @@ export async function computeManagementBalance(
   if (filters.organizationId) entryWhere.organizationId = filters.organizationId;
   else if (scope.organizationIds) entryWhere.organizationId = { in: scope.organizationIds };
 
-  const [transactions, allDocuments, entries, articles, nonCash] = await Promise.all([
+  const [transactions, allDocuments, entries, articles, nonCash, vatRule] = await Promise.all([
     prisma.bankTransaction.findMany({
       where: { AND: bankAnd },
       select: {
@@ -90,6 +91,7 @@ export async function computeManagementBalance(
     prisma.balanceEntry.findMany({ where: entryWhere, select: { balanceArticleId: true, amount: true } }),
     prisma.balanceArticle.findMany({ orderBy: { name: "asc" } }),
     loadNonCashCharges(asOfDate, organizationFilter(filters.organizationId, scope.organizationIds)),
+    loadInputVatRule(),
   ]);
 
   let cash = toDecimal(0);
@@ -143,11 +145,18 @@ export async function computeManagementBalance(
     OTHER_EXPENSE: toDecimal(0),
     TAX: toDecimal(0),
   };
+  // Profit without VAT; the VAT itself is owed to the budget — the «НДС к уплате» line.
+  let outputVat = toDecimal(0);
+  let deductibleVat = toDecimal(0);
   for (const doc of allDocuments) {
+    const deductible = vatRule(doc.organizationId, doc.date);
     for (const line of doc.lines) {
+      const vat = line.vatAmount ? toDecimal(line.vatAmount) : toDecimal(0);
+      if (doc.direction === "INCOME") outputVat = outputVat.plus(vat);
+      else if (deductible) deductibleVat = deductibleVat.plus(vat);
       if (!line.pnlArticle) continue;
       const type = line.pnlArticle.type as PnlType;
-      byType[type] = byType[type].plus(toDecimal(line.amount));
+      byType[type] = byType[type].plus(lineNetAmount(line, doc.direction, deductible));
     }
   }
   // Depreciation and interest accrued by the date: expenses in the P&L, and lines in the balance.
@@ -162,6 +171,7 @@ export async function computeManagementBalance(
   const accruedBySystemCode = new Map<string, Decimal>([
     ["accumulated_depreciation", accumulatedDepreciation.negated()],
     ["interest_payable", accruedInterest],
+    ["vat_payable", outputVat.minus(deductibleVat)],
   ]);
 
   const pnlTotals = derivePnlTotals({

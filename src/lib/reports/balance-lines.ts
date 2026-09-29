@@ -19,11 +19,11 @@ export const DERIVED_SYSTEM_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Строки начислений без документов (src/lib/reports/non-cash.ts): сумма —
- * начисленное по реестрам плюс балансовые операции и привязанные статьи ДДС
- * (остаток на начало учёта, уплата процентов, списание при выбытии).
+ * Строки начислений (src/lib/reports/non-cash.ts, НДС из документов): сумма —
+ * начисленное плюс балансовые операции и привязанные статьи ДДС (остаток на
+ * начало учёта, уплата процентов и НДС, списание при выбытии).
  */
-export const ACCRUED_SYSTEM_CODES: ReadonlySet<string> = new Set(["accumulated_depreciation", "interest_payable"]);
+export const ACCRUED_SYSTEM_CODES: ReadonlySet<string> = new Set(["accumulated_depreciation", "interest_payable", "vat_payable"]);
 
 export function acceptsManualEntries(systemCode: string | null): boolean {
   return !systemCode || !DERIVED_SYSTEM_CODES.has(systemCode);

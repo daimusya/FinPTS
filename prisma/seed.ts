@@ -91,6 +91,7 @@ const INITIAL_BALANCE_ARTICLES: Array<{ name: string; category: "ASSET" | "LIABI
   { name: "Налоги и зарплата к выплате", category: "LIABILITY", systemCode: "payroll_payable" },
   { name: "Займы и кредиты", category: "LIABILITY" },
   { name: "Проценты к уплате", category: "LIABILITY", systemCode: "interest_payable" },
+  { name: "НДС к уплате", category: "LIABILITY", systemCode: "vat_payable" },
   { name: "Капитал", category: "EQUITY" },
   { name: "Нераспределённая прибыль", category: "EQUITY", systemCode: "retained_earnings" },
 ];

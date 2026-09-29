@@ -3,6 +3,7 @@ import Decimal from "decimal.js";
 import { prisma } from "@/lib/db";
 import { sumMoney, toDecimal } from "@/lib/money";
 import { enqueueOutboxEvent } from "./outbox";
+import { lineNetAmount, loadInputVatRule } from "@/lib/accruals/vat";
 
 export interface ProjectResultDocument {
   direction: "INCOME" | "EXPENSE";
@@ -10,8 +11,8 @@ export interface ProjectResultDocument {
   total: Decimal;
   /** Сопоставленные оплаты по документу. */
   allocated: Decimal;
-  /** Строки документа по этому проекту: сумма и тип статьи ОПиУ. */
-  projectLines: Array<{ amount: Decimal; pnlType: string | null }>;
+  /** Строки документа по этому проекту: сумма с НДС (для доли в оплатах), без НДС (результат) и тип статьи ОПиУ. */
+  projectLines: Array<{ amount: Decimal; net?: Decimal; pnlType: string | null }>;
 }
 
 export interface ProjectResult {
@@ -56,10 +57,12 @@ export function computeProjectResult(documents: ProjectResultDocument[]): Projec
     const projectAmount = sumMoney(doc.projectLines.map((l) => l.amount));
     if (projectAmount.isZero()) continue;
     for (const line of doc.projectLines) {
-      if (line.pnlType === "REVENUE") revenue = revenue.plus(line.amount);
-      else if (line.pnlType === "OTHER_INCOME") otherIncome = otherIncome.plus(line.amount);
-      else if (line.pnlType === "DIRECT_VARIABLE" || line.pnlType === "DIRECT_FIXED") directCosts = directCosts.plus(line.amount);
-      else if (line.pnlType) otherCosts = otherCosts.plus(line.amount);
+      // The result is without VAT; the money (paid, outstanding) is with it.
+      const net = line.net ?? line.amount;
+      if (line.pnlType === "REVENUE") revenue = revenue.plus(net);
+      else if (line.pnlType === "OTHER_INCOME") otherIncome = otherIncome.plus(net);
+      else if (line.pnlType === "DIRECT_VARIABLE" || line.pnlType === "DIRECT_FIXED") directCosts = directCosts.plus(net);
+      else if (line.pnlType) otherCosts = otherCosts.plus(net);
     }
     const share = doc.total.isZero() ? toDecimal(0) : projectAmount.dividedBy(doc.total);
     const paid = Decimal.min(doc.allocated, doc.total).times(share);
@@ -92,6 +95,7 @@ export function computeProjectResult(documents: ProjectResultDocument[]): Projec
 }
 
 export async function loadProjectResult(projectId: string): Promise<ProjectResult> {
+  const vatRule = await loadInputVatRule();
   const docs = await prisma.accrualDocument.findMany({
     where: { status: "POSTED", lines: { some: { projectId } } },
     include: {
@@ -106,7 +110,11 @@ export async function loadProjectResult(projectId: string): Promise<ProjectResul
       allocated: sumMoney(d.allocations.map((a) => a.amount)),
       projectLines: d.lines
         .filter((l) => l.projectId === projectId)
-        .map((l) => ({ amount: toDecimal(l.amount), pnlType: l.pnlArticle?.type ?? null })),
+        .map((l) => ({
+          amount: toDecimal(l.amount),
+          net: lineNetAmount(l, d.direction, vatRule(d.organizationId, d.date)),
+          pnlType: l.pnlArticle?.type ?? null,
+        })),
     })),
   );
 }

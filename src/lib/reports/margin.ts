@@ -5,6 +5,7 @@ import type { ReportFilters } from "./filters";
 import type { ReportPeriod } from "./period";
 import { derivePnlTotals, type PnlType } from "./pnl";
 import { accrualScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
+import { lineNetAmount, loadInputVatRule, type InputVatRule } from "@/lib/accruals/vat";
 
 /**
  * Точка безубыточности: выручка, при которой операционная прибыль равна нулю.
@@ -100,6 +101,7 @@ async function aggregateByDimension(
   scope: AccessScope,
   totalIndirect: Decimal,
   driver: IndirectDriver,
+  vatRule: InputVatRule,
 ): Promise<DimensionMarginRow[]> {
   const documents = await prisma.accrualDocument.findMany({
     where: {
@@ -152,7 +154,7 @@ async function aggregateByDimension(
           operatingProfit: toDecimal(0),
           operatingMarginPct: null,
         } as DimensionMarginRow);
-      const amount = toDecimal(line.amount);
+      const amount = lineNetAmount(line, doc.direction, vatRule(doc.organizationId, doc.date));
       if (type === "REVENUE") row.revenue = row.revenue.plus(amount);
       else row.directCost = row.directCost.plus(amount);
       map.set(key, row);
@@ -197,6 +199,7 @@ export async function computeMarginReport(
   scope: AccessScope = UNRESTRICTED_SCOPE,
   driver: IndirectDriver = "revenue",
 ): Promise<MarginReport> {
+  const vatRule = await loadInputVatRule();
   const documents = await prisma.accrualDocument.findMany({
     where: {
       AND: [
@@ -232,7 +235,7 @@ export async function computeMarginReport(
     for (const line of doc.lines) {
       if (!line.pnlArticle) continue;
       const type = line.pnlArticle.type as PnlType;
-      byType[type] = byType[type].plus(toDecimal(line.amount));
+      byType[type] = byType[type].plus(lineNetAmount(line, doc.direction, vatRule(doc.organizationId, doc.date)));
     }
   }
 
@@ -251,9 +254,9 @@ export async function computeMarginReport(
   const marginOfSafetyPct = computeMarginOfSafety(totals.revenue, breakEvenRevenue);
 
   const [byProject, byProductService, byCounterparty] = await Promise.all([
-    aggregateByDimension(period, filters, "project", scope, totals.indirect, driver),
-    aggregateByDimension(period, filters, "productService", scope, totals.indirect, driver),
-    aggregateByDimension(period, filters, "counterparty", scope, totals.indirect, driver),
+    aggregateByDimension(period, filters, "project", scope, totals.indirect, driver, vatRule),
+    aggregateByDimension(period, filters, "productService", scope, totals.indirect, driver, vatRule),
+    aggregateByDimension(period, filters, "counterparty", scope, totals.indirect, driver, vatRule),
   ]);
 
   return {

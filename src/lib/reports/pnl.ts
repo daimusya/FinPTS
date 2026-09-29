@@ -7,6 +7,7 @@ import type { ReportPeriod } from "./period";
 import { accrualScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
 import { chargesIn } from "./non-cash";
 import { loadNonCashCharges, organizationFilter } from "./non-cash-load";
+import { lineNetAmount, loadInputVatRule } from "@/lib/accruals/vat";
 
 export const PNL_TYPE_ORDER = [
   "REVENUE",
@@ -83,6 +84,7 @@ export async function computePnlReport(
   filters: ReportFilters,
   scope: AccessScope = UNRESTRICTED_SCOPE,
 ): Promise<PnlReport> {
+  const vatRule = await loadInputVatRule();
   const documents = await prisma.accrualDocument.findMany({
     where: buildWhere(period, filters, scope),
     include: {
@@ -130,7 +132,8 @@ export async function computePnlReport(
         amount: toDecimal(0),
         documentIds: [],
       };
-      row.amount = row.amount.plus(toDecimal(line.amount));
+      // Without VAT: the line amount includes it (see lineNetAmount).
+      row.amount = row.amount.plus(lineNetAmount(line, doc.direction, vatRule(doc.organizationId, doc.date)));
       if (!row.documentIds.includes(doc.id)) row.documentIds.push(doc.id);
       map.set(key, row);
     }
