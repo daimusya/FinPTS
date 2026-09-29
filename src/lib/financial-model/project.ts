@@ -3,7 +3,17 @@ import { toDecimal } from "@/lib/money";
 import { computeBreakEven, computeMarginOfSafety } from "@/lib/reports/margin";
 import type { DriverCode } from "./drivers";
 import { loanSchedule, shiftByLag, type LoanInput, type LoanMonth } from "./cash-timing";
-import { ipContributionSchedule, taxSchedule, type IpContributionParams, type TaxRateInput, type TaxRegime } from "./taxes";
+import {
+  ipContributionOpening,
+  ipContributionSchedule,
+  taxSchedule,
+  vatSchedule,
+  type IpContributionParams,
+  type TaxRateInput,
+  type TaxRegime,
+  type VatParams,
+  type YearOpening,
+} from "./taxes";
 
 export interface ScenarioValueRow {
   year: number;
@@ -98,6 +108,12 @@ export interface MonthProjection {
   ipContribution: Decimal;
   ipContributionPaid: Decimal;
   ipContributionPayableEnd: Decimal;
+  /** НДС: получен от клиентов, уплачен поставщикам, начислен к уплате, уплачен в бюджет, к уплате на конец месяца. */
+  vatReceived: Decimal;
+  vatPaidToSuppliers: Decimal;
+  vatAccrued: Decimal;
+  vatPaid: Decimal;
+  vatPayableEnd: Decimal;
   /** Деньги от клиентов с учётом отсрочки оплаты. */
   collections: Decimal;
   /** Оплата переменных расходов и комиссии посредников с учётом отсрочки. */
@@ -141,6 +157,10 @@ export interface ScenarioCashExtras {
    * месяце прогноза численность больше нуля — тогда не больше 50 % налога.
    */
   taxReduction?: { employeeInsuranceShare: Decimal; registeredEmployees: boolean } | null;
+  /** Факт с 1 января до начала прогноза — налог и взносы нарастающим итогом за весь год. */
+  yearOpening?: YearOpening | null;
+  /** НДС (ставка по годам); null — не считается. */
+  vat?: VatParams | null;
 }
 
 export interface DueAmount {
@@ -330,6 +350,11 @@ export function projectScenario(
       ipContribution: zero,
       ipContributionPaid: zero,
       ipContributionPayableEnd: zero,
+      vatReceived: zero,
+      vatPaidToSuppliers: zero,
+      vatAccrued: zero,
+      vatPaid: zero,
+      vatPayableEnd: zero,
       collections: zero,
       supplierPayments: zero,
       openingReceivableCollected: zero,
@@ -425,8 +450,31 @@ function applyCashTiming(
     expenses: supplierPayments[i].plus(payableDue[i]).plus(r.fixedCosts).plus(r.payrollCost).plus(loanMonths[i].interest),
     profit: r.operatingProfit.minus(loanMonths[i].interest),
   }));
-  const contributions = extras.ipContribution ? ipContributionSchedule(extras.ipContribution, taxBase) : null;
+  const opening = extras.yearOpening ?? null;
+  const contributions = extras.ipContribution ? ipContributionSchedule(extras.ipContribution, taxBase, opening) : null;
   const reduction = extras.taxReduction;
+  // Own contributions for the months before the forecast also reduce USN on income for the year.
+  const ownBefore = opening && extras.ipContribution ? ipContributionOpening(extras.ipContribution, opening) : null;
+  const taxOpening = opening
+    ? {
+        ...opening,
+        deductibleContributions: reduction && ownBefore ? ownBefore.fixed.plus(ownBefore.income) : opening.deductibleContributions,
+        hasEmployees: reduction ? reduction.registeredEmployees || Boolean(opening.hasEmployees) : opening.hasEmployees,
+      }
+    : null;
+  const vat = extras.vat
+    ? vatSchedule(
+        extras.vat,
+        results.map((r, i) => ({
+          year: r.year,
+          month: r.month,
+          revenue: r.revenue,
+          purchases: r.variableCosts.plus(r.intermediaryCommission),
+          collections: collections[i],
+          supplierPayments: supplierPayments[i],
+        })),
+      )
+    : null;
   const taxes = taxSchedule(
     extras.tax?.regime ?? "none",
     extras.tax?.ratePct ?? zero,
@@ -441,6 +489,7 @@ function applyCashTiming(
         hasEmployees: reduction ? reduction.registeredEmployees || results[i].totalHeadcount > 0 : undefined,
       };
     }),
+    taxOpening,
   );
   results.forEach((r, i) => {
     const { drawdown, interest, principal } = loanMonths[i];
@@ -450,6 +499,7 @@ function applyCashTiming(
     const openingPayablePaid = payableDue[i];
     const tax = taxes[i];
     const contribution = contributions?.[i] ?? { accrued: zero, paid: zero, payableEnd: zero };
+    const vatMonth = vat?.[i] ?? { received: zero, paidToSuppliers: zero, accrued: zero, paid: zero, payableEnd: zero };
     receivable = receivable.plus(r.revenue).minus(collections[i]).minus(openingReceivableCollected);
     payable = payable.plus(r.variableCosts).plus(r.intermediaryCommission).minus(supplierPayments[i]).minus(openingPayablePaid);
 
@@ -465,7 +515,10 @@ function applyCashTiming(
       .minus(interest)
       .minus(principal)
       .minus(tax.paid)
-      .minus(contribution.paid);
+      .minus(contribution.paid)
+      .plus(vatMonth.received)
+      .minus(vatMonth.paidToSuppliers)
+      .minus(vatMonth.paid);
 
     r.collections = collections[i];
     r.supplierPayments = supplierPayments[i];
@@ -485,6 +538,11 @@ function applyCashTiming(
     r.ipContribution = contribution.accrued;
     r.ipContributionPaid = contribution.paid;
     r.ipContributionPayableEnd = contribution.payableEnd;
+    r.vatReceived = vatMonth.received;
+    r.vatPaidToSuppliers = vatMonth.paidToSuppliers;
+    r.vatAccrued = vatMonth.accrued;
+    r.vatPaid = vatMonth.paid;
+    r.vatPayableEnd = vatMonth.payableEnd;
     r.receivableEnd = receivable;
     r.payableEnd = payable;
     r.cashBalance = cash;

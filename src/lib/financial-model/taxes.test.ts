@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import Decimal from "decimal.js";
-import { ipContributionSchedule, taxRate, taxSchedule, type TaxMonthInput } from "./taxes";
+import { activeShare, ipContributionSchedule, taxRate, taxSchedule, vatSchedule, type TaxMonthInput } from "./taxes";
 
 const d = (v: number) => new Decimal(v);
 const month = (year: number, m: number, income: number, expenses = 0, profit = 0): TaxMonthInput => ({
@@ -127,5 +127,96 @@ describe("taxSchedule — USN on income reduced by insurance contributions", () 
   it("other regimes ignore the reduction", () => {
     const s = taxSchedule("usn_income_expense", d(15), withContributions(null));
     expect(nums(s.map((x) => x.reduction))).toEqual([0, 0, 0, 0]);
+  });
+});
+
+describe("sole proprietor's contributions for an incomplete year", () => {
+  const utc = (y: number, m: number, day: number) => new Date(Date.UTC(y, m - 1, day));
+  const params = (from: Date | null, to: Date | null) => ({
+    base: "income" as const,
+    forYear: () => ({ fixed: d(57390), income: { ratePct: d(1), threshold: d(300000), max: d(321818) } }),
+    activeFrom: from,
+    activeTo: to,
+  });
+
+  it("registered on 16 March: full months after it plus the days of March", () => {
+    expect(activeShare(2026, 3, utc(2026, 3, 16), null).toNumber()).toBeCloseTo(16 / 31, 10);
+    const s = ipContributionSchedule(params(utc(2026, 3, 16), null), Array.from({ length: 12 }, (_, i) => month(2026, i + 1, 0)));
+    expect(nums(s.slice(0, 2).map((x) => x.accrued))).toEqual([0, 0]);
+    // 57 390 × (9 + 16/31) / 12
+    expect(s.reduce((a, x) => a.plus(x.accrued), d(0)).toNumber()).toBe(45510.89);
+    expect(s[11].paid.toNumber()).toBe(45510.89);
+  });
+
+  it("closed on 10 June: contributions until then, everything for the year within 15 days", () => {
+    const s = ipContributionSchedule(params(null, utc(2026, 6, 10)), Array.from({ length: 12 }, (_, i) => month(2026, i + 1, 100000)));
+    // Fixed: 57 390 × (5 + 10/30) / 12; 1 % of (600 000 − 300 000) — income after June is not counted.
+    expect(s.reduce((a, x) => a.plus(x.accrued), d(0)).toNumber()).toBe(25506.67 + 3000);
+    expect(nums(s.map((x) => x.paid))).toEqual([0, 0, 0, 0, 0, 28506.67, 0, 0, 0, 0, 0, 0]);
+    expect(nums(s.slice(6).map((x) => x.accrued))).toEqual([0, 0, 0, 0, 0, 0]);
+  });
+});
+
+describe("the actual figures since 1 January before the forecast", () => {
+  it("the tax counts the whole year; the months before the forecast are settled outside it", () => {
+    const opening = { year: 2027, months: 4, income: d(400000), expenses: d(0), profit: d(0) };
+    const s = taxSchedule("usn_income", d(6), [5, 6, 7].map((m) => month(2027, m, 100000)), opening);
+    expect(nums(s.map((x) => x.accrued))).toEqual([6000, 6000, 6000]);
+    expect(nums(s.map((x) => x.paid))).toEqual([0, 0, 12000]); // July: Q2 only
+  });
+
+  it("the minimum tax and the 300 000 threshold count the income before the forecast", () => {
+    const opening = { year: 2026, months: 11, income: d(1100000), expenses: d(1100000), profit: d(0) };
+    expect(taxSchedule("usn_income_expense", d(15), [month(2026, 12, 100000, 100000)], opening)[0].accrued.toNumber()).toBe(12000);
+    const contributions = ipContributionSchedule(
+      { base: "income", forYear: () => ({ fixed: null, income: { ratePct: d(1), threshold: d(300000), max: null } }) },
+      [month(2026, 4, 100000)],
+      { year: 2026, months: 3, income: d(250000), expenses: d(0), profit: d(0) },
+    );
+    expect(contributions[0].accrued.toNumber()).toBe(500);
+  });
+});
+
+describe("vatSchedule", () => {
+  const vatMonth = (m: number, revenue: number, purchases: number) => ({
+    year: 2027,
+    month: m,
+    revenue: d(revenue),
+    purchases: d(purchases),
+    collections: d(revenue),
+    supplierPayments: d(purchases),
+  });
+
+  it("22 %: charged on revenue minus the suppliers' VAT, paid in thirds in the three months after the quarter", () => {
+    const s = vatSchedule({ rateForYear: () => d(22) }, [1, 2, 3, 4, 5, 6].map((m) => vatMonth(m, m <= 3 ? 100000 : 0, m <= 3 ? 30000 : 0)));
+    expect(nums(s.slice(0, 3).map((x) => x.received))).toEqual([22000, 22000, 22000]);
+    expect(nums(s.slice(0, 3).map((x) => x.paidToSuppliers))).toEqual([6600, 6600, 6600]);
+    expect(nums(s.slice(0, 3).map((x) => x.accrued))).toEqual([15400, 15400, 15400]);
+    expect(nums(s.map((x) => x.paid))).toEqual([0, 0, 0, 15400, 15400, 15400]);
+    expect(s[5].payableEnd.toNumber()).toBe(0);
+  });
+
+  it("5 % on USN: no deduction; a deduction above the charge moves to the next quarter", () => {
+    const five = vatSchedule({ rateForYear: () => d(5) }, [vatMonth(1, 100000, 30000)]);
+    expect([five[0].accrued.toNumber(), five[0].paidToSuppliers.toNumber()]).toEqual([5000, 0]);
+    const carry = vatSchedule(
+      { rateForYear: () => d(22) },
+      [1, 2, 3, 4, 5, 6, 7, 8, 9].map((m) => vatMonth(m, m === 4 || m === 5 ? 100000 : 0, m === 1 ? 100000 : 0)),
+    );
+    // Q1: −22 000 carried; Q2: 44 000 − 22 000 = 22 000 in thirds.
+    expect(nums(carry.slice(6).map((x) => x.paid))).toEqual([7333.33, 7333.33, 7333.34]);
+  });
+});
+
+describe("contributions owed for the months before the forecast", () => {
+  it("start in the balance to pay, so paying the whole year in December leaves no negative debt", () => {
+    const s = ipContributionSchedule(
+      { base: "income", forYear: () => ({ fixed: d(12000), income: null }) },
+      [10, 11, 12].map((m) => month(2026, m, 0)),
+      { year: 2026, months: 9, income: d(0), expenses: d(0), profit: d(0) },
+    );
+    expect(nums(s.map((x) => x.accrued))).toEqual([1000, 1000, 1000]);
+    expect(nums(s.map((x) => x.payableEnd))).toEqual([10000, 11000, 0]);
+    expect(s[2].paid.toNumber()).toBe(12000);
   });
 });

@@ -195,12 +195,19 @@ export async function saveScenarioTaxAction(scenarioId: string, formData: FormDa
     taxRatePct = rate.toFixed(2);
   }
 
-  const before = await prisma.financialScenario.findUnique({ where: { id: scenarioId }, select: { taxRegime: true, taxRatePct: true, taxOrganizationId: true } });
+  const vatRaw = String(formData.get("vatRatePct") ?? "").replace(/[\s ]/g, "").replace(",", ".");
+  let vatRatePct: string | null = null;
+  if (vatRaw !== "") {
+    if (!/^\d+(\.\d+)?$/.test(vatRaw) || Number(vatRaw) > 100) redirect(scenarioUrl(scenarioId, formData, "Ставка НДС — от 0 до 100% или пусто"));
+    vatRatePct = Number(vatRaw).toFixed(2);
+  }
+
+  const before = await prisma.financialScenario.findUnique({ where: { id: scenarioId }, select: { taxRegime: true, taxRatePct: true, taxOrganizationId: true, vatRatePct: true } });
   if (!before) redirect("/financial-model");
   const updated = await prisma.financialScenario.update({
     where: { id: scenarioId },
-    data: { taxRegime: regime, taxRatePct, taxOrganizationId },
-    select: { taxRegime: true, taxRatePct: true, taxOrganizationId: true },
+    data: { taxRegime: regime, taxRatePct, taxOrganizationId, vatRatePct },
+    select: { taxRegime: true, taxRatePct: true, taxOrganizationId: true, vatRatePct: true },
   });
   await logAudit({
     userId: session.userId,

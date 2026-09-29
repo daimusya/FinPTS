@@ -23,7 +23,7 @@ import { computeManagementBalance } from "@/lib/reports/balance";
 import { computePayrollSummary, type PayrollSummaryLine } from "@/lib/payroll/summary";
 import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
 import { loadNewServices } from "@/lib/financial-model/new-services";
-import { loadLoans, loadOpeningBalances, loadScenarioTax } from "@/lib/financial-model/loans";
+import { loadLoans, loadOpeningBalances, loadScenarioTax, loadYearOpening } from "@/lib/financial-model/loans";
 import { TAX_REGIME_LABELS } from "@/lib/financial-model/taxes";
 import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
 import { MONTH_NAMES_SHORT } from "@/lib/financial-model/drivers";
@@ -286,12 +286,15 @@ export async function GET(request: NextRequest) {
     const loans = (await loadLoans([scenarioId])).get(scenarioId) ?? [];
     const opening = await loadOpeningBalances(scope);
     const tax = await loadScenarioTax(scenario, startYear);
+    const yearOpening = tax.regime !== "none" || tax.ipContribution ? await loadYearOpening(startYear, startMonth, tax.organizationId, scope) : null;
     const projection = projectScenario(startYear, startMonth, SCENARIO_HORIZON_MONTHS, rows_, startingCash, newServices, {
       ...opening,
       loans,
       tax,
       ipContribution: tax.ipContribution,
       taxReduction: tax.reduction,
+      yearOpening,
+      vat: tax.vat,
     });
     const revenueRows: Array<Array<string | number>> =
       newServices.length > 0
@@ -347,12 +350,17 @@ export async function GET(request: NextRequest) {
       ["Погашение основного долга", ...projection.map((p) => toNum(p.loanPrincipal))],
       ["Прочие платежи по кредитам/лизингу", ...projection.map((p) => toNum(p.manualLoanPayments))],
       ["Уплата налога", ...projection.map((p) => toNum(p.taxPaid))],
+      ["НДС, полученный от клиентов", ...projection.map((p) => toNum(p.vatReceived))],
+      ["НДС, уплаченный поставщикам", ...projection.map((p) => toNum(p.vatPaidToSuppliers))],
+      ["НДС к уплате — начислено", ...projection.map((p) => toNum(p.vatAccrued))],
+      ["Уплата НДС", ...projection.map((p) => toNum(p.vatPaid))],
       ["Уплата взносов ИП за себя", ...projection.map((p) => toNum(p.ipContributionPaid))],
       ["Остаток денег", ...projection.map((p) => toNum(p.cashBalance))],
       ["Дебиторка на конец месяца", ...projection.map((p) => toNum(p.receivableEnd))],
       ["Кредиторка на конец месяца", ...projection.map((p) => toNum(p.payableEnd))],
       ["Долг по кредитам на конец месяца", ...projection.map((p) => toNum(p.loanDebt))],
       ["Налог к уплате на конец месяца", ...projection.map((p) => toNum(p.taxPayableEnd))],
+      ["НДС к уплате на конец месяца", ...projection.map((p) => toNum(p.vatPayableEnd))],
       ["Взносы ИП к уплате на конец месяца", ...projection.map((p) => toNum(p.ipContributionPayableEnd))],
     ];
     sheets = [{ name: "Прогноз", rows }];

@@ -198,7 +198,14 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
         options: TAX_SYSTEM_OPTIONS,
         defaultValue: "osn",
       },
+      { name: "registrationDate", label: "Дата регистрации (для взносов ИП за неполный год)", type: "date" },
+      { name: "closureDate", label: "Дата прекращения деятельности", type: "date" },
     ],
+    validateRecord: async (data) => {
+      const from = data.registrationDate instanceof Date ? data.registrationDate : null;
+      const to = data.closureDate instanceof Date ? data.closureDate : null;
+      return from && to && to < from ? "Дата прекращения деятельности не может быть раньше даты регистрации" : null;
+    },
   },
   "bank-accounts": {
     slug: "bank-accounts",

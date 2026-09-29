@@ -135,6 +135,9 @@ model Organization {
   districtCoefficient Decimal? @db.Decimal(5, 3)
   /// Система налогообложения: osn / usn_income / usn_income_expense / ausn_income / ausn_income_expense / eshn / psn (src/lib/organizations/taxes.ts).
   taxSystem     String           @default("osn")
+  /// Регистрация и прекращение деятельности: взносы ИП за неполный год, начало и конец начислений в прогнозе.
+  registrationDate DateTime?     @db.Date
+  closureDate      DateTime?     @db.Date
   isArchived    Boolean          @default(false)
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
@@ -1305,6 +1308,8 @@ model FinancialScenario {
   /// Налог в прогнозе: none / usn_income / usn_income_expense / profit (см. src/lib/financial-model/taxes.ts); ставка — пусто = стандартная.
   taxRegime   String   @default("none")
   taxRatePct  Decimal? @db.Decimal(5, 2)
+  /// НДС в прогнозе при своём режиме (пусто — не считается); при «как у организации» — ставка НДС из карточки.
+  vatRatePct  Decimal? @db.Decimal(5, 2)
   /// Для taxRegime = organization: система и ставки берутся из карточки этой организации.
   taxOrganizationId String?
   taxOrganization   Organization? @relation(fields: [taxOrganizationId], references: [id], onDelete: SetNull)

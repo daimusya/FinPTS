@@ -6,7 +6,7 @@ import { SCENARIO_TYPE_LABELS } from "@/lib/financial-model/drivers";
 import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
 import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
 import { loadNewServices } from "@/lib/financial-model/new-services";
-import { loadLoans, loadOpeningBalances, loadScenarioTax } from "@/lib/financial-model/loans";
+import { loadLoans, loadOpeningBalances, loadScenarioTax, loadYearOpening } from "@/lib/financial-model/loans";
 import { getAccessScope } from "@/lib/access-scope";
 
 const HORIZON_MONTHS = 12;
@@ -50,6 +50,9 @@ export default async function CompareScenariosPage({
     loadLoans(scenarios.map((s) => s.id)),
     Promise.all(scenarios.map((s) => loadScenarioTax(s, startYear))),
   ]);
+  const yearOpenings = await Promise.all(
+    taxes.map((t) => (t.regime !== "none" || t.ipContribution ? loadYearOpening(startYear, startMonth, t.organizationId, scope) : null)),
+  );
 
   const results = scenarios.map((s, index) => {
     const rows: ScenarioValueRow[] = s.values.map((v) => ({
@@ -65,6 +68,8 @@ export default async function CompareScenariosPage({
       tax: taxes[index],
       ipContribution: taxes[index].ipContribution,
       taxReduction: taxes[index].reduction,
+      yearOpening: yearOpenings[index],
+      vat: taxes[index].vat,
     });
     return {
       scenario: s,

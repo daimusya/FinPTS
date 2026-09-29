@@ -67,6 +67,17 @@ export interface TaxMonthInput {
   hasEmployees?: boolean;
 }
 
+/**
+ * Факт с 1 января до начала прогноза (год первого месяца прогноза): налог,
+ * порог взносов и минимальный налог считаются нарастающим итогом за весь
+ * год. Налог за эти месяцы считается уплаченным вне прогноза — в прогнозе
+ * начисляется и платится только прирост.
+ */
+export interface YearOpening extends Omit<TaxMonthInput, "month"> {
+  /** Сколько месяцев года прошло до начала прогноза (1–11). */
+  months: number;
+}
+
 export interface TaxMonth {
   /** Начислено в месяце (может быть отрицательным, если убыток уменьшил налог с начала года). */
   accrued: Decimal;
@@ -88,20 +99,21 @@ export function taxRate(regime: TaxRegime, customPct: Decimal | number | string 
 /** Ставка, % — одна на весь прогноз или своя на каждый год (ставки меняются с начала года). */
 export type TaxRateInput = Decimal | ((year: number) => Decimal);
 
-export function taxSchedule(regime: TaxRegime, ratePct: TaxRateInput, months: TaxMonthInput[]): TaxMonth[] {
+type TaxYear = {
+  income: Decimal;
+  base: Decimal;
+  tax: Decimal;
+  paid: Decimal;
+  byMonth: Decimal[];
+  contributions: Decimal;
+  reduction: Decimal;
+  employees: boolean;
+};
+
+export function taxSchedule(regime: TaxRegime, ratePct: TaxRateInput, months: TaxMonthInput[], opening?: YearOpening | null): TaxMonth[] {
   if (regime === "none") return months.map(() => ({ accrued: zero, paid: zero, payableEnd: zero, reduction: zero }));
   const rateOf = (y: number) => (typeof ratePct === "function" ? ratePct(y) : ratePct).dividedBy(100);
-  type YearState = {
-    income: Decimal;
-    base: Decimal;
-    tax: Decimal;
-    paid: Decimal;
-    byMonth: Decimal[];
-    contributions: Decimal;
-    reduction: Decimal;
-    employees: boolean;
-  };
-  const year = new Map<number, YearState>();
+  const year = new Map<number, TaxYear>();
   const yearOf = (y: number) => {
     let entry = year.get(y);
     if (!entry) {
@@ -112,19 +124,8 @@ export function taxSchedule(regime: TaxRegime, ratePct: TaxRateInput, months: Ta
   };
   const incomeOnly = regime === "usn_income" || regime === "ausn_income";
 
-  let payable = zero;
-  return months.map((m) => {
-    // Payment first: it settles an earlier period, whose figures are already known.
-    let paid = zero;
-    const settled = settles(regime, m.year, m.month);
-    const sy = settled ? year.get(settled.year) : undefined;
-    const due = settled && sy ? sy.byMonth[settled.through] : undefined;
-    if (sy && due) {
-      paid = Decimal.max(0, due.minus(sy.paid));
-      sy.paid = sy.paid.plus(paid);
-    }
-
-    const y = yearOf(m.year);
+  /** Adds a period to the year and returns the tax since the start of the year and the growth of the reduction. */
+  const accumulate = (y: TaxYear, m: Omit<TaxMonthInput, "month">, month: number) => {
     y.income = y.income.plus(m.income);
     y.base = y.base.plus(incomeOnly ? m.income : regime === "profit" ? m.profit : m.income.minus(m.expenses));
     let cumulative = round2(Decimal.max(0, y.base).times(rateOf(m.year)));
@@ -141,7 +142,33 @@ export function taxSchedule(regime: TaxRegime, ratePct: TaxRateInput, months: Ta
       cumulative = cumulative.minus(total);
     }
     const minRate = MIN_TAX_RATE[regime];
-    if (minRate && m.month === 12) cumulative = Decimal.max(cumulative, round2(y.income.times(minRate)));
+    if (minRate && month === 12) cumulative = Decimal.max(cumulative, round2(y.income.times(minRate)));
+    return { cumulative, reduction };
+  };
+
+  if (opening && months.length > 0 && opening.year === months[0].year) {
+    const y = yearOf(opening.year);
+    const { cumulative } = accumulate(y, opening, opening.months);
+    // The months before the forecast are settled outside it.
+    y.tax = cumulative;
+    y.paid = cumulative;
+    for (let k = 1; k <= opening.months; k++) y.byMonth[k] = cumulative;
+  }
+
+  let payable = zero;
+  return months.map((m) => {
+    // Payment first: it settles an earlier period, whose figures are already known.
+    let paid = zero;
+    const settled = settles(regime, m.year, m.month);
+    const sy = settled ? year.get(settled.year) : undefined;
+    const due = settled && sy ? sy.byMonth[settled.through] : undefined;
+    if (sy && due) {
+      paid = Decimal.max(0, due.minus(sy.paid));
+      sy.paid = sy.paid.plus(paid);
+    }
+
+    const y = yearOf(m.year);
+    const { cumulative, reduction } = accumulate(y, m, m.month);
     const accrued = cumulative.minus(y.tax);
     y.tax = cumulative;
     y.byMonth[m.month] = cumulative;
@@ -151,14 +178,19 @@ export function taxSchedule(regime: TaxRegime, ratePct: TaxRateInput, months: Ta
   });
 }
 
+// ---------------------------------------------------------------------------
+// Страховые взносы ИП за себя
+// ---------------------------------------------------------------------------
+
 /**
- * Взносы ИП за себя (только в прогнозе «как у организации» для ИП):
- * фиксированные — сумма года равными долями по месяцам, уплата в декабре
- * (срок — 28 декабря); с дохода свыше порога — ставка × (доход с начала
- * года − порог), не больше максимума года, нарастающим итогом, уплата в
- * июле следующего года (срок — 1 июля). Доход — как у налога: при УСН
- * «доходы» — полученные деньги, иначе полученное минус оплаченные расходы.
- * Уменьшение налога на взносы не учитывается.
+ * Взносы ИП за себя (прогноз «как у организации» для ИП): фиксированные —
+ * сумма года пропорционально дням деятельности (полные месяцы — по 1/12,
+ * месяц регистрации или прекращения — по календарным дням), уплата в
+ * декабре; с дохода свыше порога — ставка × (доход с начала года − порог),
+ * не больше максимума года, уплата в июле следующего года. При прекращении
+ * деятельности всё за этот год — в течение 15 дней после даты прекращения.
+ * Доход — как у налога: при УСН «доходы» — полученные деньги, иначе
+ * полученное минус оплаченные расходы.
  */
 export interface IpContributionParams {
   base: "income" | "income_minus_expenses";
@@ -166,38 +198,190 @@ export interface IpContributionParams {
     fixed: Decimal | null;
     income: { ratePct: Decimal; threshold: Decimal; max: Decimal | null } | null;
   };
+  /** Дата регистрации ИП (null — зарегистрирован раньше). */
+  activeFrom?: Date | null;
+  /** Дата прекращения деятельности (null — работает). */
+  activeTo?: Date | null;
 }
 
-export function ipContributionSchedule(params: IpContributionParams, months: TaxMonthInput[]): TaxMonth[] {
-  const years = new Map<number, { base: Decimal; incomeCum: Decimal; fixedAccrued: Decimal }>();
+const DAY_MS = 86_400_000;
+const utcDay = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+
+/** Доля месяца, в которую ИП вёл деятельность (0–1). */
+export function activeShare(year: number, month: number, from?: Date | null, to?: Date | null): Decimal {
+  const first = Date.UTC(year, month - 1, 1);
+  const last = Date.UTC(year, month, 0);
+  const days = (last - first) / DAY_MS + 1;
+  const start = Math.max(first, from ? utcDay(from) : first);
+  const end = Math.min(last, to ? utcDay(to) : last);
+  return end < start ? zero : new Decimal((end - start) / DAY_MS + 1).dividedBy(days);
+}
+
+/** Сколько двенадцатых года прошло к концу месяца month (с учётом дат регистрации и прекращения). */
+function yearShareThrough(params: IpContributionParams, year: number, month: number): Decimal {
+  let share = zero;
+  for (let k = 1; k <= month; k++) share = share.plus(activeShare(year, k, params.activeFrom, params.activeTo));
+  return share;
+}
+
+/** Взносы за себя за месяцы года до начала прогноза: не начисляются в прогнозе, но уплачиваются по срокам. */
+export function ipContributionOpening(params: IpContributionParams, opening: YearOpening): { fixed: Decimal; income: Decimal; base: Decimal } {
+  const settings = params.forYear(opening.year);
+  const fixed = settings.fixed ? round2(settings.fixed.times(yearShareThrough(params, opening.year, opening.months)).dividedBy(12)) : zero;
+  const base = params.base === "income" ? opening.income : opening.income.minus(opening.expenses);
+  return { fixed, income: incomeContribution(settings.income, base), base };
+}
+
+function incomeContribution(settings: { ratePct: Decimal; threshold: Decimal; max: Decimal | null } | null, base: Decimal): Decimal {
+  if (!settings) return zero;
+  const amount = round2(Decimal.max(0, base.minus(settings.threshold)).times(settings.ratePct).dividedBy(100));
+  return settings.max ? Decimal.min(amount, settings.max) : amount;
+}
+
+export function ipContributionSchedule(params: IpContributionParams, months: TaxMonthInput[], opening?: YearOpening | null): TaxMonth[] {
+  const years = new Map<number, { base: Decimal; incomeCum: Decimal; fixedCum: Decimal; fixedPaid: boolean; incomePaid: boolean }>();
+  const yearOf = (y: number) => {
+    let entry = years.get(y);
+    if (!entry) years.set(y, (entry = { base: zero, incomeCum: zero, fixedCum: zero, fixedPaid: false, incomePaid: false }));
+    return entry;
+  };
+  // Contributions for the months before the forecast are not accrued in it, but they are still owed.
   let payable = zero;
+  if (opening && months.length > 0 && opening.year === months[0].year) {
+    const before = ipContributionOpening(params, opening);
+    const y = yearOf(opening.year);
+    y.base = before.base;
+    y.incomeCum = before.income;
+    y.fixedCum = before.fixed;
+    payable = before.fixed.plus(before.income);
+  }
+  // On closure everything for that year is due within 15 days.
+  const closurePay = params.activeTo ? new Date(utcDay(params.activeTo) + 15 * DAY_MS) : null;
+  const closureIndex = closurePay ? closurePay.getUTCFullYear() * 12 + closurePay.getUTCMonth() : null;
+  const closureYear = params.activeTo?.getUTCFullYear() ?? null;
+  const closedAfter = params.activeTo ? utcDay(params.activeTo) : Infinity;
+
   return months.map((m) => {
-    const y = years.get(m.year) ?? { base: zero, incomeCum: zero, fixedAccrued: zero };
-    years.set(m.year, y);
+    const y = yearOf(m.year);
     const settings = params.forYear(m.year);
 
-    // Fixed: the amount of the year spread evenly, so twelve months add up to it exactly.
-    const fixed = settings.fixed
-      ? round2(settings.fixed.times(m.month).dividedBy(12)).minus(round2(settings.fixed.times(m.month - 1).dividedBy(12)))
-      : zero;
-    y.fixedAccrued = y.fixedAccrued.plus(fixed);
-
-    // On income above the threshold: since the start of the year, up to the annual maximum.
-    y.base = y.base.plus(params.base === "income" ? m.income : m.income.minus(m.expenses));
-    let incomeCum = zero;
-    if (settings.income) {
-      incomeCum = round2(Decimal.max(0, y.base.minus(settings.income.threshold)).times(settings.income.ratePct).dividedBy(100));
-      if (settings.income.max) incomeCum = Decimal.min(incomeCum, settings.income.max);
+    // Fixed: the share of the year worked; rounding the running total keeps the year's sum exact.
+    let fixed = zero;
+    if (settings.fixed) {
+      const cum = round2(settings.fixed.times(yearShareThrough(params, m.year, m.month)).dividedBy(12));
+      fixed = cum.minus(y.fixedCum);
+      y.fixedCum = cum;
     }
+
+    // On income above the threshold: since the start of the year, up to the annual maximum; nothing after closure.
+    if (Date.UTC(m.year, m.month - 1, 1) <= closedAfter) y.base = y.base.plus(params.base === "income" ? m.income : m.income.minus(m.expenses));
+    const incomeCum = incomeContribution(settings.income, y.base);
     const accrued = fixed.plus(incomeCum.minus(y.incomeCum));
     y.incomeCum = incomeCum;
 
-    // Fixed ones are paid for the year in December, the ones on income — in July of the next year.
-    let paid = m.month === 12 ? y.fixedAccrued : zero;
-    const previous = years.get(m.year - 1);
-    if (m.month === 7 && previous) paid = paid.plus(previous.incomeCum);
+    let paid = zero;
+    const index = m.year * 12 + m.month - 1;
+    for (const [year, state] of years) {
+      const closing = closureYear === year && closureIndex !== null;
+      const fixedDue = closing ? index === closureIndex : year === m.year && m.month === 12;
+      const incomeDue = closing ? index === closureIndex : year === m.year - 1 && m.month === 7;
+      if (fixedDue && !state.fixedPaid) {
+        paid = paid.plus(state.fixedCum);
+        state.fixedPaid = true;
+      }
+      if (incomeDue && !state.incomePaid) {
+        paid = paid.plus(state.incomeCum);
+        state.incomePaid = true;
+      }
+    }
 
     payable = payable.plus(accrued).minus(paid);
     return { accrued, paid, payableEnd: payable, reduction: zero };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// НДС
+// ---------------------------------------------------------------------------
+
+/**
+ * НДС в прогнозе. Выручка и расходы прогноза — без НДС: клиенты платят
+ * выручку плюс НДС. При общих ставках (22 %, 10 %) НДС поставщиков по
+ * переменным расходам и комиссии посредников принимается к вычету, их оплата
+ * тоже идёт с НДС; при специальных ставках УСН (5 %, 7 %) вычетов нет.
+ * НДС за квартал = с выручки − к вычету, уплата тремя равными частями в три
+ * следующих месяца (28-го); вычет больше начисленного переносится на
+ * следующий квартал. На прибыль НДС не влияет, только на деньги.
+ */
+export interface VatParams {
+  /** Ставка НДС, % на год (null — НДС нет). */
+  rateForYear: (year: number) => Decimal | null;
+}
+
+export interface VatMonthInput {
+  year: number;
+  month: number;
+  /** Выручка месяца (без НДС) — база НДС к начислению. */
+  revenue: Decimal;
+  /** Расходы с входящим НДС (без НДС): переменные расходы и комиссия. */
+  purchases: Decimal;
+  /** Поступления от клиентов по выручке прогноза (без НДС). */
+  collections: Decimal;
+  /** Оплата поставщикам (без НДС). */
+  supplierPayments: Decimal;
+}
+
+export interface VatMonth {
+  /** НДС, полученный от клиентов сверх выручки. */
+  received: Decimal;
+  /** НДС, уплаченный поставщикам сверх расходов (при вычетах). */
+  paidToSuppliers: Decimal;
+  /** Начислено к уплате в бюджет: с выручки минус вычет. */
+  accrued: Decimal;
+  /** Уплачено в бюджет. */
+  paid: Decimal;
+  payableEnd: Decimal;
+}
+
+/** Специальные ставки НДС на УСН — без вычетов. */
+export const VAT_NO_DEDUCTION_RATES = new Set(["5", "7"]);
+
+export function vatDeductible(ratePct: Decimal): boolean {
+  return !VAT_NO_DEDUCTION_RATES.has(ratePct.toString());
+}
+
+export function vatSchedule(params: VatParams, months: VatMonthInput[]): VatMonth[] {
+  const quarters = new Map<number, Decimal>();
+  let carry = zero;
+  let payable = zero;
+  return months.map((m) => {
+    const rate = params.rateForYear(m.year);
+    const r = rate ? rate.dividedBy(100) : zero;
+    const deductible = rate ? vatDeductible(rate) : false;
+    const received = round2(m.collections.times(r));
+    const paidToSuppliers = deductible ? round2(m.supplierPayments.times(r)) : zero;
+    const accrued = round2(m.revenue.times(r)).minus(deductible ? round2(m.purchases.times(r)) : zero);
+
+    // Thirds of the previous quarter's VAT in each of the three months after it.
+    const index = m.year * 12 + m.month - 1;
+    const quarterIndex = Math.floor(index / 3);
+    const monthInQuarter = index % 3;
+    const previous = quarters.get(quarterIndex - 1);
+    let paid = zero;
+    if (previous && previous.greaterThan(0)) {
+      const third = round2(previous.dividedBy(3));
+      paid = monthInQuarter === 2 ? previous.minus(third.times(2)) : third;
+    }
+    // A quarter's VAT is known at its end; a deduction above the charge moves to the next quarter.
+    const sum = (quarters.get(quarterIndex) ?? zero).plus(accrued);
+    quarters.set(quarterIndex, sum);
+    if (monthInQuarter === 2) {
+      const total = sum.plus(carry);
+      carry = Decimal.min(0, total);
+      quarters.set(quarterIndex, Decimal.max(0, total));
+    }
+
+    payable = payable.plus(accrued).minus(paid);
+    return { received, paidToSuppliers, accrued, paid, payableEnd: payable };
   });
 }

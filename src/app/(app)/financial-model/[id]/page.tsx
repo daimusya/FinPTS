@@ -20,7 +20,7 @@ import {
   saveScenarioValuesAction,
 } from "../actions";
 import { loadScenarioDepartments } from "@/lib/financial-model/scenario-departments";
-import { loadLoans, loadOpeningBalances, loadScenarioTax, MAX_LOAN_TERM_MONTHS } from "@/lib/financial-model/loans";
+import { loadLoans, loadOpeningBalances, loadScenarioTax, loadYearOpening, MAX_LOAN_TERM_MONTHS } from "@/lib/financial-model/loans";
 import { organizationScopeWhere } from "@/lib/access-scope";
 import { DEFAULT_TAX_RATES, TAX_REGIME_LABELS, TAX_REGIMES } from "@/lib/financial-model/taxes";
 import { LOAN_REPAYMENT_LABELS, type LoanRepayment } from "@/lib/financial-model/cash-timing";
@@ -108,12 +108,15 @@ export default async function ScenarioDetailPage({
   const hasContribution = Boolean(tax.ipContribution);
   // Taxes or the sole proprietor's contributions — either one brings the profit-after-tax rows.
   const taxOn = tax.regime !== "none" || hasContribution;
+  const yearOpening = taxOn ? await loadYearOpening(startYear, startMonth, tax.organizationId, scope) : null;
   const projection = projectScenario(startYear, startMonth, HORIZON_MONTHS, rows, startingCash, newServiceInputs, {
     ...opening,
     loans: loanInputs,
     tax,
     ipContribution: tax.ipContribution,
     taxReduction: tax.reduction,
+    yearOpening,
+    vat: tax.vat,
   });
   const startIndex = startYear * 12 + (startMonth - 1);
   const dueLater = (due: typeof opening.openingReceivableDue) => sumMoney(due.filter((d) => d.index > startIndex).map((d) => d.amount));
@@ -661,7 +664,11 @@ export default async function ScenarioDetailPage({
           нарастающим итогом с начала года в пределах прогноза (убыток уменьшает налог года). Уплата: УСН и налог на
           прибыль — в апреле, июле и октябре за квартал и в марте за год; ЕСХН — в июле и марте; АУСН — каждый месяц
           за предыдущий. Налог уменьшает чистую прибыль и деньги. Своя ставка не указана — стандартная. НДС, патент
-          и налоги прошлых периодов не считаются. У ИП «как у организации» считаются и взносы за себя из карточки:
+          и налоги прошлых периодов не считаются. НДС: выручка и расходы прогноза — без НДС; клиенты платят выручку плюс
+          НДС, при ставках 22% и 10% НДС поставщиков (переменные расходы и комиссия) идёт к вычету, при 5% и 7% вычетов нет;
+          НДС за квартал уплачивается тремя равными частями в следующие три месяца. На прибыль НДС не влияет. Взносы ИП за
+          неполный год — по датам регистрации и прекращения деятельности из карточки; при прекращении всё за год
+          уплачивается в течение 15 дней. У ИП «как у организации» считаются и взносы за себя из карточки:
           фиксированные — равными долями по месяцам, уплата в декабре; с дохода свыше порога — нарастающим итогом за год,
           не больше максимума, уплата в июле следующего года. При УСН «доходы» «как у организации» налог уменьшается
           на страховые взносы с начала года: у ИП без сотрудников — на взносы за себя полностью; при сотрудниках (по
@@ -705,6 +712,18 @@ export default async function ScenarioDetailPage({
               disabled={!canManage}
             />
           </label>
+          <label className="field">
+            <span>НДС, % (при своём режиме)</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              name="vatRatePct"
+              defaultValue={scenario.vatRatePct?.toString() ?? ""}
+              placeholder="не считать"
+              style={{ width: 130 }}
+              disabled={!canManage}
+            />
+          </label>
           {canManage ? (
             <button type="submit" className="btn btn-secondary">
               Сохранить налог
@@ -712,6 +731,14 @@ export default async function ScenarioDetailPage({
           ) : null}
           <span className="text-muted">Сейчас: {tax.label}</span>
         </form>
+        {yearOpening ? (
+          <p className="text-muted" style={{ marginTop: 10 }}>
+            Факт с 1 января {yearOpening.year} до начала прогноза{tax.organizationId ? " по организации" : " по всем доступным организациям"}:
+            поступления {formatMoney(yearOpening.income)}, платежи {formatMoney(yearOpening.expenses)}, прибыль до налога{" "}
+            {formatMoney(yearOpening.profit)}. Налог, порог взносов 1% и минимальный налог считаются за весь год с учётом
+            этого факта; налог за эти месяцы считается уплаченным вне прогноза.
+          </p>
+        ) : null}
       </div>
 
       <div className="card">
@@ -811,6 +838,14 @@ export default async function ScenarioDetailPage({
               ) : null}
               <ProjectionRow label="Прочие платежи по кредитам/лизингу" values={projection.map((p) => p.manualLoanPayments)} format="money" />
               {tax.regime !== "none" ? <ProjectionRow label="Уплата налога" values={projection.map((p) => p.taxPaid)} format="money" /> : null}
+              {tax.vat ? (
+                <>
+                  <ProjectionRow label="НДС, полученный от клиентов" values={projection.map((p) => p.vatReceived)} format="money" />
+                  <ProjectionRow label="НДС, уплаченный поставщикам" values={projection.map((p) => p.vatPaidToSuppliers)} format="money" />
+                  <ProjectionRow label="НДС к уплате — начислено" values={projection.map((p) => p.vatAccrued)} format="money" />
+                  <ProjectionRow label="Уплата НДС" values={projection.map((p) => p.vatPaid)} format="money" />
+                </>
+              ) : null}
               {hasContribution ? (
                 <ProjectionRow label="Уплата взносов ИП за себя" values={projection.map((p) => p.ipContributionPaid)} format="money" />
               ) : null}
@@ -822,6 +857,9 @@ export default async function ScenarioDetailPage({
               ) : null}
               {tax.regime !== "none" ? (
                 <ProjectionRow label="Налог к уплате на конец месяца" values={projection.map((p) => p.taxPayableEnd)} format="money" />
+              ) : null}
+              {tax.vat ? (
+                <ProjectionRow label="НДС к уплате на конец месяца" values={projection.map((p) => p.vatPayableEnd)} format="money" />
               ) : null}
               {hasContribution ? (
                 <ProjectionRow label="Взносы ИП к уплате на конец месяца" values={projection.map((p) => p.ipContributionPayableEnd)} format="money" />

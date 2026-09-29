@@ -103,3 +103,25 @@ describe("organizationTax — reduction of USN on income", () => {
     expect(organizationTax({ name: "ИП", taxSystem: "usn_income_expense", type: "SOLE_PROPRIETOR" }, [], 2027, none).reduction).toBeNull();
   });
 });
+
+describe("organizationTax — VAT and activity dates", () => {
+  const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d));
+  it("VAT from the card except on AUSN and the patent; the dates reach the contributions", async () => {
+    const { organizationTax } = await import("./loans");
+    const rates = [
+      { taxKind: "vat", ratePct: "5", validFrom: utc(2026, 1, 1) },
+      { taxKind: "ip_insurance_fixed", ratePct: 0, fixedAmount: 57390, validFrom: utc(2026, 1, 1) },
+    ];
+    const ip = organizationTax(
+      { name: "ИП", taxSystem: "usn_income", type: "SOLE_PROPRIETOR", registrationDate: utc(2026, 3, 16), closureDate: null },
+      rates,
+      2026,
+    );
+    expect(ip.vat?.rateForYear(2026)?.toNumber()).toBe(5);
+    expect(ip.ipContribution?.activeFrom?.toISOString().slice(0, 10)).toBe("2026-03-16");
+    expect(ip.label).toContain("деятельность с 16.03.2026");
+    expect(ip.label).toContain("НДС 5% без вычетов");
+    expect(organizationTax({ name: "ИП", taxSystem: "ausn_income", type: "SOLE_PROPRIETOR" }, rates, 2026).vat).toBeNull();
+    expect(organizationTax({ name: "ООО", taxSystem: "osn" }, [], 2026).vat).toBeNull();
+  });
+});

@@ -317,3 +317,14 @@ describe("projectScenario — USN reduced by contributions", () => {
     expect([registered.taxReduction.toNumber(), registered.tax.toNumber()]).toEqual([1000, 5000]); // below the limit
   });
 });
+
+describe("projectScenario — VAT", () => {
+  it("customers pay revenue plus VAT; VAT goes to the budget after the quarter; the profit does not change", () => {
+    const service: NewServiceInput = { id: "s", name: "Услуга", launchYear: 2027, launchMonth: 1, avgCheck: 1000, salesPerMonth: 100, rampUpMonths: 0, variableCostPct: 0 };
+    const p = projectScenario(2027, 1, 4, [], 0, [service], { vat: { rateForYear: () => new Decimal(22) } });
+    expect(p[0].cashBalance.toNumber()).toBe(122000);
+    expect(p[0].netProfit.toNumber()).toBe(100000);
+    expect(p[3].vatPaid.toNumber()).toBe(22000);
+    expect(p[3].cashBalance.toNumber()).toBe(4 * 122000 - 22000);
+  });
+});

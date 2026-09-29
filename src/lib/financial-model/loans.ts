@@ -6,7 +6,21 @@ import { accrualScopeWhere, type AccessScope } from "@/lib/access-scope";
 import type { LoanInput, LoanRepayment } from "./cash-timing";
 import type { DueAmount, ScenarioCashExtras } from "./project";
 import { combineTaxRates } from "@/lib/payroll/calculate";
-import { DEFAULT_TAX_RATES, TAX_REGIME_LABELS, TAX_REGIMES, taxRate, type IpContributionParams, type TaxRateInput, type TaxRegime } from "./taxes";
+import {
+  DEFAULT_TAX_RATES,
+  TAX_REGIME_LABELS,
+  TAX_REGIMES,
+  taxRate,
+  vatDeductible,
+  type IpContributionParams,
+  type TaxRateInput,
+  type TaxRegime,
+  type VatParams,
+  type YearOpening,
+} from "./taxes";
+import { computePnlReport } from "@/lib/reports/pnl";
+import { bankTransactionScopeWhere, UNRESTRICTED_SCOPE } from "@/lib/access-scope";
+import type { Prisma } from "@prisma/client";
 import {
   ipFixedInsuranceAt,
   ipIncomeInsuranceAt,
@@ -164,6 +178,10 @@ export interface ScenarioTax {
   ipContribution: IpContributionParams | null;
   /** Уменьшение налога УСН «доходы» на страховые взносы — только «как у организации». */
   reduction: ScenarioCashExtras["taxReduction"];
+  /** НДС: ставка по годам — из карточки организации или своя ставка сценария. */
+  vat: VatParams | null;
+  /** Организация, чей факт с начала года берётся для налога (null — все доступные). */
+  organizationId: string | null;
 }
 
 /** Для уменьшения налога: сотрудники по справочнику и ставка взносов за них (%, с травматизмом). */
@@ -190,7 +208,7 @@ export const SYSTEM_REGIME: Record<TaxSystem, { regime: TaxRegime; kind: TaxKind
  * ставки — стандартная для режима).
  */
 export function organizationTax(
-  organization: { name: string; taxSystem: string; type?: string },
+  organization: { name: string; taxSystem: string; type?: string; registrationDate?: Date | null; closureDate?: Date | null },
   rates: TaxRateRecord[],
   year: number,
   employees: EmployeeTaxContext = { registeredEmployees: 0, employeeInsurancePct: new Decimal(0) },
@@ -203,7 +221,16 @@ export function organizationTax(
     regime === "none"
       ? `как у «${organization.name}»: ${systemLabel} — налог в прогнозе не считается (стоимость патента задайте постоянными расходами)`
       : `как у «${organization.name}»: ${systemLabel}, ${ratePct(year).toString().replace(".", ",")}% в ${year} году`;
-  const ipContribution = soleProprietorContributions(system, organization.type, rates);
+  const contributions = soleProprietorContributions(system, organization.type, rates);
+  const ipContribution = contributions
+    ? { ...contributions, activeFrom: organization.registrationDate ?? null, activeTo: organization.closureDate ?? null }
+    : null;
+  // AUSN and the patent are free of VAT; otherwise the VAT rate of the card, if any.
+  const vatFree = system === "ausn_income" || system === "ausn_income_expense" || system === "psn";
+  const vat: VatParams | null =
+    vatFree || !rates.some((r) => r.taxKind === "vat")
+      ? null
+      : { rateForYear: (y) => rateAt(rates, "vat", new Date(Date.UTC(y, 0, 1))) };
   // Contributions (the payroll's share and a sole proprietor's own ones) reduce USN on income.
   const reduction =
     regime === "usn_income"
@@ -213,7 +240,15 @@ export function organizationTax(
         }
       : null;
   const parts = [label];
-  if (ipContribution) parts.push("взносы ИП за себя");
+  if (ipContribution) {
+    const dates = [
+      organization.registrationDate ? `с ${organization.registrationDate.toLocaleDateString("ru-RU", { timeZone: "UTC" })}` : null,
+      organization.closureDate ? `по ${organization.closureDate.toLocaleDateString("ru-RU", { timeZone: "UTC" })}` : null,
+    ].filter(Boolean);
+    parts.push(`взносы ИП за себя${dates.length ? ` (деятельность ${dates.join(" ")})` : ""}`);
+  }
+  const vatNow = vat?.rateForYear(year);
+  if (vatNow) parts.push(`НДС ${vatNow.toString().replace(".", ",")}%${vatDeductible(vatNow) ? " с вычетами" : " без вычетов"}`);
   if (reduction) {
     parts.push(
       employees.registeredEmployees > 0
@@ -223,7 +258,7 @@ export function organizationTax(
           : "налог уменьшается на взносы за сотрудников прогноза не больше чем на 50%",
     );
   }
-  return { regime, ratePct, label: parts.join("; "), ipContribution, reduction };
+  return { regime, ratePct, label: parts.join("; "), ipContribution, reduction, vat, organizationId: null };
 }
 
 /**
@@ -246,7 +281,7 @@ function soleProprietorContributions(system: TaxSystem, type: string | undefined
 
 /** Налог сценария для projectScenario: свой режим и ставка или «как у организации». */
 export async function loadScenarioTax(
-  scenario: { taxRegime: string; taxRatePct: { toString(): string } | null; taxOrganizationId: string | null },
+  scenario: { taxRegime: string; taxRatePct: { toString(): string } | null; taxOrganizationId: string | null; vatRatePct?: { toString(): string } | null },
   startYear: number,
 ): Promise<ScenarioTax> {
   if (scenario.taxRegime === "organization" && scenario.taxOrganizationId) {
@@ -258,27 +293,85 @@ export async function loadScenarioTax(
         taxSystem: true,
         type: true,
         taxRates: true,
+        registrationDate: true,
+        closureDate: true,
         _count: { select: { employees: { where: { status: "ACTIVE" } } } },
       },
     });
     if (organization) {
       const rules = await prisma.taxRule.findMany({ where: { isArchived: false } });
       const { insurancePct } = combineTaxRates(rules, organization.taxRates, new Date(Date.UTC(startYear, 0, 1)));
-      return organizationTax(
-        { name: organization.shortName || organization.name, taxSystem: organization.taxSystem, type: organization.type },
+      const tax = organizationTax(
+        {
+          name: organization.shortName || organization.name,
+          taxSystem: organization.taxSystem,
+          type: organization.type,
+          registrationDate: organization.registrationDate,
+          closureDate: organization.closureDate,
+        },
         organization.taxRates,
         startYear,
         { registeredEmployees: organization._count.employees, employeeInsurancePct: insurancePct },
       );
+      return { ...tax, organizationId: scenario.taxOrganizationId };
     }
   }
   const regime = (TAX_REGIMES as string[]).includes(scenario.taxRegime) ? (scenario.taxRegime as TaxRegime) : "none";
   const rate = taxRate(regime, scenario.taxRatePct?.toString() ?? null);
+  const vatRate = scenario.vatRatePct ? new Decimal(scenario.vatRatePct.toString()) : null;
+  const label = regime === "none" ? TAX_REGIME_LABELS.none : `${TAX_REGIME_LABELS[regime]}, ${rate.toString().replace(".", ",")}%`;
   return {
     regime,
     ratePct: rate,
-    label: regime === "none" ? TAX_REGIME_LABELS.none : `${TAX_REGIME_LABELS[regime]}, ${rate.toString().replace(".", ",")}%`,
+    label: vatRate ? `${label}; НДС ${vatRate.toString().replace(".", ",")}%${vatDeductible(vatRate) ? " с вычетами" : " без вычетов"}` : label,
     ipContribution: null,
     reduction: null,
+    vat: vatRate ? { rateForYear: () => vatRate } : null,
+    organizationId: null,
+  };
+}
+
+/**
+ * Факт с 1 января до начала прогноза (если прогноз начинается не с января):
+ * поступления и платежи по банку и кассе (кроме переводов между своими
+ * счетами и операций по статьям ДДС, привязанным к статьям баланса, —
+ * займов, взносов в капитал) и прибыль до налога по ОПиУ. Берётся по
+ * организации налога сценария или по всем доступным организациям, и только
+ * по уже прошедшие дни.
+ */
+export async function loadYearOpening(
+  startYear: number,
+  startMonth: number,
+  organizationId: string | null,
+  scope: AccessScope = UNRESTRICTED_SCOPE,
+  now: Date = new Date(),
+): Promise<YearOpening | null> {
+  const from = new Date(Date.UTC(startYear, 0, 1));
+  const startDate = new Date(Date.UTC(startYear, startMonth - 1, 1));
+  if (startMonth === 1 || from > now) return null;
+  const until = new Date(Math.min(startDate.getTime() - 1, now.getTime()));
+
+  const and: Prisma.BankTransactionWhereInput[] = [
+    { operationDate: { gte: from, lte: until }, isTransfer: false },
+    { OR: [{ cashFlowArticleId: null }, { cashFlowArticle: { balanceArticleId: null } }] },
+  ];
+  if (organizationId) and.push({ OR: [{ bankAccount: { organizationId } }, { cashAccount: { organizationId } }] });
+  const scoped = bankTransactionScopeWhere(scope);
+  if (Object.keys(scoped).length > 0) and.push(scoped);
+  const [flows, pnl] = await Promise.all([
+    prisma.bankTransaction.groupBy({ by: ["direction"], where: { AND: and }, _sum: { amount: true } }),
+    computePnlReport(
+      { from, to: until, year: startYear, month: 1, label: "с начала года", span: "year" },
+      organizationId ? { organizationId } : {},
+      scope,
+    ),
+  ]);
+  const sum = (direction: "INFLOW" | "OUTFLOW") => toDecimal(flows.find((f) => f.direction === direction)?._sum.amount?.toString() ?? 0);
+  return {
+    year: startYear,
+    months: startMonth - 1,
+    income: sum("INFLOW"),
+    expenses: sum("OUTFLOW"),
+    profit: pnl.netProfit.plus(pnl.tax),
   };
 }
