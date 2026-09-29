@@ -194,6 +194,9 @@ export async function addAverageEarningsLineAction(runId: string, formData: Form
         amount,
         ndflAmount,
         insuranceAmount,
+        // The P&L spreads it over the months of these days (employer-paid sick days — the first ones).
+        absenceStart: request.startDate,
+        absenceDays: result.kind === "vacation" ? request.days : Math.min(request.days, result.sick.employerDays),
         comment:
           result.kind === "vacation"
             ? `Средний дневной ${result.vacation.avgDaily.toFixed(2)} × ${request.days} дн. с ${request.startDate.toISOString().slice(0, 10)}${

@@ -12,6 +12,9 @@ export interface PayrollLineForPosting {
   accrualTypeName: string;
   amount: MoneyInput;
   insuranceAmount: MoneyInput;
+  /** Отпуск или больничный за счёт работодателя: первый день и число календарных дней. */
+  absenceStart?: Date | null;
+  absenceDays?: number | null;
 }
 
 export interface AccrualLineDraft {
@@ -49,6 +52,80 @@ export function buildPayrollAccrualLines(lines: PayrollLineForPosting[]): Accrua
   return drafts;
 }
 
+const round2 = (d: Decimal) => d.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+
+/**
+ * Делит сумму по месяцам календарных дней периода (отпуск с 25.09 на 14 дней
+ * — 6 дней в сентябре и 8 в октябре); последняя часть добирает копейки.
+ */
+export function splitByMonthDays(amount: Decimal, start: Date, days: number): Array<{ year: number; month: number; days: number; amount: Decimal }> {
+  const parts: Array<{ year: number; month: number; days: number; amount: Decimal }> = [];
+  for (let i = 0; i < days; i++) {
+    const day = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate() + i));
+    const last = parts.at(-1);
+    if (last && last.year === day.getUTCFullYear() && last.month === day.getUTCMonth() + 1) last.days += 1;
+    else parts.push({ year: day.getUTCFullYear(), month: day.getUTCMonth() + 1, days: 1, amount: new Decimal(0) });
+  }
+  let rest = amount;
+  parts.forEach((part, i) => {
+    part.amount = i === parts.length - 1 ? rest : round2(amount.times(part.days).dividedBy(days));
+    rest = rest.minus(part.amount);
+  });
+  return parts;
+}
+
+export interface PayrollAccrualDocuments {
+  /** Строки основного документа — на дату выплаты расчёта. */
+  main: AccrualLineDraft[];
+  /** Части отпускных и больничных за дни следующих месяцев — по документу на месяц, датой 1-го числа. */
+  later: Array<{ year: number; month: number; lines: AccrualLineDraft[] }>;
+}
+
+/**
+ * Документы начисления расчёта зарплаты. Отпускные и больничные за счёт
+ * работодателя относятся к месяцам дней отсутствия: доля дней месяца выплаты
+ * и прошедших месяцев — в основной документ (прошедшие периоды могут быть
+ * закрыты), доли следующих месяцев — в отдельные документы этих месяцев.
+ * Остальные начисления — целиком в основной.
+ */
+export function buildPayrollAccrualDocuments(lines: PayrollLineForPosting[], payoutDate: Date): PayrollAccrualDocuments {
+  const payoutIndex = payoutDate.getUTCFullYear() * 12 + payoutDate.getUTCMonth();
+  const main: AccrualLineDraft[] = [];
+  const later = new Map<number, AccrualLineDraft[]>();
+  for (const line of lines) {
+    const [draft] = buildPayrollAccrualLines([line]);
+    if (!draft) continue;
+    if (!line.absenceStart || !line.absenceDays || line.absenceDays < 1) {
+      main.push(draft);
+      continue;
+    }
+    const parts = splitByMonthDays(draft.amount, line.absenceStart, line.absenceDays);
+    let now = new Decimal(0);
+    const nowDays: number[] = [];
+    for (const part of parts) {
+      const index = part.year * 12 + part.month - 1;
+      if (index <= payoutIndex) {
+        now = now.plus(part.amount);
+        nowDays.push(part.days);
+        continue;
+      }
+      const list = later.get(index) ?? [];
+      list.push({ ...draft, amount: part.amount, description: `${draft.description} (${part.days} дн. в ${String(part.month).padStart(2, "0")}.${part.year})` });
+      later.set(index, list);
+    }
+    if (now.greaterThan(0)) {
+      const total = nowDays.reduce((a, b) => a + b, 0);
+      main.push({ ...draft, amount: now, description: total === line.absenceDays ? draft.description : `${draft.description} (${total} дн. из ${line.absenceDays})` });
+    }
+  }
+  return {
+    main,
+    later: [...later.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([index, drafts]) => ({ year: Math.floor(index / 12), month: (index % 12) + 1, lines: drafts })),
+  };
+}
+
 const PAYROLL_COUNTERPARTY_NAME = "Сотрудники (ФОТ)";
 
 /**
@@ -67,16 +144,18 @@ async function getOrCreatePayrollCounterpartyId(): Promise<string> {
 }
 
 /**
- * Проводит утверждённый расчёт зарплаты в ОПиУ: создаёт один документ
- * начисления (расход, статус «Проведён») со строками из
- * buildPayrollAccrualLines. Идемпотентно — привязка к расчёту через
- * (sourceSystem, externalId), повторный вызов для того же расчёта ничего
- * не создаст повторно. Если ни одна строка расчёта не привязана к статье
- * ОПиУ, документ не создаётся вовсе (нечего проводить).
+ * Проводит утверждённый расчёт зарплаты в ОПиУ: документ начисления
+ * (расход, статус «Проведён») на дату выплаты и, если отпуск или больничный
+ * переходит на следующие месяцы, — документы этих месяцев с их частью
+ * (buildPayrollAccrualDocuments). Идемпотентно — привязка к расчёту через
+ * (sourceSystem, externalId): основной — id расчёта, части месяцев —
+ * «id:ГГГГ-ММ»; повторный вызов ничего не создаст повторно. Если ни одна
+ * строка расчёта не привязана к статье ОПиУ, документы не создаются вовсе.
  */
 export async function postPayrollRunToAccrual(payrollRunId: string): Promise<string | null> {
-  const existing = await prisma.accrualDocument.findUnique({
-    where: { sourceSystem_externalId: { sourceSystem: "payroll", externalId: payrollRunId } },
+  const existing = await prisma.accrualDocument.findFirst({
+    where: { sourceSystem: "payroll", OR: [{ externalId: payrollRunId }, { externalId: { startsWith: `${payrollRunId}:` } }] },
+    orderBy: { date: "asc" },
   });
   if (existing) return existing.id;
 
@@ -85,7 +164,7 @@ export async function postPayrollRunToAccrual(payrollRunId: string): Promise<str
     include: { lines: { include: { employee: true, accrualType: true } } },
   });
 
-  const drafts = buildPayrollAccrualLines(
+  const documents = buildPayrollAccrualDocuments(
     run.lines.map((l) => ({
       pnlArticleId: l.accrualType.pnlArticleId,
       departmentId: l.departmentId,
@@ -94,38 +173,59 @@ export async function postPayrollRunToAccrual(payrollRunId: string): Promise<str
       accrualTypeName: l.accrualType.name,
       amount: l.amount,
       insuranceAmount: l.insuranceAmount,
+      absenceStart: l.absenceStart,
+      absenceDays: l.absenceDays,
     })),
+    run.payoutDate,
   );
-  if (drafts.length === 0) return null;
+  if (documents.main.length === 0 && documents.later.length === 0) return null;
 
   const counterpartyId = await getOrCreatePayrollCounterpartyId();
-  const number = `ФОТ-${run.payoutDate.toISOString().slice(0, 7)}-${run.id.slice(-6)}`;
-
-  const document = await prisma.accrualDocument.create({
-    data: {
-      organizationId: run.organizationId,
-      counterpartyId,
-      number,
-      date: run.payoutDate,
-      documentType: "MANUAL",
-      direction: "EXPENSE",
-      status: AccrualDocumentStatus.POSTED,
-      periodId: run.periodId,
-      sourceSystem: "payroll",
-      externalId: run.id,
-      comment: "Автоматически создано при утверждении расчёта зарплаты",
-      lines: {
-        create: drafts.map((d) => ({
-          pnlArticleId: d.pnlArticleId,
-          departmentId: d.departmentId,
-          projectId: d.projectId,
-          amount: d.amount,
-          description: d.description,
-        })),
+  const base = `ФОТ-${run.payoutDate.toISOString().slice(0, 7)}-${run.id.slice(-6)}`;
+  const create = (externalId: string, number: string, date: Date, periodId: string | null, comment: string, drafts: AccrualLineDraft[]) =>
+    prisma.accrualDocument.create({
+      data: {
+        organizationId: run.organizationId,
+        counterpartyId,
+        number,
+        date,
+        documentType: "MANUAL",
+        direction: "EXPENSE",
+        status: AccrualDocumentStatus.POSTED,
+        periodId,
+        sourceSystem: "payroll",
+        externalId,
+        comment,
+        lines: {
+          create: drafts.map((d) => ({
+            pnlArticleId: d.pnlArticleId,
+            departmentId: d.departmentId,
+            projectId: d.projectId,
+            amount: d.amount,
+            description: d.description,
+          })),
+        },
       },
-    },
-  });
+    });
 
-  await enqueueProjectResultsForDocument(document.id);
-  return document.id;
+  const created: string[] = [];
+  if (documents.main.length > 0) {
+    const doc = await create(run.id, base, run.payoutDate, run.periodId, "Автоматически создано при утверждении расчёта зарплаты", documents.main);
+    created.push(doc.id);
+  }
+  for (const part of documents.later) {
+    const month = `${part.year}-${String(part.month).padStart(2, "0")}`;
+    const doc = await create(
+      `${run.id}:${month}`,
+      `${base}-${month}`,
+      new Date(Date.UTC(part.year, part.month - 1, 1)),
+      null,
+      `Отпускные и больничные расчёта ${base} за дни ${String(part.month).padStart(2, "0")}.${part.year} — расход этого месяца`,
+      part.lines,
+    );
+    created.push(doc.id);
+  }
+
+  for (const id of created) await enqueueProjectResultsForDocument(id);
+  return created[0];
 }

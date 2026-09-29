@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildPayrollAccrualLines, type PayrollLineForPosting } from "./post-to-accrual";
+import { buildPayrollAccrualDocuments, buildPayrollAccrualLines, splitByMonthDays, type PayrollLineForPosting } from "./post-to-accrual";
+import Decimal from "decimal.js";
 
 function line(overrides: Partial<PayrollLineForPosting> = {}): PayrollLineForPosting {
   return {
@@ -48,5 +49,40 @@ describe("buildPayrollAccrualLines", () => {
     ]);
     expect(drafts).toHaveLength(2);
     expect(drafts.map((d) => d.description)).toEqual(["A — Оклад", "C — Оклад"]);
+  });
+});
+
+describe("vacation running into the next month", () => {
+  const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d));
+
+  it("splits an amount by the calendar days of each month, the last part taking the rounding", () => {
+    const parts = splitByMonthDays(new Decimal(10000), utc(2026, 9, 25), 14);
+    expect(parts.map((p) => [p.month, p.days, p.amount.toNumber()])).toEqual([
+      [9, 6, 4285.71],
+      [10, 8, 5714.29],
+    ]);
+    expect(splitByMonthDays(new Decimal(100), utc(2026, 12, 30), 3).map((p) => [p.year, p.month, p.days])).toEqual([
+      [2026, 12, 2],
+      [2027, 1, 1],
+    ]);
+  });
+
+  it("keeps the payout month's days in the main document and moves later months to their own documents", () => {
+    const docs = buildPayrollAccrualDocuments(
+      [
+        line({ accrualTypeName: "Оклад", amount: 50000, insuranceAmount: 15000 }),
+        line({ accrualTypeName: "Отпускные", amount: 7000, insuranceAmount: 3000, absenceStart: utc(2026, 9, 25), absenceDays: 14 }),
+      ],
+      utc(2026, 9, 22),
+    );
+    expect(docs.main.map((d) => d.amount.toNumber())).toEqual([65000, 4285.71]);
+    expect(docs.main[1].description).toContain("6 дн. из 14");
+    expect(docs.later.map((l) => [l.year, l.month, l.lines.map((x) => x.amount.toNumber())])).toEqual([[2026, 10, [5714.29]]]);
+  });
+
+  it("days before the payout month stay in the main document too", () => {
+    const docs = buildPayrollAccrualDocuments([line({ amount: 1000, insuranceAmount: 0, absenceStart: utc(2026, 8, 30), absenceDays: 4 })], utc(2026, 9, 10));
+    expect(docs.main.map((d) => d.amount.toNumber())).toEqual([1000]);
+    expect(docs.later).toEqual([]);
   });
 });

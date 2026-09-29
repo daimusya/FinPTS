@@ -45,8 +45,10 @@ export default async function PayrollRunDetailPage({
   });
   if (!run) notFound();
 
-  const accrualDocument = await prisma.accrualDocument.findUnique({
-    where: { sourceSystem_externalId: { sourceSystem: "payroll", externalId: run.id } },
+  // The main document on the payout date and, for vacations running into later months, one per month.
+  const accrualDocuments = await prisma.accrualDocument.findMany({
+    where: { sourceSystem: "payroll", OR: [{ externalId: run.id }, { externalId: { startsWith: `${run.id}:` } }] },
+    orderBy: { date: "asc" },
   });
 
   const [employees, accrualTypes, departments, projects] = await Promise.all([
@@ -101,12 +103,23 @@ export default async function PayrollRunDetailPage({
 
       {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
 
-      {accrualDocument ? (
+      {accrualDocuments.length > 0 ? (
         <div className="card" style={{ marginBottom: 16 }}>
           <p>
             Начисление проведено в ОПиУ:{" "}
-            <Link href={`/accruals/${accrualDocument.id}`}>документ № {accrualDocument.number}</Link>
+            {accrualDocuments.map((d, i) => (
+              <span key={d.id}>
+                {i > 0 ? ", " : ""}
+                <Link href={`/accruals/${d.id}`}>документ № {d.number}</Link> от {d.date.toLocaleDateString("ru-RU", { timeZone: "UTC" })}
+              </span>
+            ))}
+            .
           </p>
+          {accrualDocuments.length > 1 ? (
+            <p className="text-muted" style={{ marginTop: 6 }}>
+              Отпускные и больничные за дни следующих месяцев отнесены в расход этих месяцев — отдельными документами.
+            </p>
+          ) : null}
         </div>
       ) : run.status === "APPROVED" || run.status === "PAID" ? (
         <div className="card" style={{ marginBottom: 16 }}>

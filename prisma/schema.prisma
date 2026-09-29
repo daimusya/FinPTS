@@ -1114,6 +1114,9 @@ model PayrollLine {
   insuranceAmount Decimal @default(0) @db.Decimal(18, 2)
   /// Как получена сумма, например «Отработано 17 из 22 раб. дн. (отпуск 5)».
   comment       String?
+  /// Отпуск или больничный за счёт работодателя: с какого дня и сколько календарных дней — в ОПиУ сумма делится по месяцам этих дней.
+  absenceStart  DateTime? @db.Date
+  absenceDays   Int?
 
   payrollRun  PayrollRun          @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
   employee    Employee            @relation(fields: [employeeId], references: [id])
