@@ -1,7 +1,7 @@
 import Decimal from "decimal.js";
 import { toDecimal, type MoneyInput } from "@/lib/money";
 import { prisma } from "@/lib/db";
-import { AccrualDocumentStatus } from "@prisma/client";
+import { AccrualDocumentStatus, PayrollRunKind } from "@prisma/client";
 import { enqueueProjectResultsForDocument } from "@/lib/integrations/project-results";
 
 export interface PayrollLineForPosting {
@@ -74,8 +74,18 @@ export function splitByMonthDays(amount: Decimal, start: Date, days: number): Ar
   return parts;
 }
 
+/**
+ * Дата расхода расчёта зарплаты в ОПиУ (метод начисления): окончательный
+ * расчёт 10-го закрывает предыдущий месяц — расход последним днём этого
+ * месяца; аванс и разовые выплаты — датой выплаты.
+ */
+export function accrualDateForRun(kind: PayrollRunKind | string, payoutDate: Date): Date {
+  if (kind !== PayrollRunKind.FINAL) return payoutDate;
+  return new Date(Date.UTC(payoutDate.getUTCFullYear(), payoutDate.getUTCMonth(), 0));
+}
+
 export interface PayrollAccrualDocuments {
-  /** Строки основного документа — на дату выплаты расчёта. */
+  /** Строки основного документа — на дату расхода расчёта (accrualDateForRun). */
   main: AccrualLineDraft[];
   /** Части отпускных и больничных за дни следующих месяцев — по документу на месяц, датой 1-го числа. */
   later: Array<{ year: number; month: number; lines: AccrualLineDraft[] }>;
@@ -83,13 +93,13 @@ export interface PayrollAccrualDocuments {
 
 /**
  * Документы начисления расчёта зарплаты. Отпускные и больничные за счёт
- * работодателя относятся к месяцам дней отсутствия: доля дней месяца выплаты
- * и прошедших месяцев — в основной документ (прошедшие периоды могут быть
- * закрыты), доли следующих месяцев — в отдельные документы этих месяцев.
- * Остальные начисления — целиком в основной.
+ * работодателя относятся к месяцам дней отсутствия: доля дней месяца
+ * основного документа и прошедших месяцев — в основной документ (прошедшие
+ * периоды могут быть закрыты), доли следующих месяцев — в отдельные
+ * документы этих месяцев. Остальные начисления — целиком в основной.
  */
-export function buildPayrollAccrualDocuments(lines: PayrollLineForPosting[], payoutDate: Date): PayrollAccrualDocuments {
-  const payoutIndex = payoutDate.getUTCFullYear() * 12 + payoutDate.getUTCMonth();
+export function buildPayrollAccrualDocuments(lines: PayrollLineForPosting[], accrualDate: Date): PayrollAccrualDocuments {
+  const payoutIndex = accrualDate.getUTCFullYear() * 12 + accrualDate.getUTCMonth();
   const main: AccrualLineDraft[] = [];
   const later = new Map<number, AccrualLineDraft[]>();
   for (const line of lines) {
@@ -176,12 +186,15 @@ export async function postPayrollRunToAccrual(payrollRunId: string): Promise<str
       absenceStart: l.absenceStart,
       absenceDays: l.absenceDays,
     })),
-    run.payoutDate,
+    accrualDateForRun(run.kind, run.payoutDate),
   );
   if (documents.main.length === 0 && documents.later.length === 0) return null;
+  const accrualDate = accrualDateForRun(run.kind, run.payoutDate);
+  const periodOf = async (date: Date) =>
+    (await prisma.accountingPeriod.findUnique({ where: { year_month: { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1 } } }))?.id ?? null;
 
   const counterpartyId = await getOrCreatePayrollCounterpartyId();
-  const base = `ФОТ-${run.payoutDate.toISOString().slice(0, 7)}-${run.id.slice(-6)}`;
+  const base = `ФОТ-${accrualDate.toISOString().slice(0, 7)}-${run.id.slice(-6)}`;
   const create = (externalId: string, number: string, date: Date, periodId: string | null, comment: string, drafts: AccrualLineDraft[]) =>
     prisma.accrualDocument.create({
       data: {
@@ -210,7 +223,11 @@ export async function postPayrollRunToAccrual(payrollRunId: string): Promise<str
 
   const created: string[] = [];
   if (documents.main.length > 0) {
-    const doc = await create(run.id, base, run.payoutDate, run.periodId, "Автоматически создано при утверждении расчёта зарплаты", documents.main);
+    const comment =
+      run.kind === PayrollRunKind.FINAL
+        ? `Автоматически создано при утверждении расчёта зарплаты; окончательный расчёт с выплатой ${run.payoutDate.toLocaleDateString("ru-RU", { timeZone: "UTC" })} — расход месяца, за который начислен`
+        : "Автоматически создано при утверждении расчёта зарплаты";
+    const doc = await create(run.id, base, accrualDate, await periodOf(accrualDate), comment, documents.main);
     created.push(doc.id);
   }
   for (const part of documents.later) {
@@ -219,7 +236,7 @@ export async function postPayrollRunToAccrual(payrollRunId: string): Promise<str
       `${run.id}:${month}`,
       `${base}-${month}`,
       new Date(Date.UTC(part.year, part.month - 1, 1)),
-      null,
+      await periodOf(new Date(Date.UTC(part.year, part.month - 1, 1))),
       `Отпускные и больничные расчёта ${base} за дни ${String(part.month).padStart(2, "0")}.${part.year} — расход этого месяца`,
       part.lines,
     );

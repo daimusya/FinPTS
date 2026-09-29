@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPayrollAccrualDocuments, buildPayrollAccrualLines, splitByMonthDays, type PayrollLineForPosting } from "./post-to-accrual";
+import { accrualDateForRun, buildPayrollAccrualDocuments, buildPayrollAccrualLines, splitByMonthDays, type PayrollLineForPosting } from "./post-to-accrual";
 import Decimal from "decimal.js";
 
 function line(overrides: Partial<PayrollLineForPosting> = {}): PayrollLineForPosting {
@@ -84,5 +84,26 @@ describe("vacation running into the next month", () => {
     const docs = buildPayrollAccrualDocuments([line({ amount: 1000, insuranceAmount: 0, absenceStart: utc(2026, 8, 30), absenceDays: 4 })], utc(2026, 9, 10));
     expect(docs.main.map((d) => d.amount.toNumber())).toEqual([1000]);
     expect(docs.later).toEqual([]);
+  });
+});
+
+describe("the expense date of a payroll run", () => {
+  const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d));
+  const day = (d: Date) => d.toISOString().slice(0, 10);
+
+  it("a final settlement is the expense of the month it is for — its last day; an advance and extra runs — the payout date", () => {
+    expect(day(accrualDateForRun("FINAL", utc(2026, 10, 10)))).toBe("2026-09-30");
+    expect(day(accrualDateForRun("FINAL", utc(2027, 1, 10)))).toBe("2026-12-31");
+    expect(day(accrualDateForRun("ADVANCE", utc(2026, 9, 25)))).toBe("2026-09-25");
+    expect(day(accrualDateForRun("ADHOC", utc(2026, 9, 22)))).toBe("2026-09-22");
+  });
+
+  it("a vacation in a final settlement is split against the month the settlement is for", () => {
+    const docs = buildPayrollAccrualDocuments(
+      [line({ amount: 14000, insuranceAmount: 0, absenceStart: utc(2026, 9, 25), absenceDays: 14 })],
+      accrualDateForRun("FINAL", utc(2026, 10, 10)),
+    );
+    expect(docs.main.map((d) => d.amount.toNumber())).toEqual([6000]);
+    expect(docs.later.map((l) => [l.month, l.lines[0].amount.toNumber()])).toEqual([[10, 8000]]);
   });
 });

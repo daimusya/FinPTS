@@ -21,7 +21,7 @@ import {
   type AverageEarningsPreview,
   type AverageEarningsRequest,
 } from "@/lib/payroll/average-earnings-db";
-import { postPayrollRunToAccrual } from "@/lib/payroll/post-to-accrual";
+import { accrualDateForRun, postPayrollRunToAccrual } from "@/lib/payroll/post-to-accrual";
 import { toDecimal } from "@/lib/money";
 import { PayrollRunStatus } from "@prisma/client";
 
@@ -303,6 +303,16 @@ async function transitionRun(id: string, from: PayrollRunStatus[], to: PayrollRu
 
 export async function approvePayrollRunAction(id: string) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  // The expense goes to the month the run is for; a closed month must be reopened first.
+  const run = await prisma.payrollRun.findUniqueOrThrow({ where: { id } });
+  const accrualDate = accrualDateForRun(run.kind, run.payoutDate);
+  try {
+    await assertPeriodOpenForDate(accrualDate);
+  } catch (e) {
+    redirect(
+      `/payroll/${id}?error=${encodeURIComponent(`${(e as Error).message} Расчёт проводится в расход месяца, за который начислен (${accrualDate.getUTCMonth() + 1}.${accrualDate.getUTCFullYear()}), — откройте период в «Администрирование → Периоды», утвердите расчёт и закройте период снова.`)}`,
+    );
+  }
   await transitionRun(id, [PayrollRunStatus.CALCULATED], PayrollRunStatus.APPROVED, "approve", session.userId);
 
   const accrualDocumentId = await postPayrollRunToAccrual(id);

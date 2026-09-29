@@ -82,9 +82,15 @@ export async function runPeriodCloseChecklist(year: number, month: number): Prom
   });
 
   const period = await prisma.accountingPeriod.findUnique({ where: { year_month: { year, month } } });
-  const incompletePayroll = period
-    ? await prisma.payrollRun.count({ where: { periodId: period.id, status: { notIn: ["APPROVED", "PAID"] } } })
-    : 0;
+  // The final settlement for this month is paid next month but is this month's expense.
+  const next = monthRange(month === 12 ? year + 1 : year, month === 12 ? 1 : month + 1);
+  const incompletePayroll = await prisma.payrollRun.count({
+    where: {
+      status: { notIn: ["APPROVED", "PAID"] },
+      // A final settlement belongs to the month it is for, not to the month it is paid in.
+      OR: [...(period ? [{ periodId: period.id, kind: { not: "FINAL" as const } }] : []), { kind: "FINAL", payoutDate: { gte: next.from, lte: next.to } }],
+    },
+  });
   results.push({
     checkType: "incomplete_payroll",
     label: "Незавершённые зарплатные расчёты",
@@ -93,7 +99,24 @@ export async function runPeriodCloseChecklist(year: number, month: number): Prom
     message:
       incompletePayroll === 0
         ? "Незавершённых расчётов зарплаты за период нет."
-        : `Расчётов зарплаты не в статусе «утверждён»/«выплачен»: ${incompletePayroll}.`,
+        : `Расчётов зарплаты не в статусе «утверждён»/«выплачен»: ${incompletePayroll} (включая окончательный расчёт за этот месяц с выплатой в следующем).`,
+  });
+
+  // An advance for this month without a final settlement yet: the month's salary expense is incomplete.
+  const [advanceOrgs, finalOrgs] = await Promise.all([
+    prisma.payrollRun.findMany({ where: { kind: "ADVANCE", payoutDate: { gte: from, lte: to } }, select: { organizationId: true }, distinct: ["organizationId"] }),
+    prisma.payrollRun.findMany({ where: { kind: "FINAL", payoutDate: { gte: next.from, lte: next.to } }, select: { organizationId: true }, distinct: ["organizationId"] }),
+  ]);
+  const withoutFinal = advanceOrgs.filter((a) => !finalOrgs.some((f) => f.organizationId === a.organizationId)).length;
+  results.push({
+    checkType: "final_payroll_missing",
+    label: "Окончательный расчёт зарплаты за месяц",
+    severity: "warning",
+    passed: withoutFinal === 0,
+    message:
+      withoutFinal === 0
+        ? "Для всех организаций с авансом за месяц есть окончательный расчёт (или авансов не было)."
+        : `Организаций с авансом за месяц, но без окончательного расчёта: ${withoutFinal}. Окончательный расчёт — расход этого месяца; после закрытия периода его не утвердить, пока период не открыт.`,
   });
 
   const pendingPaymentRequests = await prisma.paymentRequest.count({
