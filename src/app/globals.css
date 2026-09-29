@@ -919,6 +919,30 @@ tbody tr:hover {
   font-weight: 700;
 }
 
+/* The dip within the day (a payment before the day's receipts). */
+.pc-day__low {
+  margin-top: auto;
+  font-size: 11px;
+  color: var(--color-graphite-700);
+  padding-top: 3px;
+}
+
+.pc-day__low--negative {
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+.pc-day__low + .pc-day__balance {
+  margin-top: 0;
+}
+
+.pc-request__time {
+  font-weight: 400;
+  color: var(--color-graphite-500);
+  margin-right: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
 .pc-request {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -1025,7 +1049,8 @@ tbody tr:hover {
     color: var(--color-graphite-500);
     text-transform: uppercase;
   }
-  .pc-day__balance {
+  .pc-day__balance,
+  .pc-day__low {
     margin-top: 2px;
   }
 }

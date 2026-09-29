@@ -5,7 +5,7 @@ import { hasPermission, type SessionPayload } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { formatMoney } from "@/lib/money";
-import { localDateKey, parseAccountKey, parseRescheduleDate, requestPlacement } from "@/lib/payment-calendar";
+import { compareDueTime, localDateKey, parseAccountKey, parseDueTime, parseRescheduleDate, requestPlacement, showDueDate } from "@/lib/payment-calendar";
 import { PAYMENT_REQUEST_STATUS_LABELS } from "@/lib/payment-requests/labels";
 import { scheduleSummary, validateSchedule, type ScheduleRowInput } from "@/lib/payment-requests/parts";
 
@@ -19,7 +19,23 @@ export type PlanResult = { ok: true; message: string } | { ok: false; error: str
 type Db = Prisma.TransactionClient;
 
 const fail = (error: string): PlanResult => ({ ok: false, error });
-const showDay = (d: Date) => d.toLocaleDateString("ru-RU", { timeZone: "UTC" });
+
+/**
+ * Новый срок из формы: дата и время. Время не передано (перетаскивание в
+ * календаре) — остаётся прежнее; передано пустым — «в течение дня».
+ */
+function parseNewDue(dateRaw: unknown, timeRaw: unknown, currentTime: string | null) {
+  const parsed = parseRescheduleDate(dateRaw, localDateKey());
+  if ("error" in parsed) return parsed;
+  if (timeRaw === undefined) return { ...parsed, time: currentTime };
+  const time = parseDueTime(timeRaw);
+  if ("error" in time) return time;
+  return { ...parsed, time: time.time };
+}
+
+/** Ближайшая часть: по дате, затем по времени (без времени — после частей со временем). */
+const byDue = (a: { dueDate: Date; dueTime: string | null }, b: { dueDate: Date; dueTime: string | null }) =>
+  a.dueDate.getTime() - b.dueDate.getTime() || compareDueTime(a.dueTime, b.dueTime);
 
 /** Сроки и счета заявок: согласующие, казначейство (банк и касса), администратор. */
 export function canPlanRequests(session: SessionPayload): boolean {
@@ -47,9 +63,9 @@ function revalidatePlan(paths: string[]) {
 async function syncRequestDueDate(db: Db, requestId: string) {
   const parts = await db.paymentRequestPart.findMany({ where: { paymentRequestId: requestId } });
   if (parts.length === 0) return;
-  const summary = scheduleSummary(parts);
-  const due = summary.nextDueDate ?? parts.reduce((max, p) => (p.dueDate > max ? p.dueDate : max), parts[0].dueDate);
-  await db.paymentRequest.update({ where: { id: requestId }, data: { dueDate: due } });
+  const unpaid = parts.filter((p) => !p.paidAt).sort(byDue);
+  const next = unpaid[0] ?? [...parts].sort(byDue).at(-1)!;
+  await db.paymentRequest.update({ where: { id: requestId }, data: { dueDate: next.dueDate, dueTime: next.dueTime } });
 }
 
 async function loadMovableRequest(id: string) {
@@ -62,26 +78,40 @@ async function loadMovableRequest(id: string) {
 }
 
 /** Перенос срока заявки, которая платится одной суммой. */
-export async function rescheduleRequest(session: SessionPayload, id: string, dateRaw: unknown, reasonRaw: unknown): Promise<PlanResult> {
+export async function rescheduleRequest(
+  session: SessionPayload,
+  id: string,
+  dateRaw: unknown,
+  reasonRaw: unknown,
+  timeRaw?: unknown,
+): Promise<PlanResult> {
   if (!canPlanRequests(session)) return fail("Переносить срок оплаты могут согласующие заявки и те, кто ведёт банк и кассу");
-  const parsed = parseRescheduleDate(dateRaw, localDateKey());
-  if ("error" in parsed) return fail(parsed.error);
   const loaded = await loadMovableRequest(id);
   if ("error" in loaded) return fail(loaded.error!);
   const { request } = loaded;
+  const parsed = parseNewDue(dateRaw, timeRaw, request.dueTime);
+  if ("error" in parsed) return fail(parsed.error);
   if (request.parts.length > 0) return fail("У заявки график оплаты частями — переносите отдельные части");
-  if (request.dueDate.toISOString().slice(0, 10) === parsed.key) return { ok: true, message: "Срок не изменился" };
+  if (request.dueDate.toISOString().slice(0, 10) === parsed.key && request.dueTime === parsed.time) return { ok: true, message: "Срок не изменился" };
   const reason = String(reasonRaw ?? "").trim().slice(0, 500) || null;
 
   // Conditional on the date and status the user saw, so two people moving the same request don't overwrite silently.
   const updated = await prisma.$transaction(async (db) => {
     const moved = await db.paymentRequest.updateMany({
-      where: { id, dueDate: request.dueDate, status: request.status },
-      data: { dueDate: parsed.date },
+      where: { id, dueDate: request.dueDate, dueTime: request.dueTime, status: request.status },
+      data: { dueDate: parsed.date, dueTime: parsed.time },
     });
     if (moved.count === 0) return null;
     await db.paymentRequestReschedule.create({
-      data: { paymentRequestId: id, fromDate: request.dueDate, toDate: parsed.date, changedById: session.userId, reason },
+      data: {
+        paymentRequestId: id,
+        fromDate: request.dueDate,
+        toDate: parsed.date,
+        fromTime: request.dueTime,
+        toTime: parsed.time,
+        changedById: session.userId,
+        reason,
+      },
     });
     return db.paymentRequest.findUniqueOrThrow({ where: { id } });
   });
@@ -96,27 +126,45 @@ export async function rescheduleRequest(session: SessionPayload, id: string, dat
     after: { ...updated, rescheduleReason: reason } as never,
   });
   revalidatePlan([`/payment-requests/${id}`]);
-  return { ok: true, message: `Срок оплаты перенесён: ${showDay(request.dueDate)} → ${showDay(parsed.date)}` };
+  return { ok: true, message: `Срок оплаты перенесён: ${showDueDate(request.dueDate, request.dueTime)} → ${showDueDate(parsed.date, parsed.time)}` };
 }
 
 /** Перенос одной части графика оплаты. */
-export async function reschedulePart(session: SessionPayload, partId: string, dateRaw: unknown, reasonRaw: unknown): Promise<PlanResult> {
+export async function reschedulePart(
+  session: SessionPayload,
+  partId: string,
+  dateRaw: unknown,
+  reasonRaw: unknown,
+  timeRaw?: unknown,
+): Promise<PlanResult> {
   if (!canPlanRequests(session)) return fail("Переносить срок оплаты могут согласующие заявки и те, кто ведёт банк и кассу");
-  const parsed = parseRescheduleDate(dateRaw, localDateKey());
-  if ("error" in parsed) return fail(parsed.error);
   const part = await prisma.paymentRequestPart.findUnique({ where: { id: partId } });
   if (!part) return fail("Часть оплаты не найдена");
   if (part.paidAt) return fail("Эта часть уже оплачена");
+  const parsed = parseNewDue(dateRaw, timeRaw, part.dueTime);
+  if ("error" in parsed) return fail(parsed.error);
   const loaded = await loadMovableRequest(part.paymentRequestId);
   if ("error" in loaded) return fail(loaded.error!);
-  if (part.dueDate.toISOString().slice(0, 10) === parsed.key) return { ok: true, message: "Срок не изменился" };
+  if (part.dueDate.toISOString().slice(0, 10) === parsed.key && part.dueTime === parsed.time) return { ok: true, message: "Срок не изменился" };
   const reason = String(reasonRaw ?? "").trim().slice(0, 500) || null;
 
   const done = await prisma.$transaction(async (db) => {
-    const moved = await db.paymentRequestPart.updateMany({ where: { id: partId, dueDate: part.dueDate, paidAt: null }, data: { dueDate: parsed.date } });
+    const moved = await db.paymentRequestPart.updateMany({
+      where: { id: partId, dueDate: part.dueDate, dueTime: part.dueTime, paidAt: null },
+      data: { dueDate: parsed.date, dueTime: parsed.time },
+    });
     if (moved.count === 0) return false;
     await db.paymentRequestReschedule.create({
-      data: { paymentRequestId: part.paymentRequestId, partId, fromDate: part.dueDate, toDate: parsed.date, changedById: session.userId, reason },
+      data: {
+        paymentRequestId: part.paymentRequestId,
+        partId,
+        fromDate: part.dueDate,
+        toDate: parsed.date,
+        fromTime: part.dueTime,
+        toTime: parsed.time,
+        changedById: session.userId,
+        reason,
+      },
     });
     await syncRequestDueDate(db, part.paymentRequestId);
     return true;
@@ -129,10 +177,13 @@ export async function reschedulePart(session: SessionPayload, partId: string, da
     entityId: part.paymentRequestId,
     action: "reschedule_part",
     before: part as never,
-    after: { ...part, dueDate: parsed.date, rescheduleReason: reason } as never,
+    after: { ...part, dueDate: parsed.date, dueTime: parsed.time, rescheduleReason: reason } as never,
   });
   revalidatePlan([`/payment-requests/${part.paymentRequestId}`]);
-  return { ok: true, message: `Часть на ${formatMoney(part.amount)} перенесена: ${showDay(part.dueDate)} → ${showDay(parsed.date)}` };
+  return {
+    ok: true,
+    message: `Часть на ${formatMoney(part.amount)} перенесена: ${showDueDate(part.dueDate, part.dueTime)} → ${showDueDate(parsed.date, parsed.time)}`,
+  };
 }
 
 /**
@@ -141,22 +192,36 @@ export async function reschedulePart(session: SessionPayload, partId: string, da
  * периоде (срок — договорённость о платеже, а не учётная цифра). Каждый
  * перенос — в истории документа и в журнале аудита.
  */
-export async function rescheduleDocument(session: SessionPayload, id: string, dateRaw: unknown, reasonRaw: unknown): Promise<PlanResult> {
+export async function rescheduleDocument(
+  session: SessionPayload,
+  id: string,
+  dateRaw: unknown,
+  reasonRaw: unknown,
+  timeRaw?: unknown,
+): Promise<PlanResult> {
   if (!canPlanDocuments(session)) return fail("Переносить срок оплаты документа могут те, кто ведёт начисления или деньги");
-  const parsed = parseRescheduleDate(dateRaw, localDateKey());
-  if ("error" in parsed) return fail(parsed.error);
   const doc = await prisma.accrualDocument.findUnique({ where: { id } });
   if (!doc) return fail("Документ не найден");
+  const parsed = parseNewDue(dateRaw, timeRaw, doc.dueTime);
+  if ("error" in parsed) return fail(parsed.error);
   if (doc.status === "CANCELLED") return fail("Документ отменён");
   if (doc.paymentStatus === "PAID" || doc.paymentStatus === "OVERPAID") return fail("Документ уже оплачен — срок оплаты не нужен");
-  if (doc.dueDate?.toISOString().slice(0, 10) === parsed.key) return { ok: true, message: "Срок не изменился" };
+  if (doc.dueDate?.toISOString().slice(0, 10) === parsed.key && doc.dueTime === parsed.time) return { ok: true, message: "Срок не изменился" };
   const reason = String(reasonRaw ?? "").trim().slice(0, 500) || null;
 
   const done = await prisma.$transaction(async (db) => {
-    const moved = await db.accrualDocument.updateMany({ where: { id, version: doc.version }, data: { dueDate: parsed.date, version: { increment: 1 } } });
+    const moved = await db.accrualDocument.updateMany({ where: { id, version: doc.version }, data: { dueDate: parsed.date, dueTime: parsed.time, version: { increment: 1 } } });
     if (moved.count === 0) return false;
     await db.accrualDueDateChange.create({
-      data: { documentId: id, fromDate: doc.dueDate, toDate: parsed.date, changedById: session.userId, reason },
+      data: {
+        documentId: id,
+        fromDate: doc.dueDate,
+        toDate: parsed.date,
+        fromTime: doc.dueTime,
+        toTime: parsed.time,
+        changedById: session.userId,
+        reason,
+      },
     });
     return true;
   });
@@ -167,14 +232,14 @@ export async function rescheduleDocument(session: SessionPayload, id: string, da
     entityType: "accrual_document",
     entityId: id,
     action: "reschedule_due_date",
-    before: { dueDate: doc.dueDate } as never,
-    after: { dueDate: parsed.date, reason } as never,
+    before: { dueDate: doc.dueDate, dueTime: doc.dueTime } as never,
+    after: { dueDate: parsed.date, dueTime: parsed.time, reason } as never,
     accrualDocumentId: id,
   });
   revalidatePlan([`/accruals/${id}`, "/accruals", "/reports/debts"]);
   return {
     ok: true,
-    message: `Срок оплаты документа № ${doc.number} перенесён: ${doc.dueDate ? showDay(doc.dueDate) : "не был указан"} → ${showDay(parsed.date)}`,
+    message: `Срок оплаты документа № ${doc.number} перенесён: ${doc.dueDate ? showDueDate(doc.dueDate, doc.dueTime) : "не был указан"} → ${showDueDate(parsed.date, parsed.time)}`,
   };
 }
 
@@ -273,15 +338,27 @@ export async function savePaymentSchedule(session: SessionPayload, requestId: st
     for (const [i, row] of checked.rows.entries()) {
       if (row.id) {
         const before = unpaid.find((p) => p.id === row.id)!;
-        await db.paymentRequestPart.update({ where: { id: row.id }, data: { dueDate: row.dueDate, amount: row.amount, sortOrder: startOrder + i + 1 } });
-        if (before.dueDate.getTime() !== row.dueDate.getTime()) {
+        await db.paymentRequestPart.update({
+          where: { id: row.id },
+          data: { dueDate: row.dueDate, dueTime: row.dueTime, amount: row.amount, sortOrder: startOrder + i + 1 },
+        });
+        if (before.dueDate.getTime() !== row.dueDate.getTime() || before.dueTime !== row.dueTime) {
           await db.paymentRequestReschedule.create({
-            data: { paymentRequestId: requestId, partId: row.id, fromDate: before.dueDate, toDate: row.dueDate, changedById: session.userId, reason: "Правка графика оплаты" },
+            data: {
+              paymentRequestId: requestId,
+              partId: row.id,
+              fromDate: before.dueDate,
+              toDate: row.dueDate,
+              fromTime: before.dueTime,
+              toTime: row.dueTime,
+              changedById: session.userId,
+              reason: "Правка графика оплаты",
+            },
           });
         }
       } else {
         await db.paymentRequestPart.create({
-          data: { paymentRequestId: requestId, dueDate: row.dueDate, amount: row.amount, sortOrder: startOrder + i + 1 },
+          data: { paymentRequestId: requestId, dueDate: row.dueDate, dueTime: row.dueTime, amount: row.amount, sortOrder: startOrder + i + 1 },
         });
       }
     }
@@ -308,10 +385,10 @@ export async function removePaymentSchedule(session: SessionPayload, requestId: 
   const { request } = loaded;
   if (request.parts.length === 0) return { ok: true, message: "Графика не было" };
   if (request.parts.some((p) => p.paidAt)) return fail("Часть уже оплачена — объединить график нельзя, можно только изменить неоплаченные части");
-  const first = request.parts.reduce((min, p) => (p.dueDate < min ? p.dueDate : min), request.parts[0].dueDate);
+  const first = [...request.parts].sort(byDue)[0];
   await prisma.$transaction([
     prisma.paymentRequestPart.deleteMany({ where: { paymentRequestId: requestId } }),
-    prisma.paymentRequest.update({ where: { id: requestId }, data: { dueDate: first } }),
+    prisma.paymentRequest.update({ where: { id: requestId }, data: { dueDate: first.dueDate, dueTime: first.dueTime } }),
   ]);
   await logAudit({
     userId: session.userId,
@@ -321,7 +398,7 @@ export async function removePaymentSchedule(session: SessionPayload, requestId: 
     before: { parts: request.parts } as never,
   });
   revalidatePlan([`/payment-requests/${requestId}`]);
-  return { ok: true, message: `График объединён: одна оплата ${showDay(first)}` };
+  return { ok: true, message: `График объединён: одна оплата ${showDueDate(first.dueDate, first.dueTime)}` };
 }
 
 /**

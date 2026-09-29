@@ -8,7 +8,7 @@ import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { PaymentRequestStatus } from "@prisma/client";
 import { PAYMENT_REQUEST_STATUS_LABELS } from "@/lib/payment-requests/labels";
-import { parseAccountKey } from "@/lib/payment-calendar";
+import { parseAccountKey, parseDueTime } from "@/lib/payment-calendar";
 import { readScheduleRows } from "@/lib/payment-requests/parts";
 import {
   assignPaymentAccount,
@@ -58,6 +58,8 @@ export async function createPaymentRequestAction(formData: FormData) {
   if (!organizationId || !amountRaw || Number(amountRaw) <= 0 || !dueDateRaw) {
     redirect(`/payment-requests/new?error=${encodeURIComponent("Заполните организацию, сумму и срок оплаты")}`);
   }
+  const dueTime = parseDueTime(formData.get("dueTime"));
+  if ("error" in dueTime) redirect(`/payment-requests/new?error=${encodeURIComponent(dueTime.error)}`);
 
   const payAccountRaw = String(formData.get("payAccount") ?? "");
   const payAccount = payAccountRaw ? parseAccountKey(payAccountRaw) : { bankAccountId: null, cashAccountId: null };
@@ -81,6 +83,7 @@ export async function createPaymentRequestAction(formData: FormData) {
       cashFlowArticleId,
       amount: amountRaw,
       dueDate: new Date(dueDateRaw),
+      dueTime: "time" in dueTime ? dueTime.time : null,
       comment,
       createdById: session.userId,
       status: PaymentRequestStatus.PENDING_APPROVAL,
@@ -314,6 +317,8 @@ export async function resubmitPaymentRequestAction(id: string, formData: FormDat
   const note = String(formData.get("resubmitNote") ?? "").trim().slice(0, 1000) || null;
   if (!/^\d+(\.\d{1,2})?$/.test(amountRaw) || Number(amountRaw) <= 0) fail("Сумма — положительное число");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDateRaw)) fail("Укажите срок оплаты");
+  const dueTime = parseDueTime(formData.get("dueTime"));
+  if ("error" in dueTime) fail(dueTime.error);
 
   const route = selectApprovalRoute(await loadActiveRoutes(), { amount: amountRaw, organizationId: request.organizationId });
   const amountChanged = Number(request.amount.toString()) !== Number(amountRaw);
@@ -325,6 +330,7 @@ export async function resubmitPaymentRequestAction(id: string, formData: FormDat
         cashFlowArticleId,
         amount: amountRaw,
         dueDate: new Date(`${dueDateRaw}T00:00:00Z`),
+        dueTime: "time" in dueTime ? dueTime.time : null,
         comment,
         status: PaymentRequestStatus.PENDING_APPROVAL,
         routeId: route?.id ?? null,
@@ -369,17 +375,17 @@ export async function cancelPaymentRequestAction(id: string, formData?: FormData
   await transition(id, PaymentRequestStatus.CANCELLED, "cancel", formData);
 }
 
-/** Перенос срока со страницы заявки (форма с датой и причиной). */
+/** Перенос срока со страницы заявки (форма с датой, временем и причиной). */
 export async function reschedulePaymentRequestAction(id: string, formData: FormData) {
   const session = await requireSession();
-  const result = await rescheduleRequest(session, id, formData.get("dueDate"), formData.get("reason"));
+  const result = await rescheduleRequest(session, id, formData.get("dueDate"), formData.get("reason"), formData.get("dueTime") ?? "");
   backToRequest(id, result);
 }
 
-/** График оплаты частями: параллельные поля partId / partDueDate / partAmount. */
+/** График оплаты частями: параллельные поля partId / partDueDate / partDueTime / partAmount. */
 export async function savePaymentScheduleAction(id: string, formData: FormData) {
   const session = await requireSession();
-  const rows = readScheduleRows(formData.getAll("partId"), formData.getAll("partDueDate"), formData.getAll("partAmount"));
+  const rows = readScheduleRows(formData.getAll("partId"), formData.getAll("partDueDate"), formData.getAll("partAmount"), formData.getAll("partDueTime"));
   const result = await savePaymentSchedule(session, id, rows);
   backToRequest(id, result);
 }

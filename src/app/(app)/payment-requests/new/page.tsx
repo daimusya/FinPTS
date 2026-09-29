@@ -82,6 +82,10 @@ export default async function NewPaymentRequestPage({
               <span>Срок оплаты *</span>
               <input type="date" name="dueDate" required />
             </label>
+            <label className="field">
+              <span>Время оплаты</span>
+              <input type="time" name="dueTime" id="pr-due-time" title="Необязательно: когда платёж должен пройти (например, до отсечки банка). Пусто — в течение дня" />
+            </label>
             <label className="field" style={{ gridColumn: "1 / -1" }}>
               <span>Счёт или касса оплаты (необязательно, для прогноза по счетам)</span>
               <select name="payAccount" defaultValue="">

@@ -244,7 +244,7 @@ export async function cancelAccrualDocumentAction(id: string) {
 /** Срок оплаты документа (в т. ч. проведённого): меняется только срок, с причиной и историей. */
 export async function rescheduleDocumentAction(id: string, formData: FormData) {
   const session = await requireSession();
-  const result = await rescheduleDocument(session, id, formData.get("dueDate"), formData.get("reason"));
+  const result = await rescheduleDocument(session, id, formData.get("dueDate"), formData.get("reason"), formData.get("dueTime") ?? "");
   const param = result.ok ? `notice=${encodeURIComponent(result.message)}` : `error=${encodeURIComponent((result as { error: string }).error)}`;
   redirect(`/accruals/${id}?${param}`);
 }

@@ -5,6 +5,8 @@ export interface ExpectedMovement {
   date: Date;
   amount: number | string;
   direction: "INFLOW" | "OUTFLOW";
+  /** Время внутри дня «ЧЧ:ММ»; пусто — в течение дня. */
+  time?: string | null;
 }
 
 export interface CalendarRow {
@@ -12,6 +14,70 @@ export interface CalendarRow {
   inflow: Decimal;
   outflow: Decimal;
   balance: Decimal;
+  /** Остаток в худший момент дня, если он ниже остатка на конец дня; иначе null. */
+  lowWithinDay: Decimal | null;
+  /** Когда остаток опускается до минимума: «ЧЧ:ММ» или null — с начала дня. */
+  lowTime: string | null;
+}
+
+/** Время платежа «ЧЧ:ММ» из формы; пусто — в течение дня (null). */
+export function parseDueTime(raw: unknown): { time: string | null } | { error: string } {
+  const text = String(raw ?? "").trim();
+  if (!text) return { time: null };
+  const match = /^(\d{1,2})[:.](\d{2})$/.exec(text);
+  if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) return { error: "Время оплаты — в формате ЧЧ:ММ, например 10:30" };
+  return { time: `${match[1].padStart(2, "0")}:${match[2]}` };
+}
+
+/** Порядок по времени внутри дня: со временем — по возрастанию, без времени — после них. */
+export function compareDueTime(a: string | null | undefined, b: string | null | undefined): number {
+  const x = a || "~";
+  const y = b || "~";
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+/** «15.10.2026» или «15.10.2026 в 10:30». */
+export function showDueDate(date: Date, time?: string | null): string {
+  const day = date.toLocaleDateString("ru-RU", { timeZone: "UTC" });
+  return time ? `${day} в ${time}` : day;
+}
+
+/**
+ * Порядок движений внутри дня — осторожная оценка: платёж без времени
+ * считается в начале дня, поступление без времени — в конце; при одинаковом
+ * времени сначала платежи. Так видно, хватит ли денег на утренние платежи
+ * до дневных поступлений.
+ */
+function intradayOrderKey(m: Pick<ExpectedMovement, "direction" | "time">): string {
+  if (!m.time) return m.direction === "OUTFLOW" ? "" : "~";
+  return `${m.time}${m.direction === "OUTFLOW" ? "0" : "1"}`;
+}
+
+/**
+ * Минимальный остаток внутри дня от остатка на начало дня. Возвращает
+ * минимум после каждого движения и время, когда он наступает (null — с
+ * начала дня: платёж без времени).
+ */
+export function intradayLow(
+  opening: Decimal,
+  movements: Array<Pick<ExpectedMovement, "amount" | "direction" | "time">>,
+): { low: Decimal; time: string | null; closing: Decimal } {
+  const ordered = [...movements].sort((a, b) => {
+    const x = intradayOrderKey(a);
+    const y = intradayOrderKey(b);
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+  let running = opening;
+  let low: Decimal | null = null;
+  let time: string | null = null;
+  for (const m of ordered) {
+    running = m.direction === "INFLOW" ? running.plus(toDecimal(m.amount)) : running.minus(toDecimal(m.amount));
+    if (low === null || running.lessThan(low)) {
+      low = running;
+      time = m.time ?? null;
+    }
+  }
+  return { low: low ?? opening, time, closing: running };
 }
 
 function dateKey(date: Date): string {
@@ -19,16 +85,17 @@ function dateKey(date: Date): string {
 }
 
 export function buildCalendarRows(startingBalance: number | string, movements: ExpectedMovement[]): CalendarRow[] {
-  const byDate = new Map<string, { inflow: Decimal; outflow: Decimal }>();
+  const byDate = new Map<string, { inflow: Decimal; outflow: Decimal; list: ExpectedMovement[] }>();
 
   for (const m of movements) {
     const key = dateKey(m.date);
-    const entry = byDate.get(key) ?? { inflow: new Decimal(0), outflow: new Decimal(0) };
+    const entry = byDate.get(key) ?? { inflow: new Decimal(0), outflow: new Decimal(0), list: [] };
     if (m.direction === "INFLOW") {
       entry.inflow = entry.inflow.plus(toDecimal(m.amount));
     } else {
       entry.outflow = entry.outflow.plus(toDecimal(m.amount));
     }
+    entry.list.push(m);
     byDate.set(key, entry);
   }
 
@@ -36,9 +103,11 @@ export function buildCalendarRows(startingBalance: number | string, movements: E
   let running = toDecimal(startingBalance);
   const rows: CalendarRow[] = [];
   for (const key of sortedDates) {
-    const { inflow, outflow } = byDate.get(key)!;
-    running = running.plus(inflow).minus(outflow);
-    rows.push({ date: key, inflow, outflow, balance: running });
+    const { inflow, outflow, list } = byDate.get(key)!;
+    const day = intradayLow(running, list);
+    running = day.closing;
+    const dips = day.low.lessThan(running);
+    rows.push({ date: key, inflow, outflow, balance: running, lowWithinDay: dips ? day.low : null, lowTime: dips ? day.time : null });
   }
   return rows;
 }
@@ -111,6 +180,10 @@ export interface CalendarDay {
   outflow: Decimal;
   /** Прогнозный остаток на конец дня; для прошедших дней — null (прогноз строится от сегодня). */
   balance: Decimal | null;
+  /** Остаток в худший момент дня, если он ниже остатка на конец дня (платёж раньше поступления). */
+  lowWithinDay: Decimal | null;
+  /** Когда остаток опускается до минимума: «ЧЧ:ММ» или null — с начала дня. */
+  lowTime: string | null;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -137,21 +210,24 @@ export function buildMonthGrid(input: {
   const sundayOffset = (7 - new Date(last).getUTCDay()) % 7;
   const gridEnd = last + sundayOffset * DAY_MS;
 
-  const perDay = new Map<string, { inflow: Decimal; outflow: Decimal }>();
+  const perDay = new Map<string, { inflow: Decimal; outflow: Decimal; list: CalendarMovement[] }>();
   let carried = toDecimal(input.startingBalance);
   const gridStartKey = keyOf(gridStart);
   for (const m of input.movements) {
     const raw = m.date.toISOString().slice(0, 10);
-    const key = raw < input.todayKey ? input.todayKey : raw;
+    const overdue = raw < input.todayKey;
+    const key = overdue ? input.todayKey : raw;
     const signed = m.direction === "INFLOW" ? toDecimal(m.amount) : toDecimal(m.amount).negated();
     // Everything due before the visible grid (but not before today) is already in the opening balance.
     if (key < gridStartKey) {
       carried = carried.plus(signed);
       continue;
     }
-    const entry = perDay.get(key) ?? { inflow: new Decimal(0), outflow: new Decimal(0) };
+    const entry = perDay.get(key) ?? { inflow: new Decimal(0), outflow: new Decimal(0), list: [] };
     if (m.direction === "INFLOW") entry.inflow = entry.inflow.plus(toDecimal(m.amount));
     else entry.outflow = entry.outflow.plus(toDecimal(m.amount));
+    // An overdue payment is due right away, whatever time it once had.
+    entry.list.push(overdue ? { ...m, time: null } : m);
     perDay.set(key, entry);
   }
 
@@ -159,9 +235,18 @@ export function buildMonthGrid(input: {
   let running = carried;
   for (let ms = gridStart; ms <= gridEnd; ms += DAY_MS) {
     const date = keyOf(ms);
-    const entry = perDay.get(date) ?? { inflow: new Decimal(0), outflow: new Decimal(0) };
+    const entry = perDay.get(date) ?? { inflow: new Decimal(0), outflow: new Decimal(0), list: [] };
     const isPast = date < input.todayKey;
-    if (!isPast) running = running.plus(entry.inflow).minus(entry.outflow);
+    let lowWithinDay: Decimal | null = null;
+    let lowTime: string | null = null;
+    if (!isPast) {
+      const day = intradayLow(running, entry.list);
+      running = day.closing;
+      if (day.low.lessThan(running)) {
+        lowWithinDay = day.low;
+        lowTime = day.time;
+      }
+    }
     const override = input.calendar.get(date);
     const dow = new Date(ms).getUTCDay();
     const isWorking = override ? override.kind === "workday" : dow !== 0 && dow !== 6;
@@ -177,6 +262,8 @@ export function buildMonthGrid(input: {
       inflow: entry.inflow,
       outflow: entry.outflow,
       balance: isPast ? null : running,
+      lowWithinDay,
+      lowTime,
     });
   }
   return weeks;

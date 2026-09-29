@@ -640,6 +640,8 @@ model AccrualDocument {
   status          AccrualDocumentStatus  @default(DRAFT)
   paymentStatus   PaymentStatus          @default(UNPAID)
   dueDate         DateTime?
+  /// Время платежа внутри дня «ЧЧ:ММ» (по Москве); пусто — в течение дня.
+  dueTime         String?                @db.VarChar(5)
   responsibleId   String?
   sourceSystem    String?                // e.g. "1C", "manual"
   externalId      String?
@@ -841,6 +843,8 @@ model PaymentRequest {
   cashFlowArticleId String?
   amount            Decimal               @db.Decimal(18, 2)
   dueDate           DateTime
+  /// Время платежа внутри дня «ЧЧ:ММ» (по Москве); пусто — в течение дня.
+  dueTime           String?               @db.VarChar(5)
   status            PaymentRequestStatus  @default(DRAFT)
   comment           String?
   createdById       String
@@ -903,6 +907,8 @@ model PaymentRequestReschedule {
   paymentRequestId String
   fromDate         DateTime
   toDate           DateTime
+  fromTime         String?  @db.VarChar(5)
+  toTime           String?  @db.VarChar(5)
   changedById      String
   reason           String?
   changedAt        DateTime @default(now())
@@ -924,6 +930,8 @@ model PaymentRequestPart {
   paymentRequestId String
   sortOrder        Int
   dueDate          DateTime
+  /// Время платежа внутри дня «ЧЧ:ММ» (по Москве); пусто — в течение дня.
+  dueTime          String?   @db.VarChar(5)
   amount           Decimal   @db.Decimal(18, 2)
   paidAt           DateTime?
   paidById         String?
@@ -945,6 +953,8 @@ model AccrualDueDateChange {
   documentId  String
   fromDate    DateTime?
   toDate      DateTime
+  fromTime    String?   @db.VarChar(5)
+  toTime      String?   @db.VarChar(5)
   changedById String
   reason      String?
   changedAt   DateTime  @default(now())

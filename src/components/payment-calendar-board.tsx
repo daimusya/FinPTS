@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useTransition, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
 import { assignCalendarAccountAction, moveCalendarItemAction } from "@/app/(app)/payment-calendar/actions";
+import { compareDueTime } from "@/lib/payment-calendar";
 
 export interface BoardDay {
   date: string;
@@ -19,6 +20,12 @@ export interface BoardDay {
   balance: string | null;
   balanceFull: string | null;
   balanceNegative: boolean;
+  /** Остаток в худший момент дня, если он ниже остатка на конец дня. */
+  low: string | null;
+  lowFull: string | null;
+  /** «ЧЧ:ММ» или null — с начала дня. */
+  lowTime: string | null;
+  lowNegative: boolean;
 }
 
 export type BoardItemKind = "request" | "part" | "document";
@@ -28,6 +35,8 @@ export interface BoardItem {
   id: string;
   href: string;
   dueDate: string;
+  /** Время «ЧЧ:ММ» или null — в течение дня. */
+  dueTime: string | null;
   direction: "INFLOW" | "OUTFLOW";
   amount: string;
   amountFull: string;
@@ -57,6 +66,8 @@ const OVERDUE_SHOWN = 40;
 
 const showDate = (key: string) => new Date(`${key}T00:00:00Z`).toLocaleDateString("ru-RU", { timeZone: "UTC" });
 const itemKey = (item: BoardItem) => `${item.kind}:${item.id}`;
+/** В дне: сначала платежи со временем по порядку, затем без времени. */
+const byTime = (a: BoardItem, b: BoardItem) => compareDueTime(a.dueTime, b.dueTime);
 
 /**
  * Сетка платёжного календаря: заявки, их части и документы начислений можно
@@ -83,6 +94,7 @@ export function PaymentCalendarBoard({
   const [overDate, setOverDate] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [pickedDate, setPickedDate] = useState("");
+  const [pickedTime, setPickedTime] = useState("");
   const [pickedAccount, setPickedAccount] = useState("");
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
@@ -104,6 +116,7 @@ export function PaymentCalendarBoard({
     list.push(item);
     byDate.set(dateOf(item), list);
   }
+  for (const list of byDate.values()) list.sort(byTime);
   const selected = items.find((i) => itemKey(i) === selectedKey) ?? null;
 
   function run(action: () => Promise<{ ok: boolean; message?: string; error?: string }>, onError?: () => void) {
@@ -120,8 +133,10 @@ export function PaymentCalendarBoard({
     });
   }
 
-  function move(item: BoardItem, date: string) {
-    if (!item.movable || date === dateOf(item)) return;
+  /** time не передано — перетаскивание, время остаётся прежним; "" — в течение дня. */
+  function move(item: BoardItem, date: string, time?: string) {
+    if (!item.movable) return;
+    if (date === dateOf(item) && (time === undefined || time === (item.dueTime ?? ""))) return;
     if (date < todayKey) {
       setMessage({ kind: "error", text: "Срок оплаты нельзя перенести в прошлое" });
       return;
@@ -129,7 +144,7 @@ export function PaymentCalendarBoard({
     const key = itemKey(item);
     setMoved((m) => ({ ...m, [key]: date }));
     run(
-      () => moveCalendarItemAction(item.kind, item.id, date),
+      () => moveCalendarItemAction(item.kind, item.id, date, time),
       () =>
         setMoved((m) => {
           const rest = { ...m };
@@ -191,12 +206,14 @@ export function PaymentCalendarBoard({
         onClick={() => {
           setSelectedKey(key === selectedKey ? null : key);
           setPickedDate(dateOf(item) < todayKey ? todayKey : dateOf(item));
+          setPickedTime(item.dueTime ?? "");
           setPickedAccount(item.accountKey ?? "");
         }}
-        title={`${item.title} · ${item.amountFull} · ${item.subtitle}${item.counted ? "" : " · не входит в прогноз"}`}
+        title={`${item.title} · ${item.amountFull}${item.dueTime ? ` · в ${item.dueTime}` : ""} · ${item.subtitle}${item.counted ? "" : " · не входит в прогноз"}`}
         aria-pressed={selectedKey === key}
       >
         <span className="pc-request__amount">
+          {item.dueTime ? <span className="pc-request__time">{item.dueTime}</span> : null}
           {item.direction === "INFLOW" ? "+" : "−"}
           {item.amount}
         </span>
@@ -229,7 +246,8 @@ export function PaymentCalendarBoard({
             </strong>
             <span className="text-muted">
               {selected.subtitle} · {selected.organization}
-              {selected.article ? ` · ${selected.article}` : ""} · срок {showDate(dateOf(selected))} · счёт оплаты:{" "}
+              {selected.article ? ` · ${selected.article}` : ""} · срок {showDate(dateOf(selected))}
+              {selected.dueTime ? ` в ${selected.dueTime}` : ""} · счёт оплаты:{" "}
               {selected.accountName ?? "не назначен"}
             </span>
           </div>
@@ -240,7 +258,17 @@ export function PaymentCalendarBoard({
                   <span>Перенести на</span>
                   <input type="date" id="pc-move-date" min={todayKey} value={pickedDate} onChange={(e) => setPickedDate(e.target.value)} />
                 </label>
-                <button type="button" className="btn btn-primary" disabled={!pickedDate || isPending} onClick={() => move(selected, pickedDate)}>
+                <label className="field">
+                  <span>Время</span>
+                  <input
+                    type="time"
+                    id="pc-move-time"
+                    value={pickedTime}
+                    onChange={(e) => setPickedTime(e.target.value)}
+                    title="Необязательно: когда платёж должен пройти. Пусто — в течение дня"
+                  />
+                </label>
+                <button type="button" className="btn btn-primary" disabled={!pickedDate || isPending} onClick={() => move(selected, pickedDate, pickedTime)}>
                   Перенести
                 </button>
                 <label className="field">
@@ -337,6 +365,14 @@ export function PaymentCalendarBoard({
               </div>
             ) : null}
             <div className="pc-day__requests">{(byDate.get(day.date) ?? []).map(card)}</div>
+            {day.low ? (
+              <div
+                className={day.lowNegative ? "pc-day__low pc-day__low--negative" : "pc-day__low"}
+                title={`В течение дня остаток опускается до ${day.lowFull}${day.lowTime ? ` в ${day.lowTime}` : " с начала дня"}: платежи раньше поступлений. Платёж без времени считается в начале дня, поступление без времени — в конце`}
+              >
+                мин. {day.low} {day.lowTime ? `в ${day.lowTime}` : "с утра"}
+              </div>
+            ) : null}
             {day.balance ? (
               <div
                 className={day.balanceNegative ? "pc-day__balance pc-day__balance--negative" : "pc-day__balance"}

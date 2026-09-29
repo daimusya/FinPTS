@@ -10,12 +10,16 @@ import {
   type PlanResult,
 } from "@/lib/payment-plan/service";
 
-/** Перенос платежа в календаре (перетаскивание или выбор даты): заявка, часть графика или документ. */
-export async function moveCalendarItemAction(kind: PlanItemKind, id: string, dueDate: string): Promise<PlanResult> {
+/**
+ * Перенос платежа в календаре: заявка, часть графика или документ.
+ * Перетаскивание передаёт только дату — время остаётся прежним; выбор даты и
+ * времени передаёт и время (пустое — «в течение дня»).
+ */
+export async function moveCalendarItemAction(kind: PlanItemKind, id: string, dueDate: string, dueTime?: string): Promise<PlanResult> {
   const session = await requireSession();
-  if (kind === "part") return reschedulePart(session, id, dueDate, null);
-  if (kind === "document") return rescheduleDocument(session, id, dueDate, null);
-  return rescheduleRequest(session, id, dueDate, null);
+  if (kind === "part") return reschedulePart(session, id, dueDate, null, dueTime);
+  if (kind === "document") return rescheduleDocument(session, id, dueDate, null, dueTime);
+  return rescheduleRequest(session, id, dueDate, null, dueTime);
 }
 
 /** Счёт оплаты платежа из календаря; пустая строка снимает счёт. */

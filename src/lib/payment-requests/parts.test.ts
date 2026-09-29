@@ -5,9 +5,10 @@ import { readScheduleRows, scheduleSummary, suggestSplit, validateSchedule } fro
 describe("readScheduleRows", () => {
   it("pairs the parallel form fields and skips empty rows", () => {
     expect(readScheduleRows(["p1", "", ""], ["2026-10-05", "2026-10-12", ""], ["100", "50", ""])).toEqual([
-      { id: "p1", dueDate: "2026-10-05", amount: "100" },
-      { id: null, dueDate: "2026-10-12", amount: "50" },
+      { id: "p1", dueDate: "2026-10-05", dueTime: "", amount: "100" },
+      { id: null, dueDate: "2026-10-12", dueTime: "", amount: "50" },
     ]);
+    expect(readScheduleRows([""], ["2026-10-05"], ["100"], ["10:30"])[0].dueTime).toBe("10:30");
   });
 });
 
@@ -19,10 +20,24 @@ describe("validateSchedule", () => {
     const r = validateSchedule({ requestAmount: "1000", paidAmounts: [], rows: [row("2026-10-20", "400,5"), row("2026-10-05", "599.50")], todayKey: today });
     expect(r).toEqual({
       rows: [
-        { id: null, dueDate: new Date("2026-10-05T00:00:00Z"), dueKey: "2026-10-05", amount: "599.50" },
-        { id: null, dueDate: new Date("2026-10-20T00:00:00Z"), dueKey: "2026-10-20", amount: "400.50" },
+        { id: null, dueDate: new Date("2026-10-05T00:00:00Z"), dueKey: "2026-10-05", dueTime: null, amount: "599.50" },
+        { id: null, dueDate: new Date("2026-10-20T00:00:00Z"), dueKey: "2026-10-20", dueTime: null, amount: "400.50" },
       ],
     });
+  });
+
+  it("keeps the time of each part, orders a day's parts by time and rejects a bad time", () => {
+    const timed = (dueDate: string, dueTime: string, amount: string) => ({ id: null, dueDate, dueTime, amount });
+    const r = validateSchedule({
+      requestAmount: "900",
+      paidAmounts: [],
+      rows: [timed("2026-10-05", "", "300"), timed("2026-10-05", "15:00", "300"), timed("2026-10-05", "9.30", "300")],
+      todayKey: today,
+    });
+    expect("rows" in r && r.rows.map((x) => x.dueTime)).toEqual(["09:30", "15:00", null]);
+    expect(
+      validateSchedule({ requestAmount: "600", paidAmounts: [], rows: [timed("2026-10-05", "25:00", "300"), timed("2026-10-06", "", "300")], todayKey: today }),
+    ).toEqual({ error: "Часть 1: время оплаты — в формате ЧЧ:ММ, например 10:30" });
   });
 
   it("counts already paid parts toward the total", () => {
@@ -69,9 +84,9 @@ describe("scheduleSummary", () => {
 describe("suggestSplit", () => {
   it("splits evenly with the remainder in the last part and weekly dates", () => {
     expect(suggestSplit("1000.00", "2026-10-30", 3)).toEqual([
-      { id: null, dueDate: "2026-10-30", amount: "333.33" },
-      { id: null, dueDate: "2026-11-06", amount: "333.33" },
-      { id: null, dueDate: "2026-11-13", amount: "333.34" },
+      { id: null, dueDate: "2026-10-30", dueTime: "", amount: "333.33" },
+      { id: null, dueDate: "2026-11-06", dueTime: "", amount: "333.33" },
+      { id: null, dueDate: "2026-11-13", dueTime: "", amount: "333.34" },
     ]);
   });
 });

@@ -50,6 +50,17 @@ export function PaymentScheduleEditor({
               <input type="date" name="partDueDate" id={`part-date-${i}`} min={todayKey} value={row.dueDate} onChange={(e) => update(i, { dueDate: e.target.value })} required />
             </label>
             <label className="field">
+              <span>Время</span>
+              <input
+                type="time"
+                name="partDueTime"
+                id={`part-time-${i}`}
+                value={row.dueTime ?? ""}
+                onChange={(e) => update(i, { dueTime: e.target.value })}
+                title="Необязательно: когда платёж должен пройти. Пусто — в течение дня"
+              />
+            </label>
+            <label className="field">
               <span>Сумма</span>
               <input
                 type="text"
@@ -80,7 +91,7 @@ export function PaymentScheduleEditor({
             type="button"
             className="btn btn-ghost btn-sm"
             disabled={rows.length >= MAX_PAYMENT_PARTS}
-            onClick={() => setRows((all) => [...all, { id: null, dueDate: all.at(-1)?.dueDate || todayKey, amount: left.greaterThan(0) ? left.toFixed(2) : "" }])}
+            onClick={() => setRows((all) => [...all, { id: null, dueDate: all.at(-1)?.dueDate || todayKey, dueTime: "", amount: left.greaterThan(0) ? left.toFixed(2) : "" }])}
           >
             + Часть
           </button>

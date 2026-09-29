@@ -4,13 +4,17 @@ import {
   adjacentMonths,
   buildCalendarRows,
   buildMonthGrid,
+  intradayLow,
   itemScope,
   localDateKey,
   parseAccountKey,
+  parseDueTime,
   parseRescheduleDate,
   requestPlacement,
+  showDueDate,
   type CalendarMovement,
 } from "./payment-calendar";
+import Decimal from "decimal.js";
 
 describe("buildCalendarRows", () => {
   it("carries a running balance forward across days", () => {
@@ -155,5 +159,79 @@ describe("account keys and forecast scope", () => {
     expect(itemScope(item("o1", null), acc)).toBe("unassigned");
     expect(itemScope(item("o1", "cash:c1"), acc)).toBe("out");
     expect(itemScope(item("o2", null), acc)).toBe("out");
+  });
+});
+
+describe("time of day", () => {
+  it("parses an optional HH:MM time", () => {
+    expect(parseDueTime("")).toEqual({ time: null });
+    expect(parseDueTime(null)).toEqual({ time: null });
+    expect(parseDueTime("9:05")).toEqual({ time: "09:05" });
+    expect(parseDueTime("14.30")).toEqual({ time: "14:30" });
+    expect(parseDueTime("24:00")).toHaveProperty("error");
+    expect(parseDueTime("10:60")).toHaveProperty("error");
+    expect(parseDueTime("утром")).toHaveProperty("error");
+    expect(showDueDate(new Date("2026-10-05T00:00:00Z"), "10:30")).toBe("05.10.2026 в 10:30");
+    expect(showDueDate(new Date("2026-10-05T00:00:00Z"), null)).toBe("05.10.2026");
+  });
+
+  it("finds the dip within a day: untimed payments first, untimed receipts last, payments before receipts at the same time", () => {
+    const day = intradayLow(new Decimal(100), [
+      { amount: 500, direction: "INFLOW", time: "15:00" },
+      { amount: 300, direction: "OUTFLOW", time: "10:00" },
+      { amount: 50, direction: "INFLOW" },
+    ]);
+    expect(day.low.toNumber()).toBe(-200);
+    expect(day.time).toBe("10:00");
+    expect(day.closing.toNumber()).toBe(350);
+
+    const untimed = intradayLow(new Decimal(100), [
+      { amount: 400, direction: "INFLOW", time: "09:00" },
+      { amount: 300, direction: "OUTFLOW" },
+    ]);
+    expect(untimed.low.toNumber()).toBe(-200);
+    expect(untimed.time).toBeNull();
+
+    const sameTime = intradayLow(new Decimal(0), [
+      { amount: 100, direction: "INFLOW", time: "12:00" },
+      { amount: 100, direction: "OUTFLOW", time: "12:00" },
+    ]);
+    expect(sameTime.low.toNumber()).toBe(-100);
+  });
+
+  it("shows the dip in the month grid and in the day rows only when it is below the day's closing balance", () => {
+    const movements: CalendarMovement[] = [
+      { date: new Date("2026-10-05T00:00:00Z"), amount: 300, direction: "OUTFLOW", time: "10:00", source: "request" },
+      { date: new Date("2026-10-05T00:00:00Z"), amount: 500, direction: "INFLOW", time: "15:00", source: "document" },
+      { date: new Date("2026-10-06T00:00:00Z"), amount: 100, direction: "OUTFLOW", source: "request" },
+    ];
+    const grid = buildMonthGrid({ month: "2026-10", todayKey: "2026-10-01", startingBalance: 100, movements, calendar: new Map() }).flat();
+    const oct5 = grid.find((x) => x.date === "2026-10-05")!;
+    expect(oct5.balance!.toNumber()).toBe(300);
+    expect(oct5.lowWithinDay!.toNumber()).toBe(-200);
+    expect(oct5.lowTime).toBe("10:00");
+    const oct6 = grid.find((x) => x.date === "2026-10-06")!;
+    expect(oct6.balance!.toNumber()).toBe(200);
+    expect(oct6.lowWithinDay).toBeNull();
+
+    const rows = buildCalendarRows(100, movements);
+    expect(rows[0].lowWithinDay!.toNumber()).toBe(-200);
+    expect(rows[1].lowWithinDay).toBeNull();
+  });
+
+  it("treats an overdue payment as due at the start of today, whatever its old time", () => {
+    const grid = buildMonthGrid({
+      month: "2026-10",
+      todayKey: "2026-10-05",
+      startingBalance: 100,
+      movements: [
+        { date: new Date("2026-10-02T00:00:00Z"), amount: 300, direction: "OUTFLOW", time: "18:00", source: "request" },
+        { date: new Date("2026-10-05T00:00:00Z"), amount: 500, direction: "INFLOW", time: "12:00", source: "document" },
+      ],
+      calendar: new Map(),
+    }).flat();
+    const today = grid.find((x) => x.date === "2026-10-05")!;
+    expect(today.lowWithinDay!.toNumber()).toBe(-200);
+    expect(today.lowTime).toBeNull();
   });
 });

@@ -24,7 +24,7 @@ import {
   markPaymentPartPaidAction,
   assignRequestAccountAction,
 } from "../actions";
-import { accountKey, localDateKey, requestPlacement } from "@/lib/payment-calendar";
+import { accountKey, localDateKey, requestPlacement, showDueDate } from "@/lib/payment-calendar";
 import { scheduleSummary, suggestSplit } from "@/lib/payment-requests/parts";
 import { canPlanRequests } from "@/lib/payment-plan/service";
 import { PaymentScheduleEditor } from "@/components/payment-schedule-editor";
@@ -50,7 +50,6 @@ const STATE_BADGE: Record<TimelineState, string> = {
 };
 
 /** Due dates are stored as UTC midnight: show them without shifting by the time zone. */
-const dueDay = (d: Date) => d.toLocaleDateString("ru-RU", { timeZone: "UTC" });
 
 const dateTime = (d: Date) =>
   d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -153,7 +152,7 @@ export default async function PaymentRequestPage({
             Заявка на оплату · {formatMoney(request.amount)}
           </h1>
           <p>
-            {counterpartyName} · срок оплаты {dueDay(request.dueDate)}{" "}
+            {counterpartyName} · срок оплаты {showDueDate(request.dueDate, request.dueTime)}{" "}
             <span className={`badge ${PAYMENT_REQUEST_STATUS_BADGE[request.status]}`}>
               {PAYMENT_REQUEST_STATUS_LABELS[request.status]}
             </span>
@@ -209,7 +208,7 @@ export default async function PaymentRequestPage({
           <dt>Сумма</dt>
           <dd className="mono">{formatMoney(request.amount)}</dd>
           <dt>Срок оплаты</dt>
-          <dd>{dueDay(request.dueDate)}</dd>
+          <dd>{showDueDate(request.dueDate, request.dueTime)}</dd>
           <dt>Создал</dt>
           <dd>
             {request.createdBy.fullName}, {dateTime(request.createdAt)}
@@ -223,7 +222,7 @@ export default async function PaymentRequestPage({
 
       <div className="card" id="due-date">
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-          План оплаты: {hasParts ? `частями, ${summary.total} ч.` : `одним платежом ${dueDay(request.dueDate)}`}
+          План оплаты: {hasParts ? `частями, ${summary.total} ч.` : `одним платежом ${showDueDate(request.dueDate, request.dueTime)}`}
           {!hasParts && firstDueKey < todayKey && movable ? (
             <span className="badge badge-danger" style={{ marginLeft: 8 }}>
               Просрочен
@@ -254,7 +253,7 @@ export default async function PaymentRequestPage({
                   <tr key={part.id}>
                     <td>{i + 1}</td>
                     <td className="mono">
-                      {dueDay(part.dueDate)}
+                      {showDueDate(part.dueDate, part.dueTime)}
                       {!part.paidAt && part.dueDate.toISOString().slice(0, 10) < todayKey ? (
                         <span className="badge badge-danger" style={{ marginLeft: 6 }}>
                           просрочена
@@ -296,6 +295,10 @@ export default async function PaymentRequestPage({
               <span>Новый срок оплаты</span>
               <input type="date" name="dueDate" min={todayKey} defaultValue={firstDueKey} required />
             </label>
+            <label className="field">
+              <span>Время</span>
+              <input type="time" name="dueTime" id="pr-move-time" defaultValue={request.dueTime ?? ""} title="Необязательно: когда платёж должен пройти (например, до отсечки банка). Пусто — в течение дня" />
+            </label>
             <label className="field" style={{ gridColumn: "span 2" }}>
               <span>Причина переноса (необязательно)</span>
               <input type="text" name="reason" maxLength={500} placeholder="Например: ждём поступления от заказчика" />
@@ -314,7 +317,12 @@ export default async function PaymentRequestPage({
               toSchedule={(hasParts ? summary.remainingAmount : new Decimal(request.amount.toString())).toFixed(2)}
               initialRows={
                 hasParts
-                  ? unpaidParts.map((part) => ({ id: part.id, dueDate: part.dueDate.toISOString().slice(0, 10), amount: part.amount.toFixed(2) }))
+                  ? unpaidParts.map((part) => ({
+                      id: part.id,
+                      dueDate: part.dueDate.toISOString().slice(0, 10),
+                      dueTime: part.dueTime ?? "",
+                      amount: part.amount.toFixed(2),
+                    }))
                   : suggestSplit(request.amount.toString(), firstDueKey < todayKey ? todayKey : firstDueKey, 2)
               }
               todayKey={todayKey}
@@ -352,7 +360,7 @@ export default async function PaymentRequestPage({
                 <li key={r.id}>
                   {r.partId ? <span className="text-muted">часть {partNumber.get(r.partId) ?? "(удалена)"}: </span> : null}
                   <span className="mono">
-                    {dueDay(r.fromDate)} → {dueDay(r.toDate)}
+                    {showDueDate(r.fromDate, r.fromTime)} → {showDueDate(r.toDate, r.toTime)}
                   </span>{" "}
                   <span className="text-muted">
                     {r.changedBy.fullName}, {dateTime(r.changedAt)}
@@ -460,6 +468,10 @@ export default async function PaymentRequestPage({
             <label className="field">
               <span>Срок оплаты *</span>
               <input type="date" name="dueDate" id="rework-due" required defaultValue={firstDueKey} />
+            </label>
+            <label className="field">
+              <span>Время оплаты</span>
+              <input type="time" name="dueTime" id="rework-due-time" defaultValue={request.dueTime ?? ""} title="Необязательно: когда платёж должен пройти (например, до отсечки банка). Пусто — в течение дня" />
             </label>
             <label className="field" style={{ gridColumn: "span 2" }}>
               <span>Комментарий к заявке</span>

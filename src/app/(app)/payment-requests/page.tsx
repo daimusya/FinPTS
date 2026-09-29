@@ -135,6 +135,7 @@ export default async function PaymentRequestsPage({
                 <tr key={req.id}>
                   <td className="mono">
                     <Link href={`/payment-requests/${req.id}`}>{req.dueDate.toLocaleDateString("ru-RU", { timeZone: "UTC" })}</Link>
+                    {req.dueTime ? <span className="text-muted"> в {req.dueTime}</span> : null}
                     {req._count.reschedules > 0 ? (
                       <div className="text-muted" style={{ fontSize: 11 }}>
                         перенесён{req._count.reschedules > 1 ? ` ×${req._count.reschedules}` : ""}

@@ -13,6 +13,7 @@ import {
   localDateKey,
   parseAccountKey,
   requestPlacement,
+  type CalendarDay,
   type CalendarMovement,
   type ForecastScope,
 } from "@/lib/payment-calendar";
@@ -29,6 +30,22 @@ const compact = new Intl.NumberFormat("ru-RU", { notation: "compact", maximumFra
 const short = (value: Decimal) => compact.format(value.toNumber());
 const showDay = (key: string) => new Date(`${key}T00:00:00Z`).toLocaleDateString("ru-RU", { timeZone: "UTC" });
 const keyOf = (d: Date) => d.toISOString().slice(0, 10);
+
+/** Худшая точка месяца: минимум по концу дня и по провалам внутри дня. */
+function lowestPoint(weeks: CalendarDay[][]): { date: string; value: Decimal; time: string | null; intraday: boolean } | null {
+  let best: { date: string; value: Decimal; time: string | null; intraday: boolean } | null = null;
+  for (const d of weeks.flat()) {
+    if (!d.inMonth || !d.balance) continue;
+    const point = d.lowWithinDay
+      ? { date: d.date, value: d.lowWithinDay, time: d.lowTime, intraday: true }
+      : { date: d.date, value: d.balance, time: null, intraday: false };
+    if (!best || point.value.lessThan(best.value)) best = point;
+  }
+  return best;
+}
+
+const showPoint = (p: { date: string; time: string | null; intraday: boolean }) =>
+  p.intraday ? `${showDay(p.date)}, ${p.time ? `в ${p.time}` : "с начала дня"}` : `${showDay(p.date)}, на конец дня`;
 
 /** Платёж календаря до отбора по срезу: знает свою организацию и счёт оплаты. */
 type Item = Omit<BoardItem, "unassigned"> & { amountValue: Decimal };
@@ -140,6 +157,7 @@ export default async function PaymentCalendarPage({
         kind: "request",
         id: r.id,
         dueDate: keyOf(r.dueDate),
+        dueTime: r.dueTime,
         amount: short(amount),
         amountFull: formatMoney(amount),
         amountValue: amount,
@@ -158,6 +176,7 @@ export default async function PaymentCalendarPage({
         kind: "part",
         id: part.id,
         dueDate: keyOf(part.dueDate),
+        dueTime: part.dueTime,
         amount: short(amount),
         amountFull: formatMoney(amount),
         amountValue: amount,
@@ -178,6 +197,7 @@ export default async function PaymentCalendarPage({
       id: doc.id,
       href: `/accruals/${doc.id}`,
       dueDate: keyOf(doc.dueDate ?? doc.date),
+      dueTime: doc.dueDate ? doc.dueTime : null,
       direction: income ? "INFLOW" : "OUTFLOW",
       amount: short(remaining),
       amountFull: formatMoney(remaining),
@@ -200,6 +220,7 @@ export default async function PaymentCalendarPage({
     date: new Date(`${item.dueDate}T00:00:00Z`),
     amount: item.amountValue.toString(),
     direction: item.direction,
+    time: item.dueTime,
     source: item.kind === "document" ? "document" : "request",
   });
   const scoped = items.map((item) => ({ item, where: itemScope(item, scope) })).filter((x) => x.where !== "out");
@@ -225,6 +246,10 @@ export default async function PaymentCalendarPage({
       balance: d.balance ? short(d.balance) : null,
       balanceFull: d.balance ? formatMoney(d.balance) : null,
       balanceNegative: Boolean(d.balance?.lessThan(0)),
+      low: d.lowWithinDay ? short(d.lowWithinDay) : null,
+      lowFull: d.lowWithinDay ? formatMoney(d.lowWithinDay) : null,
+      lowTime: d.lowTime,
+      lowNegative: Boolean(d.lowWithinDay?.lessThan(0)),
     })),
   );
 
@@ -245,8 +270,7 @@ export default async function PaymentCalendarPage({
     currentBalance.toString(),
     movements.map((m) => (keyOf(m.date) < todayKey ? { ...m, date: todayDate } : m)),
   );
-  const monthDays = weeks.flat().filter((d) => d.inMonth && d.balance);
-  const lowest = monthDays.reduce<(typeof monthDays)[number] | null>((low, d) => (!low || d.balance!.lessThan(low.balance!) ? d : low), null);
+  const lowest = lowestPoint(weeks);
   const expectedIn = sumMoney(movements.filter((m) => m.direction === "INFLOW").map((m) => m.amount));
   const expectedOut = sumMoney(movements.filter((m) => m.direction === "OUTFLOW").map((m) => m.amount));
   const pendingCount = requests.filter((r) => r.status === "PENDING_APPROVAL" || r.status === "DRAFT").length;
@@ -260,7 +284,7 @@ export default async function PaymentCalendarPage({
     const own = items.filter((i) => i.accountKey === key && i.counted).map(toMovement);
     const grid = buildMonthGrid({ month, todayKey, startingBalance: balances.get(key) ?? 0, movements: own, calendar });
     const days = grid.flat().filter((d) => d.inMonth && d.balance);
-    const low = days.reduce<(typeof days)[number] | null>((l, d) => (!l || d.balance!.lessThan(l.balance!) ? d : l), null);
+    const low = lowestPoint(grid);
     return {
       key,
       info,
@@ -308,7 +332,9 @@ export default async function PaymentCalendarPage({
           <h1>Платёжный календарь</h1>
           <p>
             Прогноз остатка от фактического остатка на счетах: непогашенные документы начислений и заявки на оплату (в том числе
-            по частям). Платёж можно перетащить на другой день — срок оплаты перенесётся.
+            по частям). Платёж можно перетащить на другой день — срок оплаты перенесётся. У платежа можно указать время: остаток
+            считается и в течение дня — платёж без времени в начале дня, поступление без времени в конце, — так видно, хватит ли
+            денег на утренние платежи до дневных поступлений.
           </p>
         </div>
       </div>
@@ -365,12 +391,12 @@ export default async function PaymentCalendarPage({
         </div>
         <div className="stat-card">
           <div className="stat-label">Минимальный остаток в месяце</div>
-          <div className="stat-value" style={{ color: lowest?.balance?.lessThan(0) ? "var(--color-danger)" : undefined }}>
-            {lowest ? formatMoney(lowest.balance!) : "—"}
+          <div className="stat-value" style={{ color: lowest?.value.lessThan(0) ? "var(--color-danger)" : undefined }}>
+            {lowest ? formatMoney(lowest.value) : "—"}
           </div>
           {lowest ? (
             <div className="text-muted" style={{ fontSize: 12 }}>
-              {showDay(lowest.date)}
+              {showPoint(lowest)}
             </div>
           ) : null}
         </div>
@@ -461,8 +487,8 @@ export default async function PaymentCalendarPage({
                   <td className="mono">{row.inflow.greaterThan(0) ? formatMoney(row.inflow) : "—"}</td>
                   <td className="mono">{row.outflow.greaterThan(0) ? formatMoney(row.outflow) : "—"}</td>
                   <td className="mono">{row.monthEnd ? formatMoney(row.monthEnd) : "—"}</td>
-                  <td className="mono" style={{ color: row.low?.balance?.lessThan(0) ? "var(--color-danger)" : undefined, fontWeight: row.low?.balance?.lessThan(0) ? 700 : undefined }}>
-                    {row.low ? `${formatMoney(row.low.balance!)} · ${showDay(row.low.date)}` : "—"}
+                  <td className="mono" style={{ color: row.low?.value.lessThan(0) ? "var(--color-danger)" : undefined, fontWeight: row.low?.value.lessThan(0) ? 700 : undefined }}>
+                    {row.low ? `${formatMoney(row.low.value)} · ${showPoint(row.low)}` : "—"}
                   </td>
                 </tr>
               ))}
@@ -498,6 +524,7 @@ export default async function PaymentCalendarPage({
                 <th>Поступления</th>
                 <th>Платежи</th>
                 <th>Прогнозный остаток</th>
+                <th>Минимум в течение дня</th>
               </tr>
             </thead>
             <tbody>
@@ -511,11 +538,14 @@ export default async function PaymentCalendarPage({
                   <td className="mono" style={{ fontWeight: 700, color: row.balance.lessThan(0) ? "var(--color-danger)" : undefined }}>
                     {formatMoney(row.balance)}
                   </td>
+                  <td className="mono" style={{ color: row.lowWithinDay?.lessThan(0) ? "var(--color-danger)" : undefined }}>
+                    {row.lowWithinDay ? `${formatMoney(row.lowWithinDay)} · ${row.lowTime ? `в ${row.lowTime}` : "с начала дня"}` : "—"}
+                  </td>
                 </tr>
               ))}
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="empty-state">
+                  <td colSpan={5} className="empty-state">
                     Нет ожидаемых движений денег.
                   </td>
                 </tr>

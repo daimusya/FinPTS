@@ -14,7 +14,7 @@ import {
 import { cancelAllocationAction } from "../../cash/actions";
 import { postAccrualDocumentAction, cancelAccrualDocumentAction, rescheduleDocumentAction, assignDocumentAccountAction } from "../actions";
 import { PaymentAccountOptions } from "@/components/payment-account-options";
-import { accountKey, localDateKey } from "@/lib/payment-calendar";
+import { accountKey, localDateKey, showDueDate } from "@/lib/payment-calendar";
 import { canPlanDocuments } from "@/lib/payment-plan/service";
 
 export default async function AccrualDocumentPage({
@@ -61,7 +61,6 @@ export default async function AccrualDocumentPage({
       ])
     : [[], []];
   const todayKey = localDateKey();
-  const showDay = (d: Date) => d.toLocaleDateString("ru-RU", { timeZone: "UTC" });
 
   const total = doc.lines.reduce((acc, l) => acc + Number(l.amount), 0);
   const allocated = doc.allocations.reduce((acc, a) => acc + Number(a.amount), 0);
@@ -135,14 +134,14 @@ export default async function AccrualDocumentPage({
       {canPlan || doc.dueDateChanges.length > 0 ? (
         <div className="card" id="payment-plan">
           <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-            Срок оплаты: {doc.dueDate ? showDay(doc.dueDate) : "не указан"}
+            Срок оплаты: {doc.dueDate ? showDueDate(doc.dueDate, doc.dueTime) : "не указан"}
           </h2>
           {doc.dueDateChanges.length > 0 ? (
             <ul className="reschedule-list">
               {doc.dueDateChanges.map((c) => (
                 <li key={c.id}>
                   <span className="mono">
-                    {c.fromDate ? showDay(c.fromDate) : "без срока"} → {showDay(c.toDate)}
+                    {c.fromDate ? showDueDate(c.fromDate, c.fromTime) : "без срока"} → {showDueDate(c.toDate, c.toTime)}
                   </span>{" "}
                   <span className="text-muted">
                     {c.changedBy.fullName}, {c.changedAt.toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}
@@ -158,6 +157,10 @@ export default async function AccrualDocumentPage({
                 <label className="field">
                   <span>Новый срок оплаты</span>
                   <input type="date" name="dueDate" min={todayKey} defaultValue={doc.dueDate?.toISOString().slice(0, 10) ?? ""} required />
+                </label>
+                <label className="field">
+                  <span>Время</span>
+                  <input type="time" name="dueTime" id="doc-due-time" defaultValue={doc.dueTime ?? ""} title="Необязательно: когда платёж должен пройти. Пусто — в течение дня" />
                 </label>
                 <label className="field" style={{ gridColumn: "span 2" }}>
                   <span>Причина (необязательно)</span>

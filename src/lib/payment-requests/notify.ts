@@ -2,12 +2,14 @@ import { prisma } from "@/lib/db";
 import { formatMoney } from "@/lib/money";
 import { notify } from "@/lib/notifications";
 import { PERMISSIONS } from "@/lib/permissions";
+import { showDueDate } from "@/lib/payment-calendar";
 import { isDelegationActive, stepDeciders } from "./delegation";
 
 type RequestForNotice = {
   id: string;
   amount: { toString(): string };
   dueDate: Date;
+  dueTime?: string | null;
   createdById: string;
   counterparty?: { shortName: string | null; fullName: string } | null;
 };
@@ -15,7 +17,7 @@ type RequestForNotice = {
 /** «на 120 000,00 ₽ для ООО «Орион», срок 15.10.2026» */
 export function requestSummary(request: RequestForNotice): string {
   const who = request.counterparty ? ` для ${request.counterparty.shortName || request.counterparty.fullName}` : "";
-  return `на ${formatMoney(request.amount.toString())}${who}, срок ${request.dueDate.toLocaleDateString("ru-RU", { timeZone: "UTC" })}`;
+  return `на ${formatMoney(request.amount.toString())}${who}, срок ${showDueDate(request.dueDate, request.dueTime)}`;
 }
 
 /**
