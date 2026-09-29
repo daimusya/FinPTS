@@ -41,7 +41,7 @@ describe("planImport", () => {
       row(2, { fullName: "ООО Ромашка", shortName: "Ромашка", inn: "7707083893", limit: 1000 }, { id: "c1" }),
       row(3, { fullName: "ООО Лютик" }, { id: "c2", cleared: ["shortName", "inn", "limit"] }),
     ]);
-    expect(p).toEqual({ creates: [], updates: [], unchanged: 2, skipped: 0, errors: [] });
+    expect(p).toEqual({ creates: [], updates: [], archives: [], pendingCreates: [], unchanged: 2, skipped: 0, errors: [] });
   });
 
   it("updates only the changed columns, matching by INN or by name, and creates the rest", () => {
@@ -103,5 +103,47 @@ describe("planImport — matching by name when the INN finds nothing", () => {
     });
     expect(p.creates).toHaveLength(1);
     expect(p.updates).toHaveLength(0);
+  });
+});
+
+describe("planImport — records missing from the file", () => {
+  const sync = (rows: ImportRow[], mode: "upsert" | "create-only" = "upsert", records: ExistingRecord[] = existing) =>
+    planImport({ fields, rows, existing: records, mode, clearValue: () => null, archiveMissing: true });
+
+  it("archives the active records the file no longer lists, and only when asked", () => {
+    const rows = [row(2, { fullName: "ООО Ромашка" }, { id: "c1", present: ["fullName"] }), row(3, { fullName: "ООО Лютик" }, { present: ["fullName"] })];
+    expect(sync(rows).archives).toEqual([
+      { id: "c3", label: "ООО Двойник" },
+      { id: "c4", label: "ООО Двойник (филиал)" },
+    ]);
+    expect(plan(rows).archives).toEqual([]);
+    expect(sync(rows, "create-only").archives).toEqual([]);
+  });
+
+  it("does not touch records already in the archive", () => {
+    const withArchived: ExistingRecord[] = [...existing.slice(0, 1), { id: "old", isArchived: true, values: { fullName: "ООО Старая" } }];
+    expect(sync([row(2, { fullName: "ООО Ромашка" }, { id: "c1", present: ["fullName"] })], "upsert", withArchived).archives).toEqual([]);
+  });
+
+  it("refuses to archive the whole dictionary when no row matches a record", () => {
+    const p = sync([row(2, { fullName: "Совсем другая запись" }, { present: ["fullName"] })]);
+    expect(p.archives).toEqual([]);
+    expect(p.errors).toEqual([
+      "Ни одна строка файла не совпала с существующими записями — отправить в архив все записи справочника (4) нельзя. Проверьте, что это выгрузка этого справочника",
+    ]);
+  });
+});
+
+describe("planImport — rows with cell errors", () => {
+  it("still finds duplicates and ambiguous keys, but plans nothing for the broken row", () => {
+    const p = plan([
+      row(2, { fullName: "ООО Ромашка", inn: "7707083893" }, { invalid: true }),
+      row(3, { fullName: "ООО Ромашка", inn: "7707083893", limit: 5 }),
+      row(4, { fullName: "ООО Новая" }, { invalid: true }),
+    ]);
+    expect(p.errors).toEqual(["Строки 2 и 3 относятся к одной записи «ООО Ромашка» — оставьте одну"]);
+    expect(p.updates).toEqual([]);
+    expect(p.creates).toEqual([]);
+    expect(p.pendingCreates.map((c) => c.line)).toEqual([4]);
   });
 });

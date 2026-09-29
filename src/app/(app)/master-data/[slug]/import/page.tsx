@@ -78,6 +78,7 @@ export default async function ImportDictionaryPage({
           <p className="form-success" style={{ marginBottom: 8 }}>
             Ошибок нет. Будет создано: {preview.created}, обновлено: {preview.updated}, без изменений: {preview.unchanged}
             {preview.skipped ? `, пропущено существующих: ${preview.skipped}` : ""}
+            {preview.archiveMissing ? `, в архив (нет в файле): ${preview.archived}` : ""}
             {preview.details
               ? `. Реквизиты: новых ${preview.details.bankCreated}, изменится ${preview.details.bankUpdated}; контакты: новых ${preview.details.contactCreated}, изменится ${preview.details.contactUpdated}`
               : ""}
@@ -113,6 +114,17 @@ export default async function ImportDictionaryPage({
               Не трогать, только добавлять новые
             </label>
           </fieldset>
+          <label className="import-archive">
+            <input type="checkbox" name="archiveMissing" id="archive-missing" defaultChecked={preview?.archiveMissing ?? false} />
+            <span>
+              Отправить в архив записи, которых нет в файле
+              <span className="text-muted" style={{ display: "block", fontSize: 12 }}>
+                Файл становится полным списком справочника: действующие записи, которых в нём нет, уйдут в архив (удаления в
+                справочниках нет — запись из архива можно вернуть). Только в режиме обновления. Сначала нажмите «Проверить без
+                сохранения» — список записей, которые уйдут в архив, будет в проверке.
+              </span>
+            </span>
+          </label>
           <div className="form-actions">
             <button type="submit" name="intent" value="check" className="btn btn-secondary">
               Проверить без сохранения
@@ -134,12 +146,20 @@ export default async function ImportDictionaryPage({
             Строка с заполненной колонкой «{ID_COLUMN_LABEL}» (она есть в выгрузке) обновляет именно эту запись — так можно
             переименовать запись или поменять любой её реквизит.
           </li>
-          <li>
-            Строка без ID ищет существующую запись по полям {keyLabels.join(" → ")}: одна найденная — обновляется, не нашлось —
-            создаётся новая, нашлось несколько — ошибка с просьбой указать ID. Запись с другим ИНН по названию не подхватывается.
-          </li>
+          {keyLabels.length > 0 ? (
+            <li>
+              Строка без ID ищет существующую запись по полям {keyLabels.join(" → ")}: одна найденная — обновляется, не нашлось —
+              создаётся новая, нашлось несколько — ошибка с просьбой указать ID. Запись с другим ИНН по названию не подхватывается.
+            </li>
+          ) : (
+            <li>Строка без ID всегда создаёт новую запись: чтобы изменить существующую, оставьте её ID из выгрузки.</li>
+          )}
           <li>Обновляются только изменившиеся поля из колонок, которые есть в файле; пустая ячейка очищает необязательное поле.</li>
           <li>Колонка «{ARCHIVE_COLUMN_LABEL}»: «В архиве» отправляет запись в архив, «Активна» — возвращает.</li>
+          <li>
+            Флажок «Отправить в архив записи, которых нет в файле» убирает записи, удалённые из файла. Если ни одна строка файла не
+            совпала с записями справочника, загрузка остановится — так случайный файл не отправит в архив весь справочник.
+          </li>
           <li>
             Повторная загрузка того же файла ничего не меняет, а две строки про одну запись — ошибка: дублей не будет. Всё или
             ничего: при любой ошибке не меняется ни одна запись.

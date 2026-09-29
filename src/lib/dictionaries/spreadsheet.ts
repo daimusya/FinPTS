@@ -86,6 +86,8 @@ export interface ImportRow {
   present: string[];
   /** «В архиве» / «Активна» из колонки «Статус записи»; null — колонки нет или ячейка пустая. */
   archived: boolean | null;
+  /** В строке есть ошибки в ячейках: она участвует в сопоставлении (поиск дублей), но не сохраняется. */
+  invalid?: boolean;
 }
 
 export interface ImportParseResult {
@@ -121,6 +123,7 @@ export function parseImportRows(fields: SheetField[], headers: string[], rows: C
     const lineNo = rowIdx + 2;
     const isEmpty = fieldColumns.every(({ index }) => index === undefined || String(row[index] ?? "").trim() === "");
     if (isEmpty) return;
+    const errorsBefore = errors.length;
 
     const data: Record<string, unknown> = {};
     const cleared: string[] = [];
@@ -185,9 +188,12 @@ export function parseImportRows(fields: SheetField[], headers: string[], rows: C
       cleared,
       present: fieldColumns.filter(({ index }) => index !== undefined).map(({ field }) => field.name),
       archived,
+      invalid: errors.length > errorsBefore,
     });
   });
 
   if (records.length === 0 && errors.length === 0) errors.push("В файле нет строк с данными");
-  return errors.length > 0 ? { records: [], rows: [], errors } : { records, rows: parsedRows, errors };
+  // Rows come back even when some cells are wrong: matching them against the records finds the remaining
+  // problems (duplicates, ambiguous keys) in the same pass, so the user sees every error at once.
+  return errors.length > 0 ? { records: [], rows: parsedRows, errors } : { records, rows: parsedRows, errors };
 }

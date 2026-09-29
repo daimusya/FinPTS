@@ -85,6 +85,11 @@ describe("parseImportRows", () => {
       ["Б", "АО", "", "может", "abc", "32.13.2026", ""],
     ]);
     expect(result.records).toEqual([]);
+    // Rows still come back (marked) so that matching errors can be found in the same pass.
+    expect(result.rows.map((r) => [r.line, r.invalid])).toEqual([
+      [2, true],
+      [3, true],
+    ]);
     expect(result.errors).toEqual([
       "Строка 2: поле «Название» обязательно",
       "Строка 3: «АО» — нет такого значения для поля «Тип»",

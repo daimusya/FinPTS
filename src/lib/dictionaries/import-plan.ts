@@ -23,9 +23,18 @@ export interface PlannedUpdate {
   label: string;
 }
 
+export interface PlannedArchive {
+  id: string;
+  label: string;
+}
+
 export interface ImportPlan {
   creates: PlannedCreate[];
   updates: PlannedUpdate[];
+  /** Действующие записи, которых нет в файле, — в архив (если выбрано «убрать отсутствующие»). */
+  archives: PlannedArchive[];
+  /** Новые записи из строк с ошибками в ячейках — не создаются, но известны (к ним могут относиться строки других листов). */
+  pendingCreates: PlannedCreate[];
   unchanged: number;
   /** Строки про существующие записи в режиме «только добавлять». */
   skipped: number;
@@ -71,16 +80,26 @@ export function planImport(input: {
   mode: ImportMode;
   /** Что записать в очищенное поле при обновлении (null или значение по умолчанию); undefined — поле не очищается. */
   clearValue: (fieldName: string) => unknown;
+  /** Отправить в архив действующие записи, которых нет в файле (только в режиме обновления). */
+  archiveMissing?: boolean;
 }): ImportPlan {
   const { fields, rows, existing, mode } = input;
   const fieldByName = new Map(fields.map((f) => [f.name, f]));
   const keys = importKeyFields(fields);
   const nameField = keys.at(-1);
   const byId = new Map(existing.map((r) => [r.id, r]));
-  const plan: ImportPlan = { creates: [], updates: [], unchanged: 0, skipped: 0, errors: [] };
+  const plan: ImportPlan = { creates: [], updates: [], archives: [], pendingCreates: [], unchanged: 0, skipped: 0, errors: [] };
   const seenRecords = new Map<string, number>();
   const seenNew = new Map<string, number>();
-  const labelOf = (values: Record<string, unknown>) => (nameField ? String(values[nameField] ?? "") : "");
+  // A dictionary without a text name (currency rates, calendar days) is labelled by its first two fields: «USD · 2026-09-01».
+  const labelOf = (values: Record<string, unknown>) =>
+    nameField
+      ? String(values[nameField] ?? "")
+      : fields
+          .slice(0, 2)
+          .map((f) => comparable(f, values[f.name]))
+          .filter(Boolean)
+          .join(" · ");
 
   for (const row of rows) {
     let target: ExistingRecord | null = null;
@@ -125,6 +144,7 @@ export function planImport(input: {
         continue;
       }
       seenRecords.set(target.id, row.line);
+      if (row.invalid) continue;
       if (mode === "create-only") {
         plan.skipped++;
         continue;
@@ -158,7 +178,22 @@ export function planImport(input: {
       }
       seenNew.set(newKey, row.line);
     }
-    plan.creates.push({ line: row.line, data: row.archived ? { ...row.data, isArchived: true } : row.data, label: labelOf(row.data) });
+    const create = { line: row.line, data: row.archived ? { ...row.data, isArchived: true } : row.data, label: labelOf(row.data) };
+    if (row.invalid) plan.pendingCreates.push(create);
+    else plan.creates.push(create);
+  }
+
+  if (input.archiveMissing && mode === "upsert") {
+    const active = existing.filter((r) => !r.isArchived);
+    const missing = active.filter((r) => !seenRecords.has(r.id));
+    // A file that matches none of the records (another dictionary, a blank template) must not archive everything.
+    if (missing.length > 0 && missing.length === active.length && seenRecords.size === 0) {
+      plan.errors.push(
+        `Ни одна строка файла не совпала с существующими записями — отправить в архив все записи справочника (${active.length}) нельзя. Проверьте, что это выгрузка этого справочника`,
+      );
+    } else {
+      plan.archives = missing.map((r) => ({ id: r.id, label: labelOf(r.values) }));
+    }
   }
   return plan;
 }
