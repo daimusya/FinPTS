@@ -64,20 +64,32 @@ export interface WorkScheduleRule {
   cycleOn?: number | null;
   cycleOff?: number | null;
   anchorDate?: Date | null;
+  /** Суммированный учёт: учётный период в месяцах (1, 3, 6, 12); нет — подённый учёт. */
+  summarizedMonths?: number | null;
 }
+
+export const SUMMARIZED_PERIOD_MONTHS = [1, 3, 6, 12];
 
 export const FIVE_DAY_WEEK: WorkScheduleRule = { kind: "five_day", hoursPerDay: new Decimal(8) };
 
 /** Правило графика из записи справочника (без графика — пятидневка по 8 часов). */
 export function scheduleRule(
-  row: { kind: string; hoursPerDay: Decimal | string | number; cycleOn: number | null; cycleOff: number | null; anchorDate: Date | null } | null,
+  row: {
+    kind: string;
+    hoursPerDay: Decimal | string | number;
+    cycleOn: number | null;
+    cycleOff: number | null;
+    anchorDate: Date | null;
+    summarizedPeriodMonths?: number | null;
+  } | null,
 ): WorkScheduleRule {
   if (!row) return FIVE_DAY_WEEK;
   const hoursPerDay = new Decimal(row.hoursPerDay.toString());
+  const summarizedMonths = row.summarizedPeriodMonths && SUMMARIZED_PERIOD_MONTHS.includes(row.summarizedPeriodMonths) ? row.summarizedPeriodMonths : null;
   if (row.kind === "shift" && row.cycleOn && row.cycleOff && row.anchorDate) {
-    return { kind: "shift", hoursPerDay, cycleOn: row.cycleOn, cycleOff: row.cycleOff, anchorDate: row.anchorDate };
+    return { kind: "shift", hoursPerDay, cycleOn: row.cycleOn, cycleOff: row.cycleOff, anchorDate: row.anchorDate, summarizedMonths };
   }
-  return { kind: "five_day", hoursPerDay };
+  return { kind: "five_day", hoursPerDay, summarizedMonths };
 }
 
 /** Рабочий ли день по графику сотрудника. */
@@ -276,7 +288,8 @@ export function computeExtraPay(input: ExtraPayInput): ExtraPayResult {
       weekendHours = weekendHours.plus(h);
       shiftHolidayHours = shiftHolidayHours.plus(h);
     }
-    const overtime = hoursOf("overtime");
+    // Under summarized accounting overtime is found for the whole accounting period (computeSummarizedOvertime).
+    const overtime = input.schedule.summarizedMonths ? null : hoursOf("overtime");
     if (overtime) {
       overtimeDays += 1;
       overtimeHours = overtimeHours.plus(overtime);
@@ -331,4 +344,94 @@ export function computeTripPay(input: TripPayInput): { avgDaily: Decimal; amount
     return { avgDaily, amount: round2(avgDaily.times(input.tripDays)), method: "salary" };
   }
   throw new Error("Для командировки нет ни заработка за 12 месяцев, ни оклада");
+}
+
+// ---------------------------------------------------------------------------
+// Суммированный учёт рабочего времени (ст. 104 ТК РФ)
+// ---------------------------------------------------------------------------
+
+/** Учётный период, в который входит месяц: периоды выровнены по календарному году (квартал, полугодие, год). */
+export function summarizedPeriod(year: number, month: number, months: number): { from: Date; to: Date; firstMonth: number; lastMonth: number } {
+  const firstMonth = Math.floor((month - 1) / months) * months + 1;
+  const lastMonth = firstMonth + months - 1;
+  return { from: new Date(Date.UTC(year, firstMonth - 1, 1)), to: new Date(Date.UTC(year, lastMonth, 0)), firstMonth, lastMonth };
+}
+
+export interface SummarizedOvertimeInput {
+  salary: Decimal;
+  /** Любой месяц учётного периода (обычно последний — месяц расчёта). */
+  year: number;
+  month: number;
+  schedule: WorkScheduleRule;
+  calendar: CalendarOverrides;
+  hireDate: Date;
+  terminationDate: Date | null;
+  /** Табель за весь учётный период: день -> вид отметки -> часы. */
+  hours: Map<string, Map<string, Decimal>>;
+}
+
+export interface SummarizedOvertimeResult {
+  periodFrom: Date;
+  periodTo: Date;
+  /** Норма по производственному календарю (40 ч в неделю) за время работы, минус часы дней отсутствия. */
+  normHours: Decimal;
+  /** Отработано в рабочие по графику дни (без выходных и праздничных смен — они оплачиваются отдельно). */
+  workedHours: Decimal;
+  overtimeHours: Decimal;
+  /** Оклад / средняя месячная норма часов учётного периода. */
+  hourlyRate: Decimal;
+  amount: Decimal;
+}
+
+/**
+ * Переработка за учётный период при суммированном учёте: отработанные часы
+ * сверх нормы периода. Норма — по производственному календарю при 40-часовой
+ * неделе (с сокращёнными предпраздничными днями) за время работы у нас, минус
+ * часы, приходящиеся по календарю на дни отпуска, болезни, командировок и
+ * отсутствия (Приказ Минздравсоцразвития № 588н). Отработано — часы табеля
+ * (работа, сверхурочные, проекты) в рабочие по графику дни, без отметок — часы
+ * смены; работа в выходные и праздничные смены сверхурочной не считается
+ * (ст. 152 ч. 3 — она оплачивается по ст. 153). Оплата: первые 2 часа за
+ * учётный период × 1,5, остальные × 2.
+ */
+export function computeSummarizedOvertime(input: SummarizedOvertimeInput): SummarizedOvertimeResult {
+  const months = input.schedule.summarizedMonths ?? 1;
+  const period = summarizedPeriod(input.year, input.month, months);
+  const first = Math.max(utcDay(period.from), utcDay(input.hireDate));
+  const last = Math.min(utcDay(period.to), input.terminationDate ? utcDay(input.terminationDate) : Infinity);
+
+  // The rate: salary per hour of an average month of the period by the calendar.
+  let fullNorm = new Decimal(0);
+  for (let m = period.firstMonth; m <= period.lastMonth; m++) fullNorm = fullNorm.plus(monthWorkNorm(input.year, m, FIVE_DAY_WEEK, input.calendar).hours);
+  const hourlyRate = fullNorm.isZero() ? new Decimal(0) : input.salary.dividedBy(fullNorm.dividedBy(months));
+
+  let normHours = new Decimal(0);
+  let workedHours = new Decimal(0);
+  for (let ms = first; ms <= last; ms += DAY_MS) {
+    const key = iso(ms);
+    const date = new Date(ms);
+    const marks = input.hours.get(key);
+    const workMarked = marks && WORK_DAY_TYPES.some((t) => marks.has(t));
+    const absent = marks && !workMarked && ABSENCE_DAY_TYPES.some((t) => marks.has(t));
+    if (isWorkingDay(date, input.calendar) && !absent) normHours = normHours.plus(dayHours(key, FIVE_DAY_WEEK, input.calendar));
+
+    if (!isScheduledDay(date, input.schedule, input.calendar) || absent) continue;
+    // A shift on a public holiday is paid as holiday work — not overtime.
+    if (input.schedule.kind === "shift" && isPublicHoliday(key)) continue;
+    const marked = WORK_DAY_TYPES.reduce<Decimal>((sum, t) => sum.plus(marks?.get(t) ?? 0), new Decimal(0));
+    workedHours = workedHours.plus(marked.greaterThan(0) ? marked : dayHours(key, input.schedule, input.calendar));
+  }
+
+  const overtimeHours = Decimal.max(workedHours.minus(normHours), 0);
+  const firstTwo = Decimal.min(overtimeHours, 2);
+  const amount = round2(hourlyRate.times(firstTwo.times(1.5).plus(overtimeHours.minus(firstTwo).times(2))));
+  return {
+    periodFrom: period.from,
+    periodTo: period.to,
+    normHours,
+    workedHours,
+    overtimeHours,
+    hourlyRate: hourlyRate.toDecimalPlaces(4, Decimal.ROUND_HALF_UP),
+    amount,
+  };
 }

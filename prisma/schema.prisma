@@ -946,6 +946,8 @@ model WorkSchedule {
   cycleOn    Int?
   cycleOff   Int?
   anchorDate DateTime?
+  /// Суммированный учёт рабочего времени (ст. 104 ТК РФ): учётный период в месяцах (1, 3, 6, 12); пусто — подённый учёт.
+  summarizedPeriodMonths Int?
 
   employees Employee[]
 

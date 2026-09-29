@@ -7,6 +7,8 @@ import {
   ABSENCE_DAY_TYPES,
   WORK_DAY_TYPES,
   computeExtraPay,
+  computeSummarizedOvertime,
+  summarizedPeriod,
   computeProratedSalary,
   computeTripPay,
   scheduleRule,
@@ -277,6 +279,41 @@ export async function calculatePayrollRun(runId: string, userId: string) {
         extra.weekend.amount,
         `Работа в выходные и праздники, ${extra.weekend.days} дн. сверх оклада: ${parts.join(", ")}; ${rate}`,
       );
+    }
+
+    // Summarized accounting (ст. 104 ТК РФ): overtime for the whole accounting period, in its last month's settlement.
+    if (schedule.summarizedMonths && summarizedPeriod(workYear, workMonth, schedule.summarizedMonths).lastMonth === workMonth) {
+      const period = summarizedPeriod(workYear, workMonth, schedule.summarizedMonths);
+      const periodRows = await prisma.timeSheet.findMany({
+        where: { employeeId: employee.id, date: { gte: period.from, lte: period.to }, dayType: { in: [...ABSENCE_DAY_TYPES, ...WORK_DAY_TYPES] } },
+        select: { date: true, dayType: true, hours: true },
+      });
+      const periodHours = new Map<string, Map<string, Decimal>>();
+      for (const row of periodRows) {
+        const key = row.date.toISOString().slice(0, 10);
+        const byType = periodHours.get(key) ?? new Map<string, Decimal>();
+        byType.set(row.dayType, (byType.get(row.dayType) ?? toDecimal(0)).plus(toDecimal(row.hours)));
+        periodHours.set(key, byType);
+      }
+      const summarized = computeSummarizedOvertime({
+        salary,
+        year: workYear,
+        month: workMonth,
+        schedule,
+        calendar,
+        hireDate: employee.hireDate,
+        terminationDate: employee.terminationDate,
+        hours: periodHours,
+      });
+      if (summarized.amount.greaterThan(0)) {
+        const range = `${summarized.periodFrom.toISOString().slice(0, 7)}…${summarized.periodTo.toISOString().slice(0, 7)}`;
+        await createLine(
+          employee,
+          extraType("overtime_pay"),
+          summarized.amount,
+          `Суммированный учёт, учётный период ${range}: отработано ${summarized.workedHours.toString()} ч при норме ${summarized.normHours.toString()} ч — переработка ${summarized.overtimeHours.toString()} ч: первые 2 ч × 1,5, остальные × 2; часовая ставка ${summarized.hourlyRate.toFixed(2)} (оклад / средняя месячная норма периода)`,
+        );
+      }
     }
 
     // Business trip days are not paid by the salary above — they are paid by the average earnings (ст. 167 ТК РФ).

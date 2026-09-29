@@ -439,7 +439,7 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
     permissionView: PERMISSIONS.MASTERDATA_VIEW,
     permissionManage: PERMISSIONS.MASTERDATA_MANAGE,
     orderBy: { name: "asc" },
-    listColumns: ["name", "kind", "hoursPerDay"],
+    listColumns: ["name", "kind", "hoursPerDay", "summarizedPeriodMonths"],
     fields: [
       { name: "name", label: "Название", type: "text", required: true },
       { name: "kind", label: "Вид графика", type: "select", required: true, options: WORK_SCHEDULE_KIND_OPTIONS, defaultValue: "five_day" },
@@ -456,6 +456,12 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "cycleOn", label: "Сменный: смен подряд", type: "number", validate: intBetween(1, 14, "Смен подряд") },
       { name: "cycleOff", label: "Сменный: выходных подряд", type: "number", validate: intBetween(1, 14, "Выходных подряд") },
       { name: "anchorDate", label: "Сменный: дата первой смены цикла", type: "date" },
+      {
+        name: "summarizedPeriodMonths",
+        label: "Суммированный учёт: учётный период, мес. (1, 3, 6 или 12; пусто — подённый учёт)",
+        type: "number",
+        validate: (value) => (["1", "3", "6", "12"].includes(value.trim()) ? null : "1, 3, 6 или 12 месяцев (пусто — подённый учёт)"),
+      },
     ],
   },
   "payroll-accrual-types": {

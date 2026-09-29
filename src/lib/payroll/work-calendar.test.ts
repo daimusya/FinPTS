@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { toDecimal } from "@/lib/money";
 import Decimal from "decimal.js";
-import { computeExtraPay, computeProratedSalary, computeTripPay, isScheduledDay, monthWorkNorm, scheduledDays, toCalendarOverrides, workingDays, type CalendarOverrides, type WorkScheduleRule } from "./work-calendar";
+import { computeExtraPay, computeProratedSalary, computeSummarizedOvertime, computeTripPay, isScheduledDay, monthWorkNorm, scheduledDays, summarizedPeriod, toCalendarOverrides, workingDays, type CalendarOverrides, type WorkScheduleRule } from "./work-calendar";
 
 // Same rows as the production_calendar_and_line_comment migration.
 const HOLIDAYS = [
@@ -190,5 +190,57 @@ describe("computeTripPay", () => {
       method: "salary",
     });
     expect(() => computeTripPay({ tripDays: 1, totalEarnings: toDecimal(0), workedDays: 0, salary: null, monthNormDays: 22 })).toThrow();
+  });
+});
+
+describe("summarized accounting of working time (ст. 104 ТК РФ)", () => {
+  const shift: WorkScheduleRule = { kind: "shift", hoursPerDay: new Decimal(12), cycleOn: 2, cycleOff: 2, anchorDate: utc(2026, 7, 1), summarizedMonths: 3 };
+  const input = {
+    salary: toDecimal(176000),
+    year: 2026,
+    month: 9,
+    schedule: shift,
+    calendar,
+    hireDate: utc(2020, 1, 1),
+    terminationDate: null,
+    hours: new Map<string, Map<string, Decimal>>(),
+  };
+
+  it("accounting periods follow the calendar year", () => {
+    expect(summarizedPeriod(2026, 8, 3)).toMatchObject({ firstMonth: 7, lastMonth: 9 });
+    expect(summarizedPeriod(2026, 8, 12)).toMatchObject({ firstMonth: 1, lastMonth: 12 });
+    expect(summarizedPeriod(2026, 8, 1)).toMatchObject({ firstMonth: 8, lastMonth: 8 });
+  });
+
+  it("overtime is the hours above the calendar norm of the quarter: the first 2 × 1.5, the rest × 2", () => {
+    // Q3 2026: 46 shifts × 12 h = 552 h against 66 working days × 8 h = 528 h; rate 176 000 / (528 / 3) = 1 000.
+    const r = computeSummarizedOvertime(input);
+    expect([r.workedHours.toNumber(), r.normHours.toNumber(), r.overtimeHours.toNumber(), r.hourlyRate.toNumber()]).toEqual([552, 528, 24, 1000]);
+    expect(r.amount.toNumber()).toBe(47000);
+  });
+
+  it("a vacation lowers both the norm (its calendar hours) and the hours worked", () => {
+    const hours = new Map<string, Map<string, Decimal>>();
+    for (let d = 1; d <= 14; d++) hours.set(`2026-07-${String(d).padStart(2, "0")}`, new Map([["vacation", new Decimal(0)]]));
+    // −10 working days (80 h) of the norm, −8 shifts (96 h) worked: 456 − 448 = 8 h → 2 × 1.5 + 6 × 2 = 15 hours' pay.
+    const r = computeSummarizedOvertime({ ...input, hours });
+    expect([r.workedHours.toNumber(), r.normHours.toNumber(), r.overtimeHours.toNumber(), r.amount.toNumber()]).toEqual([456, 448, 8, 15000]);
+  });
+
+  it("the timesheet hours count instead of the shift length, and daily overtime marks are not paid separately", () => {
+    const hours = new Map([["2026-07-01", new Map([["work", new Decimal(10)]])]]);
+    expect(computeSummarizedOvertime({ ...input, hours }).workedHours.toNumber()).toBe(550);
+    const daily = computeExtraPay({
+      salary: toDecimal(176000),
+      year: 2026,
+      month: 7,
+      schedule: shift,
+      calendar,
+      hireDate: utc(2020, 1, 1),
+      terminationDate: null,
+      hours: new Map([["2026-07-01", new Map([["overtime", new Decimal(3)]])]]),
+      workedRegularHours: new Decimal(0),
+    });
+    expect(daily.overtime.amount.toNumber()).toBe(0);
   });
 });
