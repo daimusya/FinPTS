@@ -63,7 +63,7 @@ describe("organizationTax", () => {
     expect(tax.regime).toBe("usn_income");
     const rate = tax.ratePct as (y: number) => { toNumber(): number };
     expect([rate(2026).toNumber(), rate(2027).toNumber()]).toEqual([6, 3]);
-    expect(tax.label).toBe("как у «Альфа»: УСН «доходы», 3% в 2027 году");
+    expect(tax.label.startsWith("как у «Альфа»: УСН «доходы», 3% в 2027 году")).toBe(true);
     // No own rate — the standard one; the patent is not a percentage tax.
     expect((organizationTax({ name: "Б", taxSystem: "osn" }, [], 2027).ratePct as (y: number) => { toNumber(): number })(2027).toNumber()).toBe(25);
     expect(organizationTax({ name: "ИП", taxSystem: "psn" }, [], 2027).regime).toBe("none");
@@ -81,10 +81,25 @@ describe("organizationTax — sole proprietor", () => {
     const usn = organizationTax({ name: "ИП Петров", taxSystem: "usn_income", type: "SOLE_PROPRIETOR" }, rates, 2026);
     expect(usn.ipContribution?.base).toBe("income");
     expect(usn.ipContribution?.forYear(2026).fixed?.toNumber()).toBe(57390);
-    expect(usn.label.endsWith("; взносы ИП за себя")).toBe(true);
+    expect(usn.label).toContain("; взносы ИП за себя");
     expect(organizationTax({ name: "ИП", taxSystem: "osn", type: "SOLE_PROPRIETOR" }, rates, 2026).ipContribution?.base).toBe("income_minus_expenses");
     expect(organizationTax({ name: "ИП", taxSystem: "ausn_income", type: "SOLE_PROPRIETOR" }, rates, 2026).ipContribution).toBeNull();
     expect(organizationTax({ name: "ИП", taxSystem: "psn", type: "SOLE_PROPRIETOR" }, rates, 2026).ipContribution?.forYear(2026).income).toBeNull();
     expect(organizationTax({ name: "ООО", taxSystem: "usn_income", type: "LEGAL_ENTITY" }, rates, 2026).ipContribution).toBeNull();
+  });
+});
+
+describe("organizationTax — reduction of USN on income", () => {
+  it("only on USN on income; the label says which limit applies", async () => {
+    const { organizationTax } = await import("./loans");
+    const Decimal = (await import("decimal.js")).default;
+    const none = { registeredEmployees: 0, employeeInsurancePct: new Decimal(30) };
+    const ip = organizationTax({ name: "ИП", taxSystem: "usn_income", type: "SOLE_PROPRIETOR" }, [], 2027, none);
+    expect(ip.reduction).toEqual({ employeeInsuranceShare: new Decimal(30).dividedBy(130), registeredEmployees: false });
+    expect(ip.label).toContain("полностью, пока нет сотрудников");
+    const withStaff = organizationTax({ name: "ИП", taxSystem: "usn_income", type: "SOLE_PROPRIETOR" }, [], 2027, { ...none, registeredEmployees: 2 });
+    expect(withStaff.reduction?.registeredEmployees).toBe(true);
+    expect(withStaff.label).toContain("не больше чем на 50% — есть сотрудники (2)");
+    expect(organizationTax({ name: "ИП", taxSystem: "usn_income_expense", type: "SOLE_PROPRIETOR" }, [], 2027, none).reduction).toBeNull();
   });
 });

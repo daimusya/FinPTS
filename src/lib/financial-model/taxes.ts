@@ -58,6 +58,13 @@ export interface TaxMonthInput {
   expenses: Decimal;
   /** Прибыль до налога по методу начисления (для налога на прибыль). */
   profit: Decimal;
+  /**
+   * УСН «доходы»: страховые взносы месяца, на которые уменьшается налог
+   * (взносы ИП за себя и, при сотрудниках, взносы за сотрудников).
+   */
+  deductibleContributions?: Decimal;
+  /** Есть сотрудники в этом месяце: уменьшение — не больше 50 % налога. */
+  hasEmployees?: boolean;
 }
 
 export interface TaxMonth {
@@ -66,6 +73,8 @@ export interface TaxMonth {
   paid: Decimal;
   /** Налог к уплате на конец месяца. */
   payableEnd: Decimal;
+  /** На сколько в этом месяце выросло уменьшение налога на страховые взносы (с начала года). */
+  reduction: Decimal;
 }
 
 const round2 = (d: Decimal) => d.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
@@ -80,12 +89,25 @@ export function taxRate(regime: TaxRegime, customPct: Decimal | number | string 
 export type TaxRateInput = Decimal | ((year: number) => Decimal);
 
 export function taxSchedule(regime: TaxRegime, ratePct: TaxRateInput, months: TaxMonthInput[]): TaxMonth[] {
-  if (regime === "none") return months.map(() => ({ accrued: zero, paid: zero, payableEnd: zero }));
+  if (regime === "none") return months.map(() => ({ accrued: zero, paid: zero, payableEnd: zero, reduction: zero }));
   const rateOf = (y: number) => (typeof ratePct === "function" ? ratePct(y) : ratePct).dividedBy(100);
-  const year = new Map<number, { income: Decimal; base: Decimal; tax: Decimal; paid: Decimal; byMonth: Decimal[] }>();
+  type YearState = {
+    income: Decimal;
+    base: Decimal;
+    tax: Decimal;
+    paid: Decimal;
+    byMonth: Decimal[];
+    contributions: Decimal;
+    reduction: Decimal;
+    employees: boolean;
+  };
+  const year = new Map<number, YearState>();
   const yearOf = (y: number) => {
     let entry = year.get(y);
-    if (!entry) year.set(y, (entry = { income: zero, base: zero, tax: zero, paid: zero, byMonth: [] }));
+    if (!entry) {
+      entry = { income: zero, base: zero, tax: zero, paid: zero, byMonth: [], contributions: zero, reduction: zero, employees: false };
+      year.set(y, entry);
+    }
     return entry;
   };
   const incomeOnly = regime === "usn_income" || regime === "ausn_income";
@@ -106,6 +128,18 @@ export function taxSchedule(regime: TaxRegime, ratePct: TaxRateInput, months: Ta
     y.income = y.income.plus(m.income);
     y.base = y.base.plus(incomeOnly ? m.income : regime === "profit" ? m.profit : m.income.minus(m.expenses));
     let cumulative = round2(Decimal.max(0, y.base).times(rateOf(m.year)));
+    // USN on income is reduced by the insurance contributions since the start of the year: in full
+    // without employees, by no more than half of the tax once there have been employees this year.
+    let reduction = zero;
+    if (regime === "usn_income") {
+      y.contributions = y.contributions.plus(m.deductibleContributions ?? zero);
+      y.employees = y.employees || Boolean(m.hasEmployees);
+      const limit = y.employees ? round2(cumulative.dividedBy(2)) : cumulative;
+      const total = Decimal.min(y.contributions, limit);
+      reduction = total.minus(y.reduction);
+      y.reduction = total;
+      cumulative = cumulative.minus(total);
+    }
     const minRate = MIN_TAX_RATE[regime];
     if (minRate && m.month === 12) cumulative = Decimal.max(cumulative, round2(y.income.times(minRate)));
     const accrued = cumulative.minus(y.tax);
@@ -113,7 +147,7 @@ export function taxSchedule(regime: TaxRegime, ratePct: TaxRateInput, months: Ta
     y.byMonth[m.month] = cumulative;
 
     payable = payable.plus(accrued).minus(paid);
-    return { accrued, paid, payableEnd: payable };
+    return { accrued, paid, payableEnd: payable, reduction };
   });
 }
 
@@ -164,6 +198,6 @@ export function ipContributionSchedule(params: IpContributionParams, months: Tax
     if (m.month === 7 && previous) paid = paid.plus(previous.incomeCum);
 
     payable = payable.plus(accrued).minus(paid);
-    return { accrued, paid, payableEnd: payable };
+    return { accrued, paid, payableEnd: payable, reduction: zero };
   });
 }

@@ -64,6 +64,7 @@ export default async function CompareScenariosPage({
       loans: loans.get(s.id) ?? [],
       tax: taxes[index],
       ipContribution: taxes[index].ipContribution,
+      taxReduction: taxes[index].reduction,
     });
     return {
       scenario: s,

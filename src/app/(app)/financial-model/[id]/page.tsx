@@ -113,6 +113,7 @@ export default async function ScenarioDetailPage({
     loans: loanInputs,
     tax,
     ipContribution: tax.ipContribution,
+    taxReduction: tax.reduction,
   });
   const startIndex = startYear * 12 + (startMonth - 1);
   const dueLater = (due: typeof opening.openingReceivableDue) => sumMoney(due.filter((d) => d.index > startIndex).map((d) => d.amount));
@@ -662,7 +663,11 @@ export default async function ScenarioDetailPage({
           за предыдущий. Налог уменьшает чистую прибыль и деньги. Своя ставка не указана — стандартная. НДС, патент
           и налоги прошлых периодов не считаются. У ИП «как у организации» считаются и взносы за себя из карточки:
           фиксированные — равными долями по месяцам, уплата в декабре; с дохода свыше порога — нарастающим итогом за год,
-          не больше максимума, уплата в июле следующего года. Уменьшение налога на взносы не учитывается.
+          не больше максимума, уплата в июле следующего года. При УСН «доходы» «как у организации» налог уменьшается
+          на страховые взносы с начала года: у ИП без сотрудников — на взносы за себя полностью; при сотрудниках (по
+          справочнику «Сотрудники» или с месяца, когда в прогнозе численность больше нуля) — на взносы за себя и за
+          сотрудников (их доля в ФОТ по ставке взносов организации), но не больше чем на 50% налога. При других режимах
+          взносы ИП за себя — расход.
         </p>
         <form action={saveScenarioTaxAction.bind(null, id)} className="form-grid" style={{ alignItems: "flex-end" }}>
           {keepStart}
@@ -774,6 +779,9 @@ export default async function ScenarioDetailPage({
                   <ProjectionRow label="Прибыль до налога" values={projection.map((p) => p.profitBeforeTax)} format="money" bold />
                   {tax.regime !== "none" ? (
                     <ProjectionRow label={`${TAX_REGIME_LABELS[tax.regime]} — начислено`} values={projection.map((p) => p.tax)} format="money" />
+                  ) : null}
+                  {tax.reduction ? (
+                    <ProjectionRow label="в т.ч. уменьшение налога на страховые взносы" values={projection.map((p) => p.taxReduction)} format="money" />
                   ) : null}
                   {hasContribution ? (
                     <ProjectionRow label="Взносы ИП за себя — начислено" values={projection.map((p) => p.ipContribution)} format="money" />

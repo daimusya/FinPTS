@@ -291,6 +291,7 @@ export async function GET(request: NextRequest) {
       loans,
       tax,
       ipContribution: tax.ipContribution,
+      taxReduction: tax.reduction,
     });
     const revenueRows: Array<Array<string | number>> =
       newServices.length > 0
@@ -332,6 +333,7 @@ export async function GET(request: NextRequest) {
       ["Проценты по кредитам", ...projection.map((p) => toNum(p.loanInterest))],
       ["Прибыль до налога", ...projection.map((p) => toNum(p.profitBeforeTax))],
       [`${TAX_REGIME_LABELS[tax.regime]} — начислено`, ...projection.map((p) => toNum(p.tax))],
+      ["в т.ч. уменьшение налога на страховые взносы", ...projection.map((p) => toNum(p.taxReduction))],
       ["Взносы ИП за себя — начислено", ...projection.map((p) => toNum(p.ipContribution))],
       ["Чистая прибыль", ...projection.map((p) => toNum(p.netProfit))],
       [],

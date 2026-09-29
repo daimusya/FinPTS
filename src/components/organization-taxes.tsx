@@ -37,9 +37,10 @@ const ru = (d: Date) => d.toLocaleDateString("ru-RU", { timeZone: "UTC" });
  * удаление, добавление и заполнение стандартными ставками выбранной системы.
  */
 export async function OrganizationTaxes({ organizationId, state = {} }: { organizationId: string; state?: OrganizationTaxesState }) {
-  const [organization, rates] = await Promise.all([
+  const [organization, rates, employees] = await Promise.all([
     prisma.organization.findUnique({ where: { id: organizationId }, select: { taxSystem: true, type: true } }),
     prisma.organizationTaxRate.findMany({ where: { organizationId }, orderBy: [{ taxKind: "asc" }, { validFrom: "desc" }] }),
+    prisma.employee.count({ where: { organizationId, status: "ACTIVE" } }),
   ]);
   const system = organization && isTaxSystem(organization.taxSystem) ? organization.taxSystem : "osn";
   const systemLabel = TAX_SYSTEM_OPTIONS.find((o) => o.value === system)?.label ?? system;
@@ -76,6 +77,16 @@ export async function OrganizationTaxes({ organizationId, state = {} }: { organi
           ? "Для ИП есть взносы за себя: фиксированные (сумма за год, срок уплаты — 28 декабря) и с дохода свыше порога (обычно 1% с дохода свыше 300 000 ₽ за год, не больше максимума года, срок — 1 июля следующего года)."
           : ""}
       </p>
+      {system === "usn_income" ? (
+        <p style={{ marginBottom: 10 }}>
+          Уменьшение налога УСН на страховые взносы (в финансовых сценариях «как у организации»):{" "}
+          {employees > 0
+            ? `работающих сотрудников — ${employees}, поэтому налог уменьшается на взносы${isSoleProprietor ? " за себя и" : ""} за сотрудников не больше чем на 50%.`
+            : isSoleProprietor
+              ? "сотрудников нет — налог уменьшается на взносы ИП за себя полностью. Как только в справочнике «Сотрудники» появится работающий сотрудник этой организации (или в сценарии — численность), лимит станет 50% и в расчёт войдут взносы за сотрудников."
+              : "сотрудников нет — уменьшать налог не на что."}
+        </p>
+      ) : null}
       {current.length > 0 ? (
         <p style={{ marginBottom: 10 }}>
           Сейчас действуют: {current.map((c) => `${TAX_KIND_LABELS[c.kind]} — ${describe(c.record!)}`).join("; ")}.

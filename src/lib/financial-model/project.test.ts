@@ -294,3 +294,26 @@ describe("projectScenario — sole proprietor's contributions", () => {
     expect(p[11].cashBalance.toNumber()).toBe(1200000 - 12000);
   });
 });
+
+describe("projectScenario — USN reduced by contributions", () => {
+  const service: NewServiceInput = { id: "s", name: "Услуга", launchYear: 2027, launchMonth: 1, avgCheck: 1000, salesPerMonth: 100, rampUpMonths: 0, variableCostPct: 0 };
+  const extras = (registeredEmployees: boolean) => ({
+    tax: { regime: "usn_income" as const, ratePct: new Decimal(6) },
+    ipContribution: { base: "income" as const, forYear: () => ({ fixed: new Decimal(12000), income: null }) },
+    taxReduction: { employeeInsuranceShare: new Decimal(30.2).dividedBy(130.2), registeredEmployees },
+  });
+
+  it("a sole proprietor without employees: the tax is reduced by own contributions in full", () => {
+    const [m] = projectScenario(2027, 1, 1, [], 0, [service], extras(false));
+    expect([m.taxReduction.toNumber(), m.tax.toNumber(), m.netProfit.toNumber()]).toEqual([1000, 5000, 94000]);
+  });
+
+  it("with a hire in the forecast or employees in the register: own and employee contributions, up to half of the tax", () => {
+    const hire = [row(2027, 1, "headcount", 1), row(2027, 1, "avg_employee_cost", 30200)];
+    const [hired] = projectScenario(2027, 1, 1, hire, 0, [service], extras(false));
+    // Tax 6 000; contributions 1 000 own + 7 004,92 for the employee — limited to 3 000.
+    expect([hired.taxReduction.toNumber(), hired.tax.toNumber()]).toEqual([3000, 3000]);
+    const [registered] = projectScenario(2027, 1, 1, [], 0, [service], extras(true));
+    expect([registered.taxReduction.toNumber(), registered.tax.toNumber()]).toEqual([1000, 5000]); // below the limit
+  });
+});

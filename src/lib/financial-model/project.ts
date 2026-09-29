@@ -92,6 +92,8 @@ export interface MonthProjection {
   netProfit: Decimal;
   taxPaid: Decimal;
   taxPayableEnd: Decimal;
+  /** На сколько в месяце уменьшен налог УСН «доходы» на страховые взносы (уже учтено в tax). */
+  taxReduction: Decimal;
   /** Страховые взносы ИП за себя: начислено, уплачено, к уплате на конец месяца. */
   ipContribution: Decimal;
   ipContributionPaid: Decimal;
@@ -132,6 +134,13 @@ export interface ScenarioCashExtras {
   tax?: { regime: TaxRegime; ratePct: TaxRateInput };
   /** Взносы ИП за себя — у прогноза «как у организации» для ИП. */
   ipContribution?: IpContributionParams | null;
+  /**
+   * Уменьшение налога УСН «доходы» на страховые взносы — у прогноза «как у
+   * организации»: взносы ИП за себя и взносы за сотрудников (их доля в ФОТ
+   * сценария); сотрудники есть, если они работают по справочнику или в
+   * месяце прогноза численность больше нуля — тогда не больше 50 % налога.
+   */
+  taxReduction?: { employeeInsuranceShare: Decimal; registeredEmployees: boolean } | null;
 }
 
 export interface DueAmount {
@@ -317,6 +326,7 @@ export function projectScenario(
       netProfit: operatingProfit,
       taxPaid: zero,
       taxPayableEnd: zero,
+      taxReduction: zero,
       ipContribution: zero,
       ipContributionPaid: zero,
       ipContributionPayableEnd: zero,
@@ -415,8 +425,23 @@ function applyCashTiming(
     expenses: supplierPayments[i].plus(payableDue[i]).plus(r.fixedCosts).plus(r.payrollCost).plus(loanMonths[i].interest),
     profit: r.operatingProfit.minus(loanMonths[i].interest),
   }));
-  const taxes = taxSchedule(extras.tax?.regime ?? "none", extras.tax?.ratePct ?? zero, taxBase);
   const contributions = extras.ipContribution ? ipContributionSchedule(extras.ipContribution, taxBase) : null;
+  const reduction = extras.taxReduction;
+  const taxes = taxSchedule(
+    extras.tax?.regime ?? "none",
+    extras.tax?.ratePct ?? zero,
+    taxBase.map((b, i) => {
+      const own = contributions?.[i] ?? { accrued: zero, paid: zero };
+      return {
+        ...b,
+        // Own contributions are an expense where the tax counts expenses (paid ones — the cash method).
+        expenses: b.expenses.plus(own.paid),
+        profit: b.profit.minus(own.accrued),
+        deductibleContributions: reduction ? own.accrued.plus(results[i].payrollCost.times(reduction.employeeInsuranceShare)) : undefined,
+        hasEmployees: reduction ? reduction.registeredEmployees || results[i].totalHeadcount > 0 : undefined,
+      };
+    }),
+  );
   results.forEach((r, i) => {
     const { drawdown, interest, principal } = loanMonths[i];
     loanDebt = loanDebt.plus(drawdown).minus(principal);
@@ -456,6 +481,7 @@ function applyCashTiming(
     r.netProfit = r.profitBeforeTax.minus(tax.accrued).minus(contribution.accrued);
     r.taxPaid = tax.paid;
     r.taxPayableEnd = tax.payableEnd;
+    r.taxReduction = tax.reduction;
     r.ipContribution = contribution.accrued;
     r.ipContributionPaid = contribution.paid;
     r.ipContributionPayableEnd = contribution.payableEnd;

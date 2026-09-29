@@ -100,3 +100,32 @@ describe("ipContributionSchedule — sole proprietor's own contributions", () =>
     expect(ipContributionSchedule(params("income_minus_expenses"), [month(2026, 1, 1000000, 600000)])[0].accrued.toNumber()).toBe(1000);
   });
 });
+
+describe("taxSchedule — USN on income reduced by insurance contributions", () => {
+  const withContributions = (hasEmployeesFrom: number | null) =>
+    [1, 2, 3, 4].map((m) => ({
+      ...month(2027, m, m === 4 ? 0 : 100000),
+      deductibleContributions: d(m === 1 ? 10000 : 0),
+      hasEmployees: hasEmployeesFrom !== null && m >= hasEmployeesFrom,
+    }));
+
+  it("without employees — by the contributions in full, year to date", () => {
+    const s = taxSchedule("usn_income", d(6), withContributions(null));
+    expect(nums(s.map((x) => x.reduction))).toEqual([6000, 4000, 0, 0]);
+    expect(nums(s.map((x) => x.accrued))).toEqual([0, 2000, 6000, 0]);
+    expect(s[3].paid.toNumber()).toBe(8000); // Q1: 18 000 − 10 000
+  });
+
+  it("once there are employees — by no more than half of the tax", () => {
+    const s = taxSchedule("usn_income", d(6), withContributions(2));
+    // January: no employees yet, reduced in full; from February the limit is 50 % of the tax since the start of the year.
+    expect(nums(s.map((x) => x.reduction))).toEqual([6000, 0, 3000, 0]);
+    expect(nums(s.map((x) => x.accrued))).toEqual([0, 6000, 3000, 0]);
+    expect(s[3].paid.toNumber()).toBe(9000);
+  });
+
+  it("other regimes ignore the reduction", () => {
+    const s = taxSchedule("usn_income_expense", d(15), withContributions(null));
+    expect(nums(s.map((x) => x.reduction))).toEqual([0, 0, 0, 0]);
+  });
+});

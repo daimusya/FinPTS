@@ -5,6 +5,7 @@ import { allocatedAsOf } from "@/lib/reports/balance-lines";
 import { accrualScopeWhere, type AccessScope } from "@/lib/access-scope";
 import type { LoanInput, LoanRepayment } from "./cash-timing";
 import type { DueAmount, ScenarioCashExtras } from "./project";
+import { combineTaxRates } from "@/lib/payroll/calculate";
 import { DEFAULT_TAX_RATES, TAX_REGIME_LABELS, TAX_REGIMES, taxRate, type IpContributionParams, type TaxRateInput, type TaxRegime } from "./taxes";
 import {
   ipFixedInsuranceAt,
@@ -161,6 +162,14 @@ export interface ScenarioTax {
   label: string;
   /** Взносы ИП за себя — только «как у организации» для ИП с такими ставками в карточке. */
   ipContribution: IpContributionParams | null;
+  /** Уменьшение налога УСН «доходы» на страховые взносы — только «как у организации». */
+  reduction: ScenarioCashExtras["taxReduction"];
+}
+
+/** Для уменьшения налога: сотрудники по справочнику и ставка взносов за них (%, с травматизмом). */
+export interface EmployeeTaxContext {
+  registeredEmployees: number;
+  employeeInsurancePct: Decimal;
 }
 
 /** Как система налогообложения организации считается в прогнозе и по какому налогу из её ставок. */
@@ -184,6 +193,7 @@ export function organizationTax(
   organization: { name: string; taxSystem: string; type?: string },
   rates: TaxRateRecord[],
   year: number,
+  employees: EmployeeTaxContext = { registeredEmployees: 0, employeeInsurancePct: new Decimal(0) },
 ): ScenarioTax {
   const system: TaxSystem = isTaxSystem(organization.taxSystem) ? organization.taxSystem : "osn";
   const { regime, kind } = SYSTEM_REGIME[system];
@@ -194,7 +204,26 @@ export function organizationTax(
       ? `как у «${organization.name}»: ${systemLabel} — налог в прогнозе не считается (стоимость патента задайте постоянными расходами)`
       : `как у «${organization.name}»: ${systemLabel}, ${ratePct(year).toString().replace(".", ",")}% в ${year} году`;
   const ipContribution = soleProprietorContributions(system, organization.type, rates);
-  return { regime, ratePct, label: ipContribution ? `${label}; взносы ИП за себя` : label, ipContribution };
+  // Contributions (the payroll's share and a sole proprietor's own ones) reduce USN on income.
+  const reduction =
+    regime === "usn_income"
+      ? {
+          employeeInsuranceShare: employees.employeeInsurancePct.dividedBy(employees.employeeInsurancePct.plus(100)),
+          registeredEmployees: employees.registeredEmployees > 0,
+        }
+      : null;
+  const parts = [label];
+  if (ipContribution) parts.push("взносы ИП за себя");
+  if (reduction) {
+    parts.push(
+      employees.registeredEmployees > 0
+        ? `налог уменьшается на страховые взносы не больше чем на 50% — есть сотрудники (${employees.registeredEmployees})`
+        : organization.type === "SOLE_PROPRIETOR"
+          ? "налог уменьшается на взносы ИП полностью, пока нет сотрудников (с найма — не больше 50%)"
+          : "налог уменьшается на взносы за сотрудников прогноза не больше чем на 50%",
+    );
+  }
+  return { regime, ratePct, label: parts.join("; "), ipContribution, reduction };
 }
 
 /**
@@ -223,13 +252,23 @@ export async function loadScenarioTax(
   if (scenario.taxRegime === "organization" && scenario.taxOrganizationId) {
     const organization = await prisma.organization.findUnique({
       where: { id: scenario.taxOrganizationId },
-      select: { name: true, shortName: true, taxSystem: true, type: true, taxRates: true },
+      select: {
+        name: true,
+        shortName: true,
+        taxSystem: true,
+        type: true,
+        taxRates: true,
+        _count: { select: { employees: { where: { status: "ACTIVE" } } } },
+      },
     });
     if (organization) {
+      const rules = await prisma.taxRule.findMany({ where: { isArchived: false } });
+      const { insurancePct } = combineTaxRates(rules, organization.taxRates, new Date(Date.UTC(startYear, 0, 1)));
       return organizationTax(
         { name: organization.shortName || organization.name, taxSystem: organization.taxSystem, type: organization.type },
         organization.taxRates,
         startYear,
+        { registeredEmployees: organization._count.employees, employeeInsurancePct: insurancePct },
       );
     }
   }
@@ -240,5 +279,6 @@ export async function loadScenarioTax(
     ratePct: rate,
     label: regime === "none" ? TAX_REGIME_LABELS.none : `${TAX_REGIME_LABELS[regime]}, ${rate.toString().replace(".", ",")}%`,
     ipContribution: null,
+    reduction: null,
   };
 }
