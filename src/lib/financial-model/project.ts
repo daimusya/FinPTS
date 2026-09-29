@@ -4,7 +4,9 @@ import { computeBreakEven, computeMarginOfSafety } from "@/lib/reports/margin";
 import type { DriverCode } from "./drivers";
 import { loanSchedule, shiftByLag, type LoanInput, type LoanMonth } from "./cash-timing";
 import {
+  activeShare,
   ipContributionOpening,
+  usnVatExemptMonths,
   ipContributionSchedule,
   taxSchedule,
   vatSchedule,
@@ -161,6 +163,13 @@ export interface ScenarioCashExtras {
   yearOpening?: YearOpening | null;
   /** НДС (ставка по годам); null — не считается. */
   vat?: VatParams | null;
+  /**
+   * Даты регистрации и прекращения деятельности организации: до регистрации
+   * и после прекращения выручки, расходов, ФОТ и численности нет, неполный
+   * месяц — пропорционально дням.
+   */
+  activeFrom?: Date | null;
+  activeTo?: Date | null;
 }
 
 export interface DueAmount {
@@ -183,7 +192,7 @@ export function spreadDue(due: DueAmount[] | undefined, total: Decimal, startInd
   return byMonth;
 }
 
-const DEFAULT_100_DRIVERS = new Set<DriverCode>(["seasonality_pct", "new_service_activation_pct"]);
+const DEFAULT_100_DRIVERS = new Set<DriverCode>(["seasonality_pct", "new_service_activation_pct", "fixed_costs_vat_share_pct"]);
 
 function addMonths(year: number, month: number, offset: number): { year: number; month: number } {
   const total = year * 12 + (month - 1) + offset;
@@ -236,6 +245,7 @@ export function projectScenario(
   const ownLagRevenue = new Map<string, { lag: number; amounts: Decimal[] }>();
   const supplierLagDays: number[] = [];
   const manualLoanPayments: Decimal[] = [];
+  const fixedVatShares: Decimal[] = [];
 
   for (let i = 0; i < months; i += 1) {
     const { year, month } = addMonths(startYear, startMonth, i);
@@ -321,6 +331,7 @@ export function projectScenario(
     customerLagDays.push(lookup.get(year, month, "customer_payment_days").toNumber());
     supplierLagDays.push(lookup.get(year, month, "supplier_payment_days").toNumber());
     manualLoanPayments.push(lookup.get(year, month, "loan_payment"));
+    fixedVatShares.push(Decimal.min(1, Decimal.max(0, lookup.get(year, month, "fixed_costs_vat_share_pct").dividedBy(100))));
 
     const breakEvenRevenue = computeBreakEven(fixedCosts.plus(payrollCost), revenue, variableCosts.plus(intermediaryCommission));
     const marginOfSafetyPct = computeMarginOfSafety(revenue, breakEvenRevenue);
@@ -371,13 +382,58 @@ export function projectScenario(
     });
   }
 
+  if (extras.activeFrom || extras.activeTo) limitToActivity(results, [...ownLagRevenue.values()], extras.activeFrom ?? null, extras.activeTo ?? null);
+
   applyCashTiming(results, startYear, startMonth, toDecimal(startingCash), extras, {
     customerLagDays,
     supplierLagDays,
     manualLoanPayments,
     ownLagRevenue: [...ownLagRevenue.values()],
+    fixedVatShares,
   });
   return results;
+}
+
+/** Выручка, расходы, ФОТ и численность — только в дни деятельности организации (до регистрации и после прекращения — ноль). */
+function limitToActivity(
+  results: MonthProjection[],
+  ownLagRevenue: Array<{ amounts: Decimal[] }>,
+  from: Date | null,
+  to: Date | null,
+) {
+  const round = (d: Decimal) => d.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  results.forEach((r, i) => {
+    const share = activeShare(r.year, r.month, from, to);
+    if (share.equals(1)) return;
+    const scale = (d: Decimal) => round(d.times(share));
+    r.baseRevenue = scale(r.baseRevenue);
+    r.newServices = r.newServices.map((sm) => ({
+      ...sm,
+      revenue: scale(sm.revenue),
+      variableCosts: scale(sm.variableCosts),
+      payrollCost: scale(sm.payrollCost),
+      fixedCosts: scale(sm.fixedCosts),
+      contribution: scale(sm.contribution),
+      headcount: share.isZero() ? 0 : sm.headcount,
+    }));
+    r.newServicesRevenue = r.newServices.reduce((acc, sm) => acc.plus(sm.revenue), new Decimal(0));
+    r.revenue = r.baseRevenue.plus(r.newServicesRevenue);
+    r.intermediaryCommission = scale(r.intermediaryCommission);
+    r.variableCosts = scale(r.variableCosts);
+    r.fixedCosts = scale(r.fixedCosts);
+    r.payrollCost = scale(r.payrollCost);
+    r.grossProfit = r.revenue.minus(r.variableCosts).minus(r.intermediaryCommission);
+    r.operatingProfit = r.grossProfit.minus(r.fixedCosts).minus(r.payrollCost);
+    r.profitBeforeTax = r.operatingProfit;
+    r.netProfit = r.operatingProfit;
+    if (share.isZero()) {
+      r.totalHeadcount = 0;
+      r.departmentHeadcount = r.departmentHeadcount.map((dh) => ({ ...dh, requiredHeadcount: 0 }));
+    }
+    r.breakEvenRevenue = computeBreakEven(r.fixedCosts.plus(r.payrollCost), r.revenue, r.variableCosts.plus(r.intermediaryCommission));
+    r.marginOfSafetyPct = computeMarginOfSafety(r.revenue, r.breakEvenRevenue);
+    for (const service of ownLagRevenue) if (service.amounts[i]) service.amounts[i] = scale(service.amounts[i]);
+  });
 }
 
 const zero = new Decimal(0);
@@ -402,6 +458,7 @@ function applyCashTiming(
     supplierLagDays: number[];
     manualLoanPayments: Decimal[];
     ownLagRevenue: Array<{ lag: number; amounts: Decimal[] }>;
+    fixedVatShares: Decimal[];
   },
 ) {
   const ownLagTotal = (i: number) => drivers.ownLagRevenue.reduce((acc, s) => acc.plus(s.amounts[i] ?? zero), zero);
@@ -462,17 +519,32 @@ function applyCashTiming(
         hasEmployees: reduction ? reduction.registeredEmployees || Boolean(opening.hasEmployees) : opening.hasEmployees,
       }
     : null;
+  // USN is free of VAT while its income stays within the limit (from 2025).
+  const usnRegime = extras.tax?.regime === "usn_income" || extras.tax?.regime === "usn_income_expense";
+  const exempt =
+    extras.vat?.usnExemption && usnRegime
+      ? usnVatExemptMonths(
+          taxBase.map((b) => ({ year: b.year, month: b.month, income: b.income })),
+          extras.vat.usnExemption.previousYearIncome,
+          opening ? { year: opening.year, income: opening.income } : null,
+        )
+      : null;
   const vat = extras.vat
     ? vatSchedule(
         extras.vat,
-        results.map((r, i) => ({
-          year: r.year,
-          month: r.month,
-          revenue: r.revenue,
-          purchases: r.variableCosts.plus(r.intermediaryCommission),
-          collections: collections[i],
-          supplierPayments: supplierPayments[i],
-        })),
+        results.map((r, i) => {
+          // Fixed costs bought with input VAT are paid in the same month.
+          const fixedWithVat = r.fixedCosts.times(drivers.fixedVatShares[i] ?? 1);
+          return {
+            year: r.year,
+            month: r.month,
+            revenue: r.revenue,
+            purchases: r.variableCosts.plus(r.intermediaryCommission).plus(fixedWithVat),
+            collections: collections[i],
+            supplierPayments: supplierPayments[i].plus(fixedWithVat),
+            exempt: exempt?.[i] ?? false,
+          };
+        }),
       )
     : null;
   const taxes = taxSchedule(

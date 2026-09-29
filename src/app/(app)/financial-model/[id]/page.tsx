@@ -20,9 +20,9 @@ import {
   saveScenarioValuesAction,
 } from "../actions";
 import { loadScenarioDepartments } from "@/lib/financial-model/scenario-departments";
-import { loadLoans, loadOpeningBalances, loadScenarioTax, loadYearOpening, MAX_LOAN_TERM_MONTHS } from "@/lib/financial-model/loans";
+import { loadLoans, loadOpeningBalances, loadScenarioTax, loadScenarioTaxContext, MAX_LOAN_TERM_MONTHS } from "@/lib/financial-model/loans";
 import { organizationScopeWhere } from "@/lib/access-scope";
-import { DEFAULT_TAX_RATES, TAX_REGIME_LABELS, TAX_REGIMES } from "@/lib/financial-model/taxes";
+import { DEFAULT_TAX_RATES, TAX_REGIME_LABELS, TAX_REGIMES, usnVatLimit } from "@/lib/financial-model/taxes";
 import { LOAN_REPAYMENT_LABELS, type LoanRepayment } from "@/lib/financial-model/cash-timing";
 import { loadNewServices, MAX_PAYMENT_DAYS, MAX_RAMP_UP_MONTHS } from "@/lib/financial-model/new-services";
 
@@ -108,15 +108,15 @@ export default async function ScenarioDetailPage({
   const hasContribution = Boolean(tax.ipContribution);
   // Taxes or the sole proprietor's contributions — either one brings the profit-after-tax rows.
   const taxOn = tax.regime !== "none" || hasContribution;
-  const yearOpening = taxOn ? await loadYearOpening(startYear, startMonth, tax.organizationId, scope) : null;
+  const taxContext = await loadScenarioTaxContext(tax, startYear, startMonth, scope);
+  const yearOpening = taxContext.yearOpening ?? null;
+  const vatContext = taxContext.vat ?? null;
+  const usnVat = Boolean(vatContext?.usnExemption) && (tax.regime === "usn_income" || tax.regime === "usn_income_expense");
+  const startLimit = usnVatLimit(startYear);
   const projection = projectScenario(startYear, startMonth, HORIZON_MONTHS, rows, startingCash, newServiceInputs, {
     ...opening,
     loans: loanInputs,
-    tax,
-    ipContribution: tax.ipContribution,
-    taxReduction: tax.reduction,
-    yearOpening,
-    vat: tax.vat,
+    ...taxContext,
   });
   const startIndex = startYear * 12 + (startMonth - 1);
   const dueLater = (due: typeof opening.openingReceivableDue) => sumMoney(due.filter((d) => d.index > startIndex).map((d) => d.amount));
@@ -666,7 +666,10 @@ export default async function ScenarioDetailPage({
           за предыдущий. Налог уменьшает чистую прибыль и деньги. Своя ставка не указана — стандартная. НДС, патент
           и налоги прошлых периодов не считаются. НДС: выручка и расходы прогноза — без НДС; клиенты платят выручку плюс
           НДС, при ставках 22% и 10% НДС поставщиков (переменные расходы и комиссия) идёт к вычету, при 5% и 7% вычетов нет;
-          НДС за квартал уплачивается тремя равными частями в следующие три месяца. На прибыль НДС не влияет. Взносы ИП за
+          НДС за квартал уплачивается тремя равными частями в следующие три месяца; вычет — и по постоянным расходам
+          (доля — драйвер «Постоянные расходы с входящим НДС»). На УСН НДС нет, пока доход не превышает лимит года. На
+          прибыль НДС не влияет. До даты регистрации и после даты прекращения деятельности организации выручки, расходов и
+          ФОТ в прогнозе нет. Взносы ИП за
           неполный год — по датам регистрации и прекращения деятельности из карточки; при прекращении всё за год
           уплачивается в течение 15 дней. У ИП «как у организации» считаются и взносы за себя из карточки:
           фиксированные — равными долями по месяцам, уплата в декабре; с дохода свыше порога — нарастающим итогом за год,
@@ -731,6 +734,19 @@ export default async function ScenarioDetailPage({
           ) : null}
           <span className="text-muted">Сейчас: {tax.label}</span>
         </form>
+        {vatContext ? (
+          <p className="text-muted" style={{ marginTop: 10 }}>
+            НДС до начала прогноза по проведённым документам («в т.ч. НДС»): прошлый квартал — начислено{" "}
+            {formatMoney(vatContext.opening?.previousQuarter.output ?? 0)}, к вычету {formatMoney(vatContext.opening?.previousQuarter.input ?? 0)}
+            {" "}(его трети уплачиваются в первые месяцы квартала начала прогноза); месяцы этого квартала до прогноза — начислено{" "}
+            {formatMoney(vatContext.opening?.currentQuarter.output ?? 0)}, к вычету {formatMoney(vatContext.opening?.currentQuarter.input ?? 0)}.
+            {usnVat
+              ? startLimit === null
+                ? " До 2025 года УСН НДС не платит."
+                : ` Освобождение от НДС на УСН: доход за ${startYear - 1} год по банку и кассе — ${formatMoney(vatContext.usnExemption!.previousYearIncome)}, лимит ${startYear} года — ${formatMoney(startLimit)}; ${vatContext.usnExemption!.previousYearIncome.lessThanOrEqualTo(startLimit) ? "освобождение действует, пока доход с начала года не превысит лимит (НДС — со следующего месяца)" : "лимит превышен — НДС платится весь год"}.`
+              : ""}
+          </p>
+        ) : null}
         {yearOpening ? (
           <p className="text-muted" style={{ marginTop: 10 }}>
             Факт с 1 января {yearOpening.year} до начала прогноза{tax.organizationId ? " по организации" : " по всем доступным организациям"}:

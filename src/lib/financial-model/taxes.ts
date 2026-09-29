@@ -316,6 +316,16 @@ export function ipContributionSchedule(params: IpContributionParams, months: Tax
 export interface VatParams {
   /** Ставка НДС, % на год (null — НДС нет). */
   rateForYear: (year: number) => Decimal | null;
+  /** НДС по документам до начала прогноза: прошлый квартал и месяцы текущего квартала до прогноза. */
+  opening?: VatOpening | null;
+  /** УСН: освобождение от НДС при доходе до лимита (доход прошлого года по факту). */
+  usnExemption?: { previousYearIncome: Decimal } | null;
+}
+
+/** НДС из проведённых документов начисления («в т.ч. НДС»): исходящий — по доходным, входящий — по расходным. */
+export interface VatOpening {
+  previousQuarter: { output: Decimal; input: Decimal };
+  currentQuarter: { output: Decimal; input: Decimal };
 }
 
 export interface VatMonthInput {
@@ -329,6 +339,8 @@ export interface VatMonthInput {
   collections: Decimal;
   /** Оплата поставщикам (без НДС). */
   supplierPayments: Decimal;
+  /** Месяц освобождён от НДС (УСН при доходе до лимита). */
+  exempt?: boolean;
 }
 
 export interface VatMonth {
@@ -354,8 +366,27 @@ export function vatSchedule(params: VatParams, months: VatMonthInput[]): VatMont
   const quarters = new Map<number, Decimal>();
   let carry = zero;
   let payable = zero;
+  // VAT before the forecast (from the documents): the rest of the previous quarter's thirds and the start of this quarter.
+  if (params.opening && months.length > 0) {
+    const startIndex = months[0].year * 12 + months[0].month - 1;
+    const quarter = Math.floor(startIndex / 3);
+    const net = (part: { output: Decimal; input: Decimal }, year: number) => {
+      const rate = params.rateForYear(year);
+      return part.output.minus(rate && vatDeductible(rate) ? part.input : zero);
+    };
+    const previous = net(params.opening.previousQuarter, Math.floor((quarter - 1) * 3 / 12));
+    if (previous.greaterThan(0)) {
+      quarters.set(quarter - 1, previous);
+      payable = previous.minus(round2(previous.dividedBy(3)).times(startIndex % 3));
+    } else {
+      carry = previous;
+    }
+    const current = net(params.opening.currentQuarter, months[0].year);
+    quarters.set(quarter, current);
+    payable = payable.plus(current);
+  }
   return months.map((m) => {
-    const rate = params.rateForYear(m.year);
+    const rate = m.exempt ? null : params.rateForYear(m.year);
     const r = rate ? rate.dividedBy(100) : zero;
     const deductible = rate ? vatDeductible(rate) : false;
     const received = round2(m.collections.times(r));
@@ -383,5 +414,42 @@ export function vatSchedule(params: VatParams, months: VatMonthInput[]): VatMont
 
     payable = payable.plus(accrued).minus(paid);
     return { received, paidToSuppliers, accrued, paid, payableEnd: payable };
+  });
+}
+
+/**
+ * Лимит дохода для освобождения от НДС на УСН (ст. 145 НК РФ в редакции с
+ * 2025 года): 60 млн ₽ в 2025, 20 млн в 2026, 15 млн в 2027, 10 млн с 2028.
+ * До 2025 года УСН НДС не платила — null (освобождена всегда).
+ */
+export function usnVatLimit(year: number): Decimal | null {
+  if (year < 2025) return null;
+  return new Decimal(year === 2025 ? 60_000_000 : year === 2026 ? 20_000_000 : year === 2027 ? 15_000_000 : 10_000_000);
+}
+
+/**
+ * Какие месяцы прогноза освобождены от НДС на УСН: если доход прошлого года
+ * не больше лимита текущего, НДС нет — пока доход с начала года не превысит
+ * лимит; со следующего месяца после превышения и до конца года НДС есть.
+ * Доход — полученные деньги (как у налога УСН); прошлый год — по факту или
+ * по прогнозу, если прогноз его охватывает; факт с начала года (opening)
+ * входит в доход года начала прогноза.
+ */
+export function usnVatExemptMonths(
+  months: Array<{ year: number; month: number; income: Decimal }>,
+  previousYearIncome: Decimal,
+  opening: { year: number; income: Decimal } | null,
+): boolean[] {
+  const incomeByYear = new Map<number, Decimal>();
+  if (opening) incomeByYear.set(opening.year, opening.income);
+  const firstYear = months[0]?.year;
+  if (firstYear !== undefined) incomeByYear.set(firstYear - 1, previousYearIncome);
+  return months.map((m) => {
+    const limit = usnVatLimit(m.year);
+    const previousYear = incomeByYear.get(m.year - 1) ?? zero;
+    const before = incomeByYear.get(m.year) ?? zero; // income since 1 January before this month
+    incomeByYear.set(m.year, before.plus(m.income));
+    // Income only grows within a year, so once above the limit the exemption stays lost until December.
+    return limit === null || (previousYear.lessThanOrEqualTo(limit) && before.lessThanOrEqualTo(limit));
   });
 }

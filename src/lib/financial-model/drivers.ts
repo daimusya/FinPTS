@@ -12,7 +12,8 @@ export type DriverCode =
   | "productivity_per_employee"
   | "loan_payment"
   | "customer_payment_days"
-  | "supplier_payment_days";
+  | "supplier_payment_days"
+  | "fixed_costs_vat_share_pct";
 
 export interface DriverDef {
   code: DriverCode;
@@ -40,6 +41,8 @@ export const GENERAL_DRIVERS: DriverDef[] = [
   { code: "avg_employee_cost", label: "Средняя стоимость сотрудника в месяц (ФОТ+взносы)", unit: "₽/мес" },
   { code: "customer_payment_days", label: "Отсрочка оплаты клиентов", unit: "дней" },
   { code: "supplier_payment_days", label: "Отсрочка оплаты поставщикам (переменные расходы)", unit: "дней" },
+  // Only matters when the forecast counts VAT with deductions: the part of fixed costs bought with input VAT.
+  { code: "fixed_costs_vat_share_pct", label: "Постоянные расходы с входящим НДС (доля, для вычета НДС)", unit: "%", defaultValue: 100 },
   // Loans with a schedule and interest are listed separately (FinancialScenarioLoan); this stays for ad-hoc payments.
   { code: "loan_payment", label: "Прочие платежи по кредитам/лизингу (вручную, без графика)", unit: "₽/мес" },
 ];

@@ -23,7 +23,7 @@ import { computeManagementBalance } from "@/lib/reports/balance";
 import { computePayrollSummary, type PayrollSummaryLine } from "@/lib/payroll/summary";
 import { projectScenario, type ScenarioValueRow } from "@/lib/financial-model/project";
 import { loadNewServices } from "@/lib/financial-model/new-services";
-import { loadLoans, loadOpeningBalances, loadScenarioTax, loadYearOpening } from "@/lib/financial-model/loans";
+import { loadLoans, loadOpeningBalances, loadScenarioTax, loadScenarioTaxContext } from "@/lib/financial-model/loans";
 import { TAX_REGIME_LABELS } from "@/lib/financial-model/taxes";
 import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
 import { MONTH_NAMES_SHORT } from "@/lib/financial-model/drivers";
@@ -286,15 +286,11 @@ export async function GET(request: NextRequest) {
     const loans = (await loadLoans([scenarioId])).get(scenarioId) ?? [];
     const opening = await loadOpeningBalances(scope);
     const tax = await loadScenarioTax(scenario, startYear);
-    const yearOpening = tax.regime !== "none" || tax.ipContribution ? await loadYearOpening(startYear, startMonth, tax.organizationId, scope) : null;
+    const taxContext = await loadScenarioTaxContext(tax, startYear, startMonth, scope);
     const projection = projectScenario(startYear, startMonth, SCENARIO_HORIZON_MONTHS, rows_, startingCash, newServices, {
       ...opening,
       loans,
-      tax,
-      ipContribution: tax.ipContribution,
-      taxReduction: tax.reduction,
-      yearOpening,
-      vat: tax.vat,
+      ...taxContext,
     });
     const revenueRows: Array<Array<string | number>> =
       newServices.length > 0

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import Decimal from "decimal.js";
-import { activeShare, ipContributionSchedule, taxRate, taxSchedule, vatSchedule, type TaxMonthInput } from "./taxes";
+import { activeShare, ipContributionSchedule, taxRate, taxSchedule, usnVatExemptMonths, vatSchedule, type TaxMonthInput } from "./taxes";
 
 const d = (v: number) => new Decimal(v);
 const month = (year: number, m: number, income: number, expenses = 0, profit = 0): TaxMonthInput => ({
@@ -218,5 +218,47 @@ describe("contributions owed for the months before the forecast", () => {
     expect(nums(s.map((x) => x.accrued))).toEqual([1000, 1000, 1000]);
     expect(nums(s.map((x) => x.payableEnd))).toEqual([10000, 11000, 0]);
     expect(s[2].paid.toNumber()).toBe(12000);
+  });
+});
+
+describe("USN free of VAT within the income limit", () => {
+  const m = (year: number, month: number, income: number) => ({ year, month, income: d(income) });
+  it("free while the income since 1 January stays within the limit; VAT from the month after it is exceeded", () => {
+    const months = [1, 2, 3, 4, 5, 6].map((k) => m(2026, k, 5000000));
+    expect(usnVatExemptMonths(months, d(15000000), null)).toEqual([true, true, true, true, true, false]);
+    expect(usnVatExemptMonths(months, d(25000000), null)).toEqual([false, false, false, false, false, false]);
+    expect(usnVatExemptMonths([m(2024, 12, 99000000)], d(99000000), null)).toEqual([true]); // no VAT on USN before 2025
+  });
+
+  it("counts the actual income since 1 January and the forecast's own year for the next one", () => {
+    const months = [m(2026, 10, 1000000), m(2026, 11, 1000000), m(2026, 12, 1000000), m(2027, 1, 0)];
+    // 2026: 18 + 3 = 21 million — above the 2027 limit of 15 million.
+    expect(usnVatExemptMonths(months, d(0), { year: 2026, income: d(18000000) })).toEqual([true, true, true, false]);
+  });
+});
+
+describe("vatSchedule — before the forecast and exempt months", () => {
+  const vatMonth = (month: number, revenue: number, exempt = false) => ({
+    year: 2027,
+    month,
+    revenue: d(revenue),
+    purchases: d(0),
+    collections: d(revenue),
+    supplierPayments: d(0),
+    exempt,
+  });
+
+  it("pays the rest of the previous quarter's thirds and adds the months of this quarter before the forecast", () => {
+    const opening = { previousQuarter: { output: d(30000), input: d(0) }, currentQuarter: { output: d(5000), input: d(0) } };
+    const s = vatSchedule({ rateForYear: () => d(22), opening }, [2, 3, 4, 5, 6].map((k) => vatMonth(k, 0)));
+    // Q4 2026: 30 000 in thirds, January's third already paid; Q1 2027: January's 5 000 from the documents.
+    expect(nums(s.map((x) => x.paid))).toEqual([10000, 10000, 1666.67, 1666.67, 1666.66]);
+    expect(s[4].payableEnd.toNumber()).toBe(0);
+  });
+
+  it("an exempt month has no VAT", () => {
+    const s = vatSchedule({ rateForYear: () => d(5) }, [vatMonth(1, 100000, true), vatMonth(2, 100000)]);
+    expect(nums(s.map((x) => x.accrued))).toEqual([0, 5000]);
+    expect(nums(s.map((x) => x.received))).toEqual([0, 5000]);
   });
 });

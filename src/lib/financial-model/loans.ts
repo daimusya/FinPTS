@@ -15,11 +15,12 @@ import {
   type IpContributionParams,
   type TaxRateInput,
   type TaxRegime,
+  type VatOpening,
   type VatParams,
   type YearOpening,
 } from "./taxes";
 import { computePnlReport } from "@/lib/reports/pnl";
-import { bankTransactionScopeWhere, UNRESTRICTED_SCOPE } from "@/lib/access-scope";
+import { accrualScopeWhere as accrualScope, bankTransactionScopeWhere, UNRESTRICTED_SCOPE } from "@/lib/access-scope";
 import type { Prisma } from "@prisma/client";
 import {
   ipFixedInsuranceAt,
@@ -182,6 +183,9 @@ export interface ScenarioTax {
   vat: VatParams | null;
   /** Организация, чей факт с начала года берётся для налога (null — все доступные). */
   organizationId: string | null;
+  /** Даты регистрации и прекращения деятельности организации (только «как у организации»). */
+  activeFrom: Date | null;
+  activeTo: Date | null;
 }
 
 /** Для уменьшения налога: сотрудники по справочнику и ставка взносов за них (%, с травматизмом). */
@@ -258,7 +262,17 @@ export function organizationTax(
           : "налог уменьшается на взносы за сотрудников прогноза не больше чем на 50%",
     );
   }
-  return { regime, ratePct, label: parts.join("; "), ipContribution, reduction, vat, organizationId: null };
+  return {
+    regime,
+    ratePct,
+    label: parts.join("; "),
+    ipContribution,
+    reduction,
+    vat,
+    organizationId: null,
+    activeFrom: organization.registrationDate ?? null,
+    activeTo: organization.closureDate ?? null,
+  };
 }
 
 /**
@@ -328,6 +342,8 @@ export async function loadScenarioTax(
     reduction: null,
     vat: vatRate ? { rateForYear: () => vatRate } : null,
     organizationId: null,
+    activeFrom: null,
+    activeTo: null,
   };
 }
 
@@ -351,15 +367,8 @@ export async function loadYearOpening(
   if (startMonth === 1 || from > now) return null;
   const until = new Date(Math.min(startDate.getTime() - 1, now.getTime()));
 
-  const and: Prisma.BankTransactionWhereInput[] = [
-    { operationDate: { gte: from, lte: until }, isTransfer: false },
-    { OR: [{ cashFlowArticleId: null }, { cashFlowArticle: { balanceArticleId: null } }] },
-  ];
-  if (organizationId) and.push({ OR: [{ bankAccount: { organizationId } }, { cashAccount: { organizationId } }] });
-  const scoped = bankTransactionScopeWhere(scope);
-  if (Object.keys(scoped).length > 0) and.push(scoped);
   const [flows, pnl] = await Promise.all([
-    prisma.bankTransaction.groupBy({ by: ["direction"], where: { AND: and }, _sum: { amount: true } }),
+    prisma.bankTransaction.groupBy({ by: ["direction"], where: operatingFlowsWhere(from, until, organizationId, scope), _sum: { amount: true } }),
     computePnlReport(
       { from, to: until, year: startYear, month: 1, label: "с начала года", span: "year" },
       organizationId ? { organizationId } : {},
@@ -373,5 +382,94 @@ export async function loadYearOpening(
     income: sum("INFLOW"),
     expenses: sum("OUTFLOW"),
     profit: pnl.netProfit.plus(pnl.tax),
+  };
+}
+
+/** Операции банка и кассы, которые считаются доходом и расходом: без переводов между своими счетами и статей баланса. */
+function operatingFlowsWhere(from: Date, until: Date, organizationId: string | null, scope: AccessScope): Prisma.BankTransactionWhereInput {
+  const and: Prisma.BankTransactionWhereInput[] = [
+    { operationDate: { gte: from, lte: until }, isTransfer: false },
+    { OR: [{ cashFlowArticleId: null }, { cashFlowArticle: { balanceArticleId: null } }] },
+  ];
+  if (organizationId) and.push({ OR: [{ bankAccount: { organizationId } }, { cashAccount: { organizationId } }] });
+  const scoped = bankTransactionScopeWhere(scope);
+  if (Object.keys(scoped).length > 0) and.push(scoped);
+  return { AND: and };
+}
+
+/**
+ * НДС из проведённых документов начисления до начала прогноза: прошлый
+ * квартал (его трети уплачиваются в месяцах квартала начала прогноза) и
+ * месяцы квартала начала прогноза до него. «В т.ч. НДС» доходных документов —
+ * исходящий, расходных — входящий. Плюс доход прошлого года по банку и
+ * кассе — для освобождения от НДС на УСН.
+ */
+export async function loadVatOpening(
+  startYear: number,
+  startMonth: number,
+  organizationId: string | null,
+  scope: AccessScope = UNRESTRICTED_SCOPE,
+  now: Date = new Date(),
+): Promise<{ opening: VatOpening; previousYearIncome: Decimal }> {
+  const startIndex = startYear * 12 + startMonth - 1;
+  const quarterStart = startIndex - (startIndex % 3);
+  const dateOf = (index: number) => new Date(Date.UTC(Math.floor(index / 12), index % 12, 1));
+  const until = (index: number) => new Date(Math.min(dateOf(index).getTime() - 1, now.getTime()));
+  const vatBetween = async (fromIndex: number, toIndex: number) => {
+    const from = dateOf(fromIndex);
+    if (fromIndex >= toIndex || from > now) return { output: new Decimal(0), input: new Decimal(0) };
+    const docs = await prisma.accrualDocument.findMany({
+      where: {
+        status: "POSTED",
+        date: { gte: from, lte: until(toIndex) },
+        ...(organizationId ? { organizationId } : {}),
+        ...accrualScope(scope),
+      },
+      select: { direction: true, lines: { select: { vatAmount: true } } },
+    });
+    let output = new Decimal(0);
+    let input = new Decimal(0);
+    for (const d of docs) {
+      const vat = d.lines.reduce((acc, l) => acc.plus(l.vatAmount?.toString() ?? 0), new Decimal(0));
+      if (d.direction === "INCOME") output = output.plus(vat);
+      else input = input.plus(vat);
+    }
+    return { output, input };
+  };
+  const previousYearFrom = new Date(Date.UTC(startYear - 1, 0, 1));
+  const [previousQuarter, currentQuarter, flows] = await Promise.all([
+    vatBetween(quarterStart - 3, quarterStart),
+    vatBetween(quarterStart, startIndex),
+    previousYearFrom > now
+      ? Promise.resolve([])
+      : prisma.bankTransaction.aggregate({
+          where: { AND: [operatingFlowsWhere(previousYearFrom, until(startYear * 12), organizationId, scope), { direction: "INFLOW" }] },
+          _sum: { amount: true },
+        }).then((r) => [r]),
+  ]);
+  const previousYearIncome = new Decimal(flows[0]?._sum.amount?.toString() ?? 0);
+  return { opening: { previousQuarter, currentQuarter }, previousYearIncome };
+}
+
+/**
+ * Всё, что прогнозу с налогом нужно из фактических данных: факт с начала
+ * года (налог и взносы), НДС до начала прогноза и доход прошлого года
+ * (освобождение на УСН), даты деятельности. Одно место для страницы
+ * сценария, сравнения и выгрузки.
+ */
+export async function loadScenarioTaxContext(tax: ScenarioTax, startYear: number, startMonth: number, scope: AccessScope): Promise<Partial<ScenarioCashExtras>> {
+  const taxOn = tax.regime !== "none" || Boolean(tax.ipContribution);
+  const [yearOpening, vatContext] = await Promise.all([
+    taxOn ? loadYearOpening(startYear, startMonth, tax.organizationId, scope) : null,
+    tax.vat ? loadVatOpening(startYear, startMonth, tax.organizationId, scope) : null,
+  ]);
+  return {
+    tax,
+    ipContribution: tax.ipContribution,
+    taxReduction: tax.reduction,
+    yearOpening,
+    vat: tax.vat && vatContext ? { ...tax.vat, opening: vatContext.opening, usnExemption: { previousYearIncome: vatContext.previousYearIncome } } : null,
+    activeFrom: tax.activeFrom,
+    activeTo: tax.activeTo,
   };
 }

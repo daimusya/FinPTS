@@ -328,3 +328,24 @@ describe("projectScenario — VAT", () => {
     expect(p[3].cashBalance.toNumber()).toBe(4 * 122000 - 22000);
   });
 });
+
+describe("projectScenario — fixed costs with input VAT and the activity dates", () => {
+  const service: NewServiceInput = { id: "s", name: "Услуга", launchYear: 2027, launchMonth: 1, avgCheck: 1000, salesPerMonth: 100, rampUpMonths: 0, variableCostPct: 0 };
+
+  it("fixed costs are paid with VAT and the VAT is deducted, by the driver's share", () => {
+    const vat = { rateForYear: () => new Decimal(22) };
+    const [full] = projectScenario(2027, 1, 1, [row(2027, 1, "fixed_costs", 10000)], 0, [], { vat });
+    expect([full.vatPaidToSuppliers.toNumber(), full.vatAccrued.toNumber(), full.cashBalance.toNumber()]).toEqual([2200, -2200, -12200]);
+    const [half] = projectScenario(2027, 1, 1, [row(2027, 1, "fixed_costs", 10000), row(2027, 1, "fixed_costs_vat_share_pct", 50)], 0, [], { vat });
+    expect(half.vatPaidToSuppliers.toNumber()).toBe(1100);
+  });
+
+  it("no revenue, costs or staff before registration and after closure; the incomplete month by days", () => {
+    const rows = [1, 2, 3].flatMap((m) => [row(2027, m, "headcount", 1), row(2027, m, "avg_employee_cost", 28000)]);
+    const p = projectScenario(2027, 1, 3, rows, 0, [service], { activeTo: new Date(Date.UTC(2027, 1, 14)) });
+    expect(p.map((m) => m.revenue.toNumber())).toEqual([100000, 50000, 0]);
+    expect(p.map((m) => m.payrollCost.toNumber())).toEqual([28000, 14000, 0]);
+    expect(p.map((m) => m.totalHeadcount)).toEqual([1, 1, 0]);
+    expect(p[2].collections.toNumber()).toBe(0);
+  });
+});
