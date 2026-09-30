@@ -15,6 +15,9 @@ const GUESS_KEYWORDS: Array<[RegExp, OnecMappingTarget]> = [
   [/номер/i, "number"],
   [/дата/i, "date"],
   [/срок/i, "dueDate"],
+  // «Курс валюты» is the rate; only a header that starts with «Валюта» is the currency («Сумма в валюте» stays the amount).
+  [/курс/i, "exchangeRate"],
+  [/^\s*валют/i, "currency"],
   [/сумма/i, "amount"],
   [/ндс/i, "vatAmount"],
   [/стать/i, "pnlArticleCode"],

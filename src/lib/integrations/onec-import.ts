@@ -6,6 +6,10 @@ import { ONEC_REQUIRED_TARGETS, type OnecColumnMapping } from "./onec-mapping";
 import { describeRows, groupOnecRows, type OnecDocumentGroup, type OnecLine } from "./onec-grouping";
 import { AccrualDocumentStatus } from "@prisma/client";
 import { ensureCounterpartyByInn, isAutoCreateEnabled } from "./inn-service";
+import Decimal from "decimal.js";
+import { lineAmounts } from "@/lib/accruals/currency";
+import { normalizeCurrency } from "@/lib/currency";
+import { loadRateLookup } from "@/lib/currency-rates";
 import { enqueueProjectResultsForDocument } from "./project-results";
 
 export interface OnecImportResult {
@@ -88,10 +92,23 @@ async function importDocument(doc: OnecDocumentGroup, batchId: string): Promise<
 
   const lineRefs: LineRefs[] = [];
   for (const line of doc.lines) lineRefs.push(await resolveLine(line, organization.id));
+  // A document in a foreign currency: amounts in the file are in that currency, roubles at the rate from the file
+  // or the CBR rate on the document date (as in the document form).
+  const currency = normalizeCurrency(h.currency);
+  let exchangeRate: Decimal | null = null;
+  if (currency !== "RUB") {
+    if (h.exchangeRate) exchangeRate = new Decimal(h.exchangeRate);
+    else {
+      const rates = await loadRateLookup();
+      exchangeRate = rates.rateOn(currency, h.date!);
+      if (!exchangeRate || rates.missingText()) {
+        throw new Error(`нет курса ЦБ ${currency} на дату документа — загрузите курсы в справочнике «Курсы валют» или добавьте колонку «Курс»`);
+      }
+    }
+  }
   const lines = doc.lines.map((line, i) => ({
     ...lineRefs[i],
-    amount: line.amount,
-    vatAmount: line.vatAmount,
+    ...lineAmounts({ amount: line.amount, vatAmount: line.vatAmount }, exchangeRate),
     description: line.description,
   }));
 
@@ -105,6 +122,8 @@ async function importDocument(doc: OnecDocumentGroup, batchId: string): Promise<
     direction: h.direction as never,
     dueDate: h.dueDate,
     comment: h.comment,
+    currency,
+    exchangeRate,
   };
 
   const existingLink = await prisma.integrationExternalObject.findUnique({

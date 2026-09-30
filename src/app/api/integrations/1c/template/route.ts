@@ -3,7 +3,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { buildWorkbookBuffer } from "@/lib/reports/xlsx-export";
 import { ONEC_MAPPING_LABELS, ONEC_REQUIRED_TARGETS, type OnecMappingTarget } from "@/lib/integrations/onec-mapping";
 
-const OPTIONAL_COLUMNS: OnecMappingTarget[] = ["vatAmount", "lineDescription", "projectName", "productServiceName"];
+const OPTIONAL_COLUMNS: OnecMappingTarget[] = ["vatAmount", "currency", "exchangeRate", "lineDescription", "projectName", "productServiceName"];
 
 export async function GET() {
   try {
@@ -36,6 +36,17 @@ export async function GET() {
       amount: "30000",
       pnlArticleCode: "Выручка от реализации",
       lineDescription: "Консультация",
+    }),
+    // A document in dollars: amounts in the currency; an empty rate means the CBR rate on the document date.
+    example({
+      externalId: "1C-DOC-000125",
+      ...header,
+      number: "АКТ-17",
+      currency: "USD",
+      exchangeRate: "",
+      amount: "1200",
+      pnlArticleCode: "Выручка от реализации",
+      lineDescription: "Экспорт услуг",
     }),
   ];
 

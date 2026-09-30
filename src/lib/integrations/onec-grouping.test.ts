@@ -78,6 +78,29 @@ describe("groupOnecRows", () => {
   });
 });
 
+describe("groupOnecRows — currency", () => {
+  const fxMapping: OnecColumnMapping = { ...mapping, 12: "currency", 13: "exchangeRate" };
+  const fxRow = (id: string, currency: string | null, rate: string | null) => [...row(id, 1000, "Выручка"), currency, rate];
+
+  it("reads the document currency and rate; «руб.» and 643 are roubles", () => {
+    const { documents, errors } = groupOnecRows([fxRow("D-1", "USD", "84,0954"), fxRow("D-2", "руб.", null), fxRow("D-3", "643", null)], fxMapping);
+    expect(errors).toEqual([]);
+    expect(documents.map((d) => [d.header.currency, d.header.exchangeRate])).toEqual([
+      ["USD", 84.0954],
+      ["RUB", null],
+      ["RUB", null],
+    ]);
+  });
+
+  it("rejects an unknown currency and a non-positive rate", () => {
+    const { errors } = groupOnecRows([fxRow("D-1", "доллары", null), fxRow("D-2", "USD", "-5")], fxMapping);
+    expect(errors.map((e) => e.message)).toEqual([
+      "валюта «ДОЛЛАРЫ» — укажите трёхбуквенный код: USD, EUR, CNY…",
+      "курс валюты должен быть положительным числом",
+    ]);
+  });
+});
+
 describe("describeRows", () => {
   it("formats single, contiguous and scattered row numbers", () => {
     expect(describeRows([5])).toBe("строка 5");

@@ -1,3 +1,4 @@
+import { normalizeCurrency } from "@/lib/currency";
 export type OnecMappingTarget =
   | "externalId"
   | "organizationInn"
@@ -8,6 +9,8 @@ export type OnecMappingTarget =
   | "number"
   | "date"
   | "dueDate"
+  | "currency"
+  | "exchangeRate"
   | "amount"
   | "vatAmount"
   | "pnlArticleCode"
@@ -29,7 +32,9 @@ export const ONEC_MAPPING_LABELS: Record<OnecMappingTarget, string> = {
   number: "Номер документа (обязательно)",
   date: "Дата документа (обязательно)",
   dueDate: "Срок оплаты",
-  amount: "Сумма (обязательно)",
+  currency: "Валюта документа (USD, EUR…; пусто — рубли)",
+  exchangeRate: "Курс валюты (пусто — курс ЦБ на дату документа)",
+  amount: "Сумма (обязательно; для валютного документа — в валюте)",
   vatAmount: "в т.ч. НДС",
   pnlArticleCode: "Код или название статьи ОПиУ (обязательно)",
   comment: "Комментарий",
@@ -52,6 +57,8 @@ export const ONEC_MAPPING_OPTIONS: OnecMappingTarget[] = [
   "number",
   "date",
   "dueDate",
+  "currency",
+  "exchangeRate",
   "amount",
   "vatAmount",
   "pnlArticleCode",
@@ -117,6 +124,8 @@ export interface ExtractedOnecRow {
   number: string | null;
   date: Date | null;
   dueDate: Date | null;
+  currency: string | null;
+  exchangeRate: number | null;
   amount: number | null;
   vatAmount: number | null;
   pnlArticleCode: string | null;
@@ -139,6 +148,8 @@ export function extractOnecRow(row: Array<string | number | null>, mapping: Onec
     number: null,
     date: null,
     dueDate: null,
+    currency: null,
+    exchangeRate: null,
     amount: null,
     vatAmount: null,
     pnlArticleCode: null,
@@ -183,6 +194,15 @@ export function extractOnecRow(row: Array<string | number | null>, mapping: Onec
         break;
       case "amount":
         result.amount = parseAmountCell(cell);
+        break;
+      case "currency": {
+        // 1C writes «руб.», «RUB», «643» or the code of a foreign currency.
+        const raw = cellToString(cell);
+        result.currency = raw ? (raw === "643" ? "RUB" : normalizeCurrency(raw)) : null;
+        break;
+      }
+      case "exchangeRate":
+        result.exchangeRate = parseAmountCell(cell);
         break;
       case "vatAmount":
         result.vatAmount = parseAmountCell(cell);

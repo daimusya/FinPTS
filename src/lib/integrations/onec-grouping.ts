@@ -13,6 +13,8 @@ const HEADER_FIELDS = [
   "number",
   "date",
   "dueDate",
+  "currency",
+  "exchangeRate",
   "comment",
 ] as const;
 type HeaderField = (typeof HEADER_FIELDS)[number];
@@ -26,6 +28,8 @@ const HEADER_LABELS: Record<HeaderField, string> = {
   number: "номер",
   date: "дата",
   dueDate: "срок оплаты",
+  currency: "валюта",
+  exchangeRate: "курс",
   comment: "комментарий",
 };
 
@@ -133,6 +137,14 @@ export function groupOnecRows(
     }
     if (!h.organizationInn || !h.counterpartyInn) {
       fail("не указаны ИНН организации или контрагента");
+      continue;
+    }
+    if (h.currency && !/^[A-Z]{3}$/.test(h.currency)) {
+      fail(`валюта «${h.currency}» — укажите трёхбуквенный код: USD, EUR, CNY…`);
+      continue;
+    }
+    if (h.exchangeRate !== null && !(h.exchangeRate > 0)) {
+      fail("курс валюты должен быть положительным числом");
       continue;
     }
 
