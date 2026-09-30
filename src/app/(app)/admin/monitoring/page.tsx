@@ -84,7 +84,7 @@ export default async function MonitoringPage() {
       <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label">Размер базы данных</div>
-          <div className="stat-value">{metrics.databaseBytes === null ? "—" : `${(metrics.databaseBytes / 1024 / 1024).toFixed(1)} МБ`}</div>
+          <div className="stat-value">{metrics.databaseBytes === null ? "—" : `${(metrics.databaseBytes / 1024 / 1024).toFixed(1).replace(".", ",")} МБ`}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Операций банка и кассы</div>
