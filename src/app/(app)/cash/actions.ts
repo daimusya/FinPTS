@@ -10,7 +10,7 @@ import { recomputeAccrualDocumentStatus, recomputeBankTransactionStatus } from "
 import { formatMoney, sumMoney, toDecimal } from "@/lib/money";
 import { PERMISSIONS } from "@/lib/permissions";
 import { computeFingerprint } from "@/lib/bank-import/fingerprint";
-import { oppositeDirection, validateTransferAccounts } from "@/lib/cash/transfer";
+import { oppositeDirection, resolveTransferAmounts, validateTransferAccounts } from "@/lib/cash/transfer";
 import {
   checkTransactionDeletion,
   deletedByBatch,
@@ -51,6 +51,9 @@ export async function createBankTransactionAction(formData: FormData) {
   if (!operationDateRaw || !direction || !amountRaw || Number(amountRaw) <= 0) {
     redirect(`/cash/transactions/new?error=${encodeURIComponent("Заполните дату, направление и сумму")}`);
   }
+  // A transfer between accounts in different currencies (buying or selling currency) has its own amount on each leg.
+  let secondAmount = amountRaw;
+  let dealRate: string | null = null;
   if (isTransfer) {
     const validationError = validateTransferAccounts(
       { bankAccountId, cashAccountId },
@@ -59,6 +62,15 @@ export async function createBankTransactionAction(formData: FormData) {
     if (validationError) {
       redirect(`/cash/transactions/new?error=${encodeURIComponent(validationError)}`);
     }
+    const amounts = resolveTransferAmounts({
+      amount: amountRaw,
+      secondAmount: String(formData.get("secondAmount") ?? ""),
+      currency: await accountCurrency(bankAccountId, cashAccountId),
+      secondCurrency: await accountCurrency(secondBankAccountId, secondCashAccountId),
+    });
+    if ("error" in amounts) redirect(`/cash/transactions/new?error=${encodeURIComponent(amounts.error)}`);
+    secondAmount = (amounts as { second: string }).second;
+    dealRate = (amounts as { dealRate: string | null }).dealRate;
   }
 
   const operationDate = new Date(operationDateRaw);
@@ -85,7 +97,7 @@ export async function createBankTransactionAction(formData: FormData) {
       bankAccountId: secondBankAccountId ?? secondCashAccountId ?? "manual",
       operationDate,
       direction: secondDirection,
-      amount: toDecimal(amountRaw).toFixed(2),
+      amount: toDecimal(secondAmount).toFixed(2),
       purpose,
     });
     const secondExisting = await prisma.bankTransaction.findUnique({ where: { fingerprint: secondFingerprint } });
@@ -120,7 +132,7 @@ export async function createBankTransactionAction(formData: FormData) {
           cashAccountId: secondCashAccountId,
           operationDate,
           direction: secondDirection as never,
-          amount: amountRaw,
+          amount: secondAmount,
           purpose,
           counterpartyId,
           cashFlowArticleId,
@@ -148,7 +160,7 @@ export async function createBankTransactionAction(formData: FormData) {
         entityType: "bank_transaction",
         entityId: secondLeg.id,
         action: "create_manual_transfer",
-        after: secondLeg as never,
+        after: { ...secondLeg, dealRate } as never,
       }),
     ]);
 
@@ -264,6 +276,13 @@ export async function updateTransactionClassificationAction(id: string, formData
   redirect(`/cash/transactions/${id}`);
 }
 
+/** Валюта банковского счёта или кассы. */
+async function accountCurrency(bankAccountId: string | null, cashAccountId: string | null): Promise<string> {
+  if (bankAccountId) return normalizeCurrency((await prisma.bankAccount.findUnique({ where: { id: bankAccountId } }))?.currency);
+  if (cashAccountId) return normalizeCurrency((await prisma.cashAccount.findUnique({ where: { id: cashAccountId } }))?.currency);
+  return "RUB";
+}
+
 /**
  * Исправление даты, суммы, направления, назначения и счёта ручной операции.
  * У перевода между собственными счетами вторая нога меняется вместе с первой.
@@ -276,7 +295,19 @@ export async function updateBankTransactionAction(id: string, formData: FormData
   const parsed = parseTransactionEdit((name) => formData.get(name));
   if ("error" in parsed) back(parsed.error);
   const next = parsed as TransactionEditInput;
-  const problem = checkTransactionEdit(toEditableLeg(tx), next, pair ? toEditableLeg(pair) : null);
+  // The other leg of a transfer between currencies keeps its own amount (from the form), otherwise the same.
+  let pairAmount = next.amount;
+  if (pair) {
+    const amounts = resolveTransferAmounts({
+      amount: next.amount,
+      secondAmount: String(formData.get("pairAmount") ?? ""),
+      currency: await accountCurrency(next.bankAccountId, next.cashAccountId),
+      secondCurrency: await accountCurrency(pair.bankAccountId, pair.cashAccountId),
+    });
+    if ("error" in amounts) back(amounts.error);
+    pairAmount = (amounts as { second: string }).second;
+  }
+  const problem = checkTransactionEdit(toEditableLeg(tx), next, pair ? toEditableLeg(pair) : null, pairAmount);
   if (problem) back(problem);
 
   // Both the old and the new month must be open: the operation leaves one and enters the other.
@@ -297,7 +328,7 @@ export async function updateBankTransactionAction(id: string, formData: FormData
         bankAccountId: pair.bankAccountId ?? pair.cashAccountId ?? "manual",
         operationDate: next.operationDate,
         direction: pairDirection,
-        amount: next.amount,
+        amount: pairAmount,
         purpose: next.purpose,
       })
     : null;
@@ -313,7 +344,9 @@ export async function updateBankTransactionAction(id: string, formData: FormData
       where: { id },
       data: { ...common, direction: next.direction, bankAccountId: next.bankAccountId, cashAccountId: next.cashAccountId, fingerprint },
     }),
-    ...(pair ? [prisma.bankTransaction.update({ where: { id: pair.id }, data: { ...common, direction: pairDirection, fingerprint: pairFingerprint! } })] : []),
+    ...(pair
+      ? [prisma.bankTransaction.update({ where: { id: pair.id }, data: { ...common, amount: pairAmount, direction: pairDirection, fingerprint: pairFingerprint! } })]
+      : []),
   ]);
   // The amount may have changed relative to the allocations: refresh "matched / partially matched".
   await Promise.all(ownIds.map((legId) => recomputeBankTransactionStatus(legId)));

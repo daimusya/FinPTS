@@ -28,3 +28,38 @@ export function validateTransferAccounts(primary: AccountRef, second: AccountRef
   }
   return null;
 }
+
+/**
+ * Суммы двух ног перевода. Счета в одной валюте — одна сумма на обеих ногах
+ * (вторую указывать не нужно; указанная другая — ошибка: комиссия банка —
+ * отдельная операция). Счета в разных валютах (покупка или продажа валюты) —
+ * сумма второй ноги обязательна, в валюте второго счёта; курс сделки — для
+ * сообщения.
+ */
+export function resolveTransferAmounts(input: {
+  amount: string;
+  secondAmount: string;
+  currency: string;
+  secondCurrency: string;
+}): { first: string; second: string; dealRate: string | null } | { error: string } {
+  const parse = (raw: string) => {
+    const text = raw.replace(/\s/g, "").replace(",", ".");
+    return /^\d+(\.\d{1,2})?$/.test(text) && Number(text) > 0 ? Number(text).toFixed(2) : null;
+  };
+  const first = parse(input.amount);
+  if (!first) return { error: "Сумма — положительное число, не больше двух знаков после запятой" };
+  const secondText = input.secondAmount.trim();
+  if (input.currency === input.secondCurrency) {
+    if (secondText && parse(secondText) !== first) {
+      return { error: "У счетов одна валюта — суммы перевода должны совпадать. Комиссию банка внесите отдельной операцией" };
+    }
+    return { first, second: first, dealRate: null };
+  }
+  const second = parse(secondText);
+  if (!second) {
+    return { error: `Счета в разных валютах (${input.currency} и ${input.secondCurrency}) — укажите сумму, поступившую на второй счёт, в ${input.secondCurrency}` };
+  }
+  // Roubles per unit of the foreign currency, whichever side it is on.
+  const rate = input.currency === "RUB" ? Number(first) / Number(second) : input.secondCurrency === "RUB" ? Number(second) / Number(first) : Number(second) / Number(first);
+  return { first, second, dealRate: rate.toFixed(4) };
+}

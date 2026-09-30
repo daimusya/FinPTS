@@ -83,6 +83,13 @@ describe("checkTransactionEdit", () => {
       /встречной операции перевода/,
     );
   });
+
+  it("checks the other leg of a currency transfer against its own amount", () => {
+    const pair = leg({ direction: "INFLOW", bankAccountId: "b2", allocated: "80000" });
+    // 1 000 $ sold, 84 000 ₽ received; 80 000 ₽ of the rouble leg are matched with documents.
+    expect(checkTransactionEdit(leg(), next({ amount: "1000.00" }), pair, "84000.00")).toBeNull();
+    expect(checkTransactionEdit(leg(), next({ amount: "1000.00" }), pair, "79000.00")).toMatch(/встречной операции перевода сопоставлено 80000\.00/);
+  });
 });
 
 describe("checkTransactionDeletion", () => {

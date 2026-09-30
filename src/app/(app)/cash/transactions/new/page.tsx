@@ -160,8 +160,9 @@ export default async function NewCashTransactionPage({
           </label>
           <p className="text-muted" style={{ marginTop: 6 }}>
             Если отмечено — обязательно укажите второй счёт или кассу ниже. Встречная операция на
-            нём (с противоположным направлением и той же суммой) будет создана автоматически, чтобы
-            общий остаток не искажался, если завести только одну сторону перевода.
+            нём (с противоположным направлением) будет создана автоматически, чтобы общий остаток не
+            искажался, если завести только одну сторону перевода. Счета в одной валюте — та же сумма; в
+            разных (покупка или продажа валюты) — укажите, сколько поступило на второй счёт в его валюте.
           </p>
           <div className="form-grid" style={{ marginTop: 6 }}>
             <label className="field">
@@ -174,6 +175,10 @@ export default async function NewCashTransactionPage({
                   </option>
                 ))}
               </select>
+            </label>
+            <label className="field">
+              <span>Сумма на втором счёте (только если валюта другая)</span>
+              <input type="text" inputMode="decimal" name="secondAmount" id="second-amount" placeholder="например 84 000,00" />
             </label>
             <label className="field">
               <span>Вторая касса (для перевода)</span>

@@ -54,7 +54,7 @@ export interface EditableLeg {
  * между собственными счетами: у неё меняются те же дата, сумма и назначение,
  * а направление остаётся противоположным.
  */
-export function checkTransactionEdit(current: EditableLeg, next: TransactionEditInput, pair: EditableLeg | null): string | null {
+export function checkTransactionEdit(current: EditableLeg, next: TransactionEditInput, pair: EditableLeg | null, pairAmount?: string): string | null {
   if (current.isImported) {
     return "Операция загружена из выписки банка — дата, сумма и счёт должны совпадать с банком. Если выписка загружена ошибочно, удалите операцию и загрузите выписку заново";
   }
@@ -70,7 +70,9 @@ export function checkTransactionEdit(current: EditableLeg, next: TransactionEdit
     if (legDirectionChanges) {
       return `У ${label} есть сопоставления с начислениями — сначала отмените их, потом меняйте направление`;
     }
-    if (amount.lessThan(allocated)) {
+    // The other leg of a transfer between currencies has its own amount.
+    const legAmount = leg === current ? amount : toDecimal(pairAmount ?? next.amount);
+    if (legAmount.lessThan(allocated)) {
       return `У ${label} сопоставлено ${allocated.toFixed(2)} — сумма не может быть меньше. Сначала отмените лишние сопоставления`;
     }
   }

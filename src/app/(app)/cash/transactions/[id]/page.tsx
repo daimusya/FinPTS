@@ -329,6 +329,12 @@ export default async function CashTransactionDetailPage({
                 <span>Сумма</span>
                 <input type="number" step="0.01" min="0.01" name="amount" defaultValue={tx.amount.toFixed(2)} required />
               </label>
+              {linkedTransfer && transactionCurrency(linkedTransfer) !== transactionCurrency(tx) ? (
+                <label className="field">
+                  <span>Сумма встречной операции, {transactionCurrency(linkedTransfer)}</span>
+                  <input type="number" step="0.01" min="0.01" name="pairAmount" id="pair-amount" defaultValue={linkedTransfer.amount.toFixed(2)} required />
+                </label>
+              ) : null}
               <label className="field">
                 <span>Банковский счёт</span>
                 <select name="bankAccountId" defaultValue={tx.bankAccountId ?? ""}>
