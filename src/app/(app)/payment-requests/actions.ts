@@ -30,6 +30,7 @@ import {
 import { stepAuthority } from "@/lib/payment-requests/delegation";
 import { normalizeCurrency } from "@/lib/currency";
 import { amountInRub, loadRateLookup } from "@/lib/currency-rates";
+import { currencyNotAllowed } from "@/lib/foreign-currency";
 import { currentDeciders, notifyAuthor, notifyDeciders } from "@/lib/payment-requests/notify";
 
 async function loadActiveRoutes(): Promise<ApprovalRouteCandidate[]> {
@@ -77,6 +78,8 @@ export async function createPaymentRequestAction(formData: FormData) {
 
   // A request in a foreign currency is routed by its rouble equivalent at today's rate (route limits are in roubles).
   const currency = normalizeCurrency(formData.get("currency"));
+  const currencyProblem = await currencyNotAllowed(organizationId, currency);
+  if (currencyProblem) redirect(`/payment-requests/new?error=${encodeURIComponent(currencyProblem)}`);
   const amountRub = amountInRub(amountRaw, currency, await loadRateLookup());
   if (!amountRub) redirect(`/payment-requests/new?error=${encodeURIComponent(`Нет курса ЦБ ${currency} — загрузите курсы в справочнике «Курсы валют»`)}`);
   const routes = await loadActiveRoutes();
@@ -328,6 +331,11 @@ export async function resubmitPaymentRequestAction(id: string, formData: FormDat
   if ("error" in dueTime) fail(dueTime.error);
 
   const currency = normalizeCurrency(formData.get("currency") ?? request.currency);
+  // A request already in a currency may stay in it; a new currency needs the organization to work with currency.
+  if (currency !== request.currency) {
+    const currencyProblem = await currencyNotAllowed(request.organizationId, currency);
+    if (currencyProblem) fail(currencyProblem);
+  }
   const amountRub = amountInRub(amountRaw, currency, await loadRateLookup());
   if (!amountRub) fail(`Нет курса ЦБ ${currency} — загрузите курсы в справочнике «Курсы валют»`);
   const route = selectApprovalRoute(await loadActiveRoutes(), { amount: amountRub!.toString(), organizationId: request.organizationId });

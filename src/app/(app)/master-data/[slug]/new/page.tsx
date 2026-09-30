@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getSession, hasPermission } from "@/lib/session";
 import { DICTIONARY_REGISTRY, getDictionaryConfig } from "@/lib/dictionaries/registry";
 import { DictionaryFormFields, resolveFieldDefault, type ResolvedField } from "@/components/dictionary-form-fields";
+import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createDictionaryItem } from "../../actions";
 
 export default async function NewDictionaryItemPage({
@@ -26,8 +27,10 @@ export default async function NewDictionaryItemPage({
     );
   }
 
+  // Fields of a switched-off feature (foreign currency) are not shown.
+  const foreignCurrency = await isForeignCurrencyEnabled();
   const resolvedFields: ResolvedField[] = await Promise.all(
-    config.fields.map(async (field) => ({
+    config.fields.filter((field) => field.feature !== "foreignCurrency" || foreignCurrency).map(async (field) => ({
       name: field.name,
       label: field.label,
       type: field.type,

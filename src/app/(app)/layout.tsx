@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import Link from "next/link";
 import { Sidebar } from "@/components/sidebar";
 import { unreadNotificationCount } from "@/lib/notifications";
+import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { logoutAction } from "./actions";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -10,11 +11,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!session) {
     redirect("/login");
   }
-  const unread = await unreadNotificationCount(session.userId);
+  const [unread, foreignCurrency] = await Promise.all([unreadNotificationCount(session.userId), isForeignCurrencyEnabled()]);
 
   return (
     <div className="app-shell">
-      <Sidebar />
+      <Sidebar foreignCurrency={foreignCurrency} />
       <div className="main">
         <header className="topbar">
           <div />

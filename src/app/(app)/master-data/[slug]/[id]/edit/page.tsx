@@ -7,6 +7,7 @@ import { updateDictionaryItem } from "../../../actions";
 import { CounterpartyDetails } from "@/components/counterparty-details";
 import { CounterpartyInnCard } from "@/components/counterparty-inn";
 import { OrganizationInnCard } from "@/components/registry-by-inn";
+import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { OrganizationTaxes } from "@/components/organization-taxes";
 
 export default async function EditDictionaryItemPage({
@@ -45,8 +46,10 @@ export default async function EditDictionaryItemPage({
   const record = await config.delegate.findUnique({ where: { id } });
   if (!record) notFound();
 
+  // Fields of a switched-off feature (foreign currency) are not shown.
+  const foreignCurrency = await isForeignCurrencyEnabled();
   const resolvedFields: ResolvedField[] = await Promise.all(
-    config.fields.map(async (field) => ({
+    config.fields.filter((field) => field.feature !== "foreignCurrency" || foreignCurrency).map(async (field) => ({
       name: field.name,
       label: field.label,
       type: field.type,

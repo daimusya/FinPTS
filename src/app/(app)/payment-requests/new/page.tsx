@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
+import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createPaymentRequestAction } from "../actions";
 
 export default async function NewPaymentRequestPage({
@@ -29,6 +30,7 @@ export default async function NewPaymentRequestPage({
   ]);
   const orgName = (o: { name: string; shortName: string | null }) => o.shortName || o.name;
 
+  const foreignCurrency = await isForeignCurrencyEnabled();
   return (
     <div className="page">
       <div className="page-header">
@@ -79,16 +81,18 @@ export default async function NewPaymentRequestPage({
               <span>Сумма *</span>
               <input type="number" step="0.01" name="amount" required />
             </label>
-            <label className="field">
-              <span>Валюта</span>
-              <select name="currency" id="pr-currency" defaultValue={"RUB"}>
-                {CURRENCY_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.value}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {foreignCurrency ? (
+              <label className="field">
+                <span>Валюта</span>
+                <select name="currency" id="pr-currency" defaultValue={"RUB"}>
+                  {CURRENCY_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label className="field">
               <span>Срок оплаты *</span>
               <input type="date" name="dueDate" required />

@@ -5,6 +5,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { AccrualLinesEditor, type LineDraft } from "@/components/accrual-lines-editor";
 import { DocumentCurrencyFields } from "@/components/document-currency-fields";
+import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { updateAccrualDocumentAction } from "../../actions";
 
 function toDateInput(date: Date): string {
@@ -51,6 +52,7 @@ export default async function EditAccrualDocumentPage({
     );
   }
 
+  const foreignCurrency = await isForeignCurrencyEnabled();
   const initialLines: LineDraft[] = doc.lines.map((l) => ({
     key: l.id,
     departmentId: l.departmentId ?? "",
@@ -141,7 +143,9 @@ export default async function EditAccrualDocumentPage({
               <span>Срок оплаты</span>
               <input type="date" name="dueDate" defaultValue={doc.dueDate ? toDateInput(doc.dueDate) : ""} />
             </label>
-            <DocumentCurrencyFields currency={doc.currency} rate={doc.exchangeRate ? doc.exchangeRate.toString() : ""} />
+            {foreignCurrency || doc.currency !== "RUB" ? (
+              <DocumentCurrencyFields currency={doc.currency} rate={doc.exchangeRate ? doc.exchangeRate.toString() : ""} />
+            ) : null}
             <label className="field">
               <span>Ответственный</span>
               <select name="responsibleId" defaultValue={doc.responsibleId ?? ""}>

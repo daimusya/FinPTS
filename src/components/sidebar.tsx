@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 interface NavItem {
   href: string;
   label: string;
+  /** Пункт видно, только когда включена работа с иностранной валютой. */
+  foreignCurrency?: boolean;
 }
 
 interface NavGroup {
@@ -24,7 +26,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/master-data/organizations", label: "Организации и ИП" },
       { href: "/master-data/bank-accounts", label: "Банковские счета" },
       { href: "/master-data/cash-accounts", label: "Кассы" },
-      { href: "/master-data/currency-rates", label: "Курсы валют" },
+      { href: "/master-data/currency-rates", label: "Курсы валют", foreignCurrency: true },
       { href: "/master-data/departments", label: "Подразделения" },
       { href: "/master-data/cost-centers", label: "ЦФО" },
       { href: "/master-data/projects", label: "Проекты" },
@@ -106,7 +108,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-export function Sidebar() {
+export function Sidebar({ foreignCurrency = false }: { foreignCurrency?: boolean }) {
   const pathname = usePathname();
 
   return (
@@ -122,7 +124,7 @@ export function Sidebar() {
       {NAV_GROUPS.map((group) => (
         <div className="sidebar-group" key={group.title}>
           <div className="sidebar-group-title">{group.title}</div>
-          {group.items.map((item) => {
+          {group.items.filter((item) => !item.foreignCurrency || foreignCurrency).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link

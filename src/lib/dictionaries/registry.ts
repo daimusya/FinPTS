@@ -5,6 +5,7 @@ import { acceptsManualEntries } from "@/lib/reports/balance-lines";
 import { validateInn } from "@/lib/integrations/inn";
 import { TAX_SYSTEM_OPTIONS } from "@/lib/organizations/taxes";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
+import { currencyNotAllowed } from "@/lib/foreign-currency";
 import { validateCreditAgreementRecord, validateFixedAssetRecord } from "@/lib/reports/non-cash-guards";
 
 function delegate(d: unknown): DictionaryDelegate {
@@ -201,6 +202,11 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       },
       { name: "registrationDate", label: "Дата регистрации (для взносов ИП за неполный год)", type: "date" },
       { name: "closureDate", label: "Дата прекращения деятельности", type: "date" },
+      {
+        name: "usesForeignCurrency",
+        label: "Работает с иностранной валютой (валютные счета, документы и заявки, курсы ЦБ)",
+        type: "checkbox",
+      },
     ],
     validateRecord: async (data) => {
       const from = data.registrationDate instanceof Date ? data.registrationDate : null;
@@ -223,8 +229,13 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "bankName", label: "Банк", type: "text", required: true },
       { name: "accountNumber", label: "Номер счёта", type: "text", required: true },
       { name: "bik", label: "БИК", type: "text" },
-      { name: "currency", label: "Валюта", type: "select", required: true, options: CURRENCY_OPTIONS, defaultValue: "RUB" },
+      { name: "currency", label: "Валюта", type: "select", required: true, options: CURRENCY_OPTIONS, defaultValue: "RUB", feature: "foreignCurrency" },
     ],
+    // An existing account keeps its currency even if the organization stopped working with currency.
+    validateRecord: async (data, before) =>
+      before && before.currency === data.currency && before.organizationId === data.organizationId
+        ? null
+        : currencyNotAllowed(String(data.organizationId ?? ""), data.currency),
   },
   "cash-accounts": {
     slug: "cash-accounts",
@@ -239,8 +250,13 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
     fields: [
       { name: "organizationId", label: "Организация", type: "select", required: true, loadOptions: organizationOptions },
       { name: "name", label: "Название кассы", type: "text", required: true },
-      { name: "currency", label: "Валюта", type: "select", required: true, options: CURRENCY_OPTIONS, defaultValue: "RUB" },
+      { name: "currency", label: "Валюта", type: "select", required: true, options: CURRENCY_OPTIONS, defaultValue: "RUB", feature: "foreignCurrency" },
     ],
+    // An existing account keeps its currency even if the organization stopped working with currency.
+    validateRecord: async (data, before) =>
+      before && before.currency === data.currency && before.organizationId === data.organizationId
+        ? null
+        : currencyNotAllowed(String(data.organizationId ?? ""), data.currency),
   },
   "currency-rates": {
     slug: "currency-rates",

@@ -200,6 +200,8 @@ model Organization {
   /// Регистрация и прекращение деятельности: взносы ИП за неполный год, начало и конец начислений в прогнозе.
   registrationDate DateTime?     @db.Date
   closureDate      DateTime?     @db.Date
+  /// Работает с иностранной валютой: валютные счета, документы и заявки, курсы ЦБ. Пока ни у одной организации не включено (и валютных данных нет) — валютные функции скрыты.
+  usesForeignCurrency Boolean     @default(false)
   /// Откуда реквизиты: DADATA — заполнены по ИНН из ЕГРЮЛ/ЕГРИП; null — вручную.
   dataSource       String?
   dataUpdatedAt    DateTime?

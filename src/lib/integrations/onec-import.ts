@@ -10,6 +10,7 @@ import Decimal from "decimal.js";
 import { lineAmounts } from "@/lib/accruals/currency";
 import { normalizeCurrency } from "@/lib/currency";
 import { loadRateLookup } from "@/lib/currency-rates";
+import { currencyNotAllowed } from "@/lib/foreign-currency";
 import { enqueueProjectResultsForDocument } from "./project-results";
 
 export interface OnecImportResult {
@@ -97,6 +98,8 @@ async function importDocument(doc: OnecDocumentGroup, batchId: string): Promise<
   const currency = normalizeCurrency(h.currency);
   let exchangeRate: Decimal | null = null;
   if (currency !== "RUB") {
+    const notAllowed = await currencyNotAllowed(organization.id, currency);
+    if (notAllowed) throw new Error(notAllowed.charAt(0).toLowerCase() + notAllowed.slice(1));
     if (h.exchangeRate) exchangeRate = new Decimal(h.exchangeRate);
     else {
       const rates = await loadRateLookup();

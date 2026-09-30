@@ -19,6 +19,8 @@ export interface FieldConfig {
   defaultValue?: string;
   /** Extra check of a non-empty value; returns an error message or null. */
   validate?: (value: string) => string | null;
+  /** Поле показывается, только когда включена функция (например, работа с иностранной валютой). */
+  feature?: "foreignCurrency";
 }
 
 export interface DictionaryDelegate {

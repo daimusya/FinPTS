@@ -15,6 +15,7 @@ import type Decimal from "decimal.js";
 import { isForeign, lineAmounts, parseRate } from "@/lib/accruals/currency";
 import { normalizeCurrency } from "@/lib/currency";
 import { loadRateLookup } from "@/lib/currency-rates";
+import { currencyNotAllowed } from "@/lib/foreign-currency";
 import { enqueueProjectResultsForDocument } from "@/lib/integrations/project-results";
 
 interface DocumentHeaderInput {
@@ -71,6 +72,8 @@ function parseHeader(formData: FormData): DocumentHeaderInput {
  */
 async function resolveDocumentRate(header: DocumentHeaderInput, formData: FormData): Promise<Decimal | null> {
   if (!isForeign(header.currency)) return null;
+  const notAllowed = await currencyNotAllowed(header.organizationId, header.currency);
+  if (notAllowed) throw new Error(notAllowed);
   const parsed = parseRate(String(formData.get("exchangeRate") ?? ""));
   if ("error" in parsed) throw new Error(parsed.error);
   if (parsed.rate) return parsed.rate;

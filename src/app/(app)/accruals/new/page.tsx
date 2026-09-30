@@ -4,6 +4,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { AccrualLinesEditor } from "@/components/accrual-lines-editor";
 import { DocumentCurrencyFields } from "@/components/document-currency-fields";
+import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createAccrualDocumentAction } from "../actions";
 
 export default async function NewAccrualDocumentPage({
@@ -34,6 +35,7 @@ export default async function NewAccrualDocumentPage({
       prisma.pnlArticle.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     ]);
 
+  const foreignCurrency = await isForeignCurrencyEnabled();
   return (
     <div className="page">
       <div className="page-header">
@@ -113,7 +115,7 @@ export default async function NewAccrualDocumentPage({
               <span>Срок оплаты</span>
               <input type="date" name="dueDate" />
             </label>
-            <DocumentCurrencyFields />
+            {foreignCurrency ? <DocumentCurrencyFields /> : null}
             <label className="field">
               <span>Ответственный</span>
               <select name="responsibleId">

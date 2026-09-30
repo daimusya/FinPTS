@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
+import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createBankTransactionAction } from "../../actions";
 
 export default async function NewCashTransactionPage({
@@ -31,6 +32,7 @@ export default async function NewCashTransactionPage({
       prisma.productService.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     ]);
 
+  const foreignCurrency = await isForeignCurrencyEnabled();
   return (
     <div className="page">
       <div className="page-header">
@@ -161,8 +163,10 @@ export default async function NewCashTransactionPage({
           <p className="text-muted" style={{ marginTop: 6 }}>
             Если отмечено — обязательно укажите второй счёт или кассу ниже. Встречная операция на
             нём (с противоположным направлением) будет создана автоматически, чтобы общий остаток не
-            искажался, если завести только одну сторону перевода. Счета в одной валюте — та же сумма; в
-            разных (покупка или продажа валюты) — укажите, сколько поступило на второй счёт в его валюте.
+            искажался, если завести только одну сторону перевода.
+            {foreignCurrency
+              ? " Счета в одной валюте — та же сумма; в разных (покупка или продажа валюты) — укажите, сколько поступило на второй счёт в его валюте."
+              : " Сумма та же."}
           </p>
           <div className="form-grid" style={{ marginTop: 6 }}>
             <label className="field">
@@ -176,10 +180,12 @@ export default async function NewCashTransactionPage({
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>Сумма на втором счёте (только если валюта другая)</span>
-              <input type="text" inputMode="decimal" name="secondAmount" id="second-amount" placeholder="например 84 000,00" />
-            </label>
+            {foreignCurrency ? (
+              <label className="field">
+                <span>Сумма на втором счёте (только если валюта другая)</span>
+                <input type="text" inputMode="decimal" name="secondAmount" id="second-amount" placeholder="например 84 000,00" />
+              </label>
+            ) : null}
             <label className="field">
               <span>Вторая касса (для перевода)</span>
               <select name="secondCashAccountId">

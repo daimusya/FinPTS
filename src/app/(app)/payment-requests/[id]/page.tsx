@@ -32,6 +32,7 @@ import { PaymentAccountOptions } from "@/components/payment-account-options";
 import { PrimaryContact } from "@/components/primary-contact";
 import { CURRENCY_OPTIONS, formatMoneyIn } from "@/lib/currency";
 import { amountInRub, loadRateLookup } from "@/lib/currency-rates";
+import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { currentDeciders } from "@/lib/payment-requests/notify";
 
 const STATE_LABELS: Record<TimelineState, string> = {
@@ -107,6 +108,7 @@ export default async function PaymentRequestPage({
     : (request.payCashAccount?.name ?? null);
   // A request in a foreign currency: amounts in its currency, the rouble equivalent at today's rate next to them.
   const money = (value: unknown) => formatMoneyIn(Number(value), request.currency);
+  const foreignCurrency = await isForeignCurrencyEnabled();
   const amountRub = request.currency !== "RUB" ? amountInRub(request.amount.toString(), request.currency, await loadRateLookup()) : null;
   const firstDueKey = request.dueDate.toISOString().slice(0, 10);
 
@@ -491,16 +493,18 @@ export default async function PaymentRequestPage({
               <span>Сумма *</span>
               <input type="text" inputMode="decimal" name="amount" id="rework-amount" required defaultValue={request.amount.toFixed(2)} style={{ width: 140 }} />
             </label>
-            <label className="field">
-              <span>Валюта</span>
-              <select name="currency" id="rework-currency" defaultValue={request.currency}>
-                {CURRENCY_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.value}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {foreignCurrency || request.currency !== "RUB" ? (
+              <label className="field">
+                <span>Валюта</span>
+                <select name="currency" id="rework-currency" defaultValue={request.currency}>
+                  {CURRENCY_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label className="field">
               <span>Срок оплаты *</span>
               <input type="date" name="dueDate" id="rework-due" required defaultValue={firstDueKey} />

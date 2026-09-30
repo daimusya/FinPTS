@@ -5,6 +5,7 @@ import { DICTIONARY_REGISTRY, getDictionaryConfig } from "@/lib/dictionaries/reg
 import { archiveDictionaryItem, restoreDictionaryItem } from "../actions";
 import { CounterpartyCreateByInn } from "@/components/counterparty-inn";
 import { CurrencyRatesLoader } from "@/components/currency-rates-loader";
+import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { CounterpartyEnrich, OrganizationCreateByInn } from "@/components/registry-by-inn";
 
 function formatCell(value: unknown): string {
@@ -79,6 +80,8 @@ export default async function DictionaryListPage({
     ...(config.listLimit ? { take: config.listLimit } : {}),
   });
 
+  const foreignCurrency = await isForeignCurrencyEnabled();
+  const listColumns = config.listColumns.filter((col) => config.fields.find((f) => f.name === col)?.feature !== "foreignCurrency" || foreignCurrency);
   const active = items.filter((item) => !item.isArchived);
   const archived = items.filter((item) => item.isArchived);
 
@@ -126,7 +129,7 @@ export default async function DictionaryListPage({
         <table>
           <thead>
             <tr>
-              {config.listColumns.map((col) => (
+              {listColumns.map((col) => (
                 <th key={col}>{config.fields.find((f) => f.name === col)?.label ?? col}</th>
               ))}
               {/* «Статус» clashes with a dictionary's own status column (projects, contracts). */}
@@ -137,7 +140,7 @@ export default async function DictionaryListPage({
           <tbody>
             {[...active, ...archived].map((item) => (
               <tr key={String(item.id)}>
-                {config.listColumns.map((col) => (
+                {listColumns.map((col) => (
                   <td key={col}>
                     {config.fields.find((f) => f.name === col)?.options?.find((o) => o.value === String(item[col]))?.label ??
                       LABELS[String(item[col])] ??
@@ -175,7 +178,7 @@ export default async function DictionaryListPage({
             ))}
             {items.length === 0 ? (
               <tr>
-                <td colSpan={config.listColumns.length + 2} className="empty-state">
+                <td colSpan={listColumns.length + 2} className="empty-state">
                   Записей пока нет.
                 </td>
               </tr>
