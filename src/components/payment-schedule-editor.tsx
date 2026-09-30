@@ -4,8 +4,8 @@ import { useState } from "react";
 import Decimal from "decimal.js";
 import { suggestSplit, MAX_PAYMENT_PARTS, type ScheduleRowInput } from "@/lib/payment-requests/parts";
 
-const money = (value: Decimal) =>
-  new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" }).format(value.toNumber());
+const money = (value: Decimal, currency: string) =>
+  new Intl.NumberFormat("ru-RU", { style: "currency", currency: /^[A-Z]{3}$/.test(currency) ? currency : "RUB" }).format(value.toNumber());
 
 const parse = (raw: string) => {
   const cleaned = raw.replace(/\s/g, "").replace(",", ".");
@@ -22,6 +22,7 @@ export function PaymentScheduleEditor({
   initialRows,
   todayKey,
   submitLabel,
+  currency = "RUB",
 }: {
   action: (formData: FormData) => void | Promise<void>;
   /** Сколько нужно распределить по неоплаченным частям. */
@@ -29,6 +30,8 @@ export function PaymentScheduleEditor({
   initialRows: ScheduleRowInput[];
   todayKey: string;
   submitLabel: string;
+  /** Валюта заявки — суммы частей в ней. */
+  currency?: string;
 }) {
   const [rows, setRows] = useState<ScheduleRowInput[]>(initialRows);
   const target = new Decimal(toSchedule);
@@ -81,10 +84,10 @@ export function PaymentScheduleEditor({
       <div className="schedule-editor__footer">
         <span className={left.isZero() ? "text-muted" : "form-error"} style={{ margin: 0 }}>
           {left.isZero()
-            ? `Распределено полностью: ${money(target)}`
+            ? `Распределено полностью: ${money(target, currency)}`
             : left.greaterThan(0)
-              ? `Не распределено: ${money(left)}`
-              : `Лишнее: ${money(left.negated())}`}
+              ? `Не распределено: ${money(left, currency)}`
+              : `Лишнее: ${money(left.negated(), currency)}`}
         </span>
         <div className="schedule-editor__buttons">
           <button

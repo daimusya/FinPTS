@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { AccrualLinesEditor } from "@/components/accrual-lines-editor";
+import { DocumentCurrencyFields } from "@/components/document-currency-fields";
 import { createAccrualDocumentAction } from "../actions";
 
 export default async function NewAccrualDocumentPage({
@@ -112,6 +113,7 @@ export default async function NewAccrualDocumentPage({
               <span>Срок оплаты</span>
               <input type="date" name="dueDate" />
             </label>
+            <DocumentCurrencyFields />
             <label className="field">
               <span>Ответственный</span>
               <select name="responsibleId">

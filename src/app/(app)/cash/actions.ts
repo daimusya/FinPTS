@@ -21,6 +21,9 @@ import {
 } from "@/lib/cash/transaction-edit";
 import { bankTransactionScopeWhere, getAccessScope } from "@/lib/access-scope";
 import type { Prisma } from "@prisma/client";
+import { allocationTransactionSide, planAllocation, type AllocationAmounts } from "@/lib/accruals/currency";
+import { normalizeCurrency } from "@/lib/currency";
+import { loadRateLookup } from "@/lib/currency-rates";
 import crypto from "node:crypto";
 
 export async function createBankTransactionAction(formData: FormData) {
@@ -202,7 +205,8 @@ async function loadTransactionWithPair(session: Session, id: string) {
   return { tx: found, pair };
 }
 
-const allocatedSum = (leg: { allocations: Array<{ amount: Prisma.Decimal }> }) => sumMoney(leg.allocations.map((a) => a.amount)).toFixed(2);
+const allocatedSum = (leg: { allocations: Array<{ amount: Prisma.Decimal; transactionAmount: Prisma.Decimal | null }> }) =>
+  sumMoney(leg.allocations.map(allocationTransactionSide)).toFixed(2);
 
 const toEditableLeg = (leg: NonNullable<Awaited<ReturnType<typeof loadTransactionWithPair>>["pair"]>) => ({
   direction: leg.direction,
@@ -469,8 +473,39 @@ export async function allocatePaymentAction(transactionId: string, formData: For
     redirect(`/cash/transactions/${transactionId}?error=${encodeURIComponent((e as Error).message)}`);
   });
 
+  // Currencies of the payment and of the document: a rouble payment of a document in «у.е.» is converted at the payment day rate.
+  const transaction = await prisma.bankTransaction.findUniqueOrThrow({
+    where: { id: transactionId },
+    include: { bankAccount: { select: { currency: true } }, cashAccount: { select: { currency: true } } },
+  });
+  const transactionCurrency = normalizeCurrency(transaction.bankAccount?.currency ?? transaction.cashAccount?.currency);
+  const documentCurrency = normalizeCurrency(document.currency);
+  const foreignCurrency = transactionCurrency !== "RUB" ? transactionCurrency : documentCurrency;
+  let paymentDayRate = null;
+  if (transactionCurrency !== documentCurrency) {
+    const rates = await loadRateLookup();
+    paymentDayRate = rates.rateOn(foreignCurrency, transaction.operationDate);
+    // A rate from a later day is not the rate of the payment: better to ask for the rates to be loaded.
+    if (rates.missingText()) paymentDayRate = null;
+  }
+  const planned = planAllocation({
+    entered: amountRaw.replace(",", "."),
+    transactionCurrency,
+    documentCurrency,
+    documentRate: document.exchangeRate,
+    paymentDayRate,
+  });
+  if ("error" in planned) redirect(`/cash/transactions/${transactionId}?error=${encodeURIComponent(planned.error)}`);
+  const amounts = planned as AllocationAmounts;
+
   const allocation = await prisma.paymentAllocation.create({
-    data: { bankTransactionId: transactionId, accrualDocumentId, amount: amountRaw },
+    data: {
+      bankTransactionId: transactionId,
+      accrualDocumentId,
+      amount: amounts.amount.toFixed(2),
+      currencyAmount: amounts.currencyAmount?.toFixed(2) ?? null,
+      transactionAmount: amounts.transactionAmount?.toFixed(2) ?? null,
+    },
   });
 
   await Promise.all([

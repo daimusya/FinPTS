@@ -3,9 +3,9 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
-import { formatMoney } from "@/lib/money";
 import { ACCRUAL_DOCUMENT_TYPE_LABELS } from "@/lib/accruals/labels";
-import { formatMoneyIn, transactionCurrency } from "@/lib/currency";
+import { formatMoneyIn, normalizeCurrency, transactionCurrency } from "@/lib/currency";
+import { allocationDocumentSide, allocationTransactionSide, documentTotal, isForeign } from "@/lib/accruals/currency";
 import {
   allocatePaymentAction,
   updateTransactionClassificationAction,
@@ -83,8 +83,17 @@ export default async function CashTransactionDetailPage({
     take: 50,
   });
 
-  const allocatedTotal = tx.allocations.reduce((acc, a) => acc + Number(a.amount), 0);
-  const remaining = Number(tx.amount) - allocatedTotal;
+  // In the currency of the operation's account; documents show their remainder in their own currency.
+  const txCurrency = transactionCurrency(tx);
+  const allocatedTotal = tx.allocations.reduce((acc, a) => acc + allocationTransactionSide(a).toNumber(), 0);
+  const remaining = Math.round((Number(tx.amount) - allocatedTotal) * 100) / 100;
+  const documentRemainder = (doc: (typeof candidateDocuments)[number]) => {
+    const foreign = isForeign(doc.currency);
+    const total = documentTotal(doc.lines, foreign).toNumber();
+    const allocated = doc.allocations.reduce((acc, a) => acc + allocationDocumentSide(a).toNumber(), 0);
+    return formatMoneyIn(total - allocated, doc.currency);
+  };
+  const anyCurrencyDiffers = candidateDocuments.some((d) => normalizeCurrency(d.currency) !== txCurrency);
 
   return (
     <div className="page">
@@ -212,7 +221,7 @@ export default async function CashTransactionDetailPage({
 
       <div className="card">
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
-          Сопоставление с начислениями — остаток {formatMoney(remaining)}
+          Сопоставление с начислениями — остаток {formatMoneyIn(remaining, txCurrency)}
         </h2>
         <div className="table-wrap" style={{ marginBottom: 14 }}>
           <table>
@@ -233,7 +242,14 @@ export default async function CashTransactionDetailPage({
                     </Link>
                   </td>
                   <td>{a.accrualDocument.counterparty.shortName || a.accrualDocument.counterparty.fullName}</td>
-                  <td className="mono">{formatMoney(a.amount)}</td>
+                  <td className="mono">
+                    {formatMoneyIn(allocationTransactionSide(a), txCurrency)}
+                    {a.currencyAmount && normalizeCurrency(a.accrualDocument.currency) !== txCurrency ? (
+                      <div className="text-muted" style={{ fontSize: 11 }}>
+                        = {formatMoneyIn(a.currencyAmount, a.accrualDocument.currency)} по документу
+                      </div>
+                    ) : null}
+                  </td>
                   <td>
                     {canManage ? (
                       <form action={cancelAllocationAction.bind(null, a.id)}>
@@ -262,22 +278,23 @@ export default async function CashTransactionDetailPage({
               <span>Документ начисления ({matchingDirection === "INCOME" ? "доход" : "расход"})</span>
               <select name="accrualDocumentId" required>
                 <option value="">— выбрать —</option>
-                {candidateDocuments.map((doc) => {
-                  const total = doc.lines.reduce((acc, l) => acc + Number(l.amount), 0);
-                  const allocated = doc.allocations.reduce((acc, a) => acc + Number(a.amount), 0);
-                  return (
-                    <option key={doc.id} value={doc.id}>
-                      № {doc.number} · {doc.counterparty.shortName || doc.counterparty.fullName} · остаток{" "}
-                      {formatMoney(total - allocated)}
-                    </option>
-                  );
-                })}
+                {candidateDocuments.map((doc) => (
+                  <option key={doc.id} value={doc.id}>
+                    № {doc.number} · {doc.counterparty.shortName || doc.counterparty.fullName} · остаток {documentRemainder(doc)}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="field">
-              <span>Сумма</span>
+              <span>Сумма, {txCurrency}</span>
               <input type="number" step="0.01" name="amount" defaultValue={remaining.toFixed(2)} required />
             </label>
+            {anyCurrencyDiffers ? (
+              <p className="text-muted" style={{ gridColumn: "1 / -1", fontSize: 12, margin: 0 }}>
+                Сумма — в валюте операции ({txCurrency}). Если документ в другой валюте, она пересчитается по курсу ЦБ на день
+                операции; разница с курсом документа попадёт в курсовые разницы.
+              </p>
+            ) : null}
             <button type="submit" className="btn btn-primary">
               Сопоставить
             </button>

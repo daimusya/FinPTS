@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { AccrualLinesEditor, type LineDraft } from "@/components/accrual-lines-editor";
+import { DocumentCurrencyFields } from "@/components/document-currency-fields";
 import { updateAccrualDocumentAction } from "../../actions";
 
 function toDateInput(date: Date): string {
@@ -57,8 +58,9 @@ export default async function EditAccrualDocumentPage({
     projectId: l.projectId ?? "",
     productServiceId: l.productServiceId ?? "",
     pnlArticleId: l.pnlArticleId ?? "",
-    amount: String(l.amount),
-    vatAmount: l.vatAmount ? String(l.vatAmount) : "",
+    // A document in a foreign currency is edited in its currency.
+    amount: String(l.currencyAmount ?? l.amount),
+    vatAmount: (l.currencyVatAmount ?? l.vatAmount) ? String(l.currencyVatAmount ?? l.vatAmount) : "",
     description: l.description ?? "",
   }));
 
@@ -139,6 +141,7 @@ export default async function EditAccrualDocumentPage({
               <span>Срок оплаты</span>
               <input type="date" name="dueDate" defaultValue={doc.dueDate ? toDateInput(doc.dueDate) : ""} />
             </label>
+            <DocumentCurrencyFields currency={doc.currency} rate={doc.exchangeRate ? doc.exchangeRate.toString() : ""} />
             <label className="field">
               <span>Ответственный</span>
               <select name="responsibleId" defaultValue={doc.responsibleId ?? ""}>

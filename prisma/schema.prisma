@@ -669,6 +669,10 @@ model AccrualDocument {
   dueDate         DateTime?
   /// Время платежа внутри дня «ЧЧ:ММ» (по Москве); пусто — в течение дня.
   dueTime         String?                @db.VarChar(5)
+  /// Валюта документа (ISO 4217). Не рубль — суммы строк в валюте (currencyAmount), рублёвые суммы строк — по курсу exchangeRate.
+  currency        String                 @default("RUB") @db.VarChar(3)
+  /// Рублей за единицу валюты на дату документа (курс ЦБ или договорной); null — документ в рублях.
+  exchangeRate    Decimal?               @db.Decimal(18, 6)
   responsibleId   String?
   sourceSystem    String?                // e.g. "1C", "manual"
   externalId      String?
@@ -712,6 +716,9 @@ model AccrualDocumentLine {
   pnlArticleId     String?
   amount           Decimal  @db.Decimal(18, 2)
   vatAmount        Decimal? @db.Decimal(18, 2)
+  /// Сумма и НДС в валюте документа (для документа в рублях — null); amount и vatAmount — рубли по курсу документа.
+  currencyAmount    Decimal? @db.Decimal(18, 2)
+  currencyVatAmount Decimal? @db.Decimal(18, 2)
   description      String?
 
   document       AccrualDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
@@ -838,7 +845,12 @@ model PaymentAllocation {
   id                String   @id @default(cuid())
   bankTransactionId String
   accrualDocumentId String
+  /// Рубли по курсу документа — на столько уменьшается задолженность в отчётах.
   amount            Decimal  @db.Decimal(18, 2)
+  /// Сумма в валюте документа (документ не в рублях); null — как amount.
+  currencyAmount    Decimal? @db.Decimal(18, 2)
+  /// Сумма в валюте платежа (валюта счёта операции), если она отличается от amount; null — как amount.
+  transactionAmount Decimal? @db.Decimal(18, 2)
   createdAt         DateTime @default(now())
   cancelledAt       DateTime?
 
@@ -869,6 +881,8 @@ model PaymentRequest {
   counterpartyId    String?
   cashFlowArticleId String?
   amount            Decimal               @db.Decimal(18, 2)
+  /// Валюта суммы заявки (и частей графика); в рубли — по курсу ЦБ на сегодня (маршрут, календарь, дашборд).
+  currency          String                @default("RUB") @db.VarChar(3)
   dueDate           DateTime
   /// Время платежа внутри дня «ЧЧ:ММ» (по Москве); пусто — в течение дня.
   dueTime           String?               @db.VarChar(5)

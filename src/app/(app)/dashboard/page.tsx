@@ -7,6 +7,8 @@ import { computePnlReport } from "@/lib/reports/pnl";
 import { getSession } from "@/lib/session";
 import { cashBalanceRub } from "@/lib/currency-rates";
 import { formatMoneyIn } from "@/lib/currency";
+import { isForeign, outstanding } from "@/lib/accruals/currency";
+import { amountInRub, loadRateLookup } from "@/lib/currency-rates";
 import {
   accrualScopeWhere,
   bankTransactionScopeWhere,
@@ -67,18 +69,24 @@ export default async function DashboardPage() {
   let receivable = sumMoney([]);
   let payable = sumMoney([]);
   let overdueTotal = sumMoney([]);
+  const rates = await loadRateLookup();
   for (const doc of unpaidDocuments) {
-    const total = sumMoney(doc.lines.map((l) => l.amount));
-    const allocated = sumMoney(doc.allocations.map((a) => a.amount));
-    const remaining = total.minus(allocated);
-    if (remaining.lessThanOrEqualTo(0)) continue;
+    // A document in a foreign currency counts at today's rate.
+    const left = outstanding(doc, isForeign(doc.currency) ? rates.rateOn(doc.currency, now) : null);
+    const remaining = left.rub;
+    if (left.native.lessThanOrEqualTo(0)) continue;
     if (doc.direction === "INCOME") receivable = receivable.plus(remaining);
     else payable = payable.plus(remaining);
     if (doc.dueDate && doc.dueDate < now) overdueTotal = overdueTotal.plus(remaining);
   }
 
   // Requests paid in parts count only what is still to be paid.
-  const upcomingPaymentsTotal = sumMoney(upcomingRequests.map((r) => sumMoney([r.amount]).minus(sumMoney(r.parts.map((p) => p.amount)))));
+  const upcomingPaymentsTotal = sumMoney(
+    upcomingRequests.map((r) => {
+      const left = sumMoney([r.amount]).minus(sumMoney(r.parts.map((p) => p.amount)));
+      return amountInRub(left, r.currency, rates) ?? left;
+    }),
+  );
 
   return (
     <div className="page">

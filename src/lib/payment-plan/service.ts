@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { hasPermission, type SessionPayload } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
-import { formatMoney } from "@/lib/money";
+import { formatMoneyIn } from "@/lib/currency";
 import { compareDueTime, localDateKey, parseAccountKey, parseDueTime, parseRescheduleDate, requestPlacement, showDueDate } from "@/lib/payment-calendar";
 import { PAYMENT_REQUEST_STATUS_LABELS } from "@/lib/payment-requests/labels";
 import { scheduleSummary, validateSchedule, type ScheduleRowInput } from "@/lib/payment-requests/parts";
@@ -138,7 +138,7 @@ export async function reschedulePart(
   timeRaw?: unknown,
 ): Promise<PlanResult> {
   if (!canPlanRequests(session)) return fail("Переносить срок оплаты могут согласующие заявки и те, кто ведёт банк и кассу");
-  const part = await prisma.paymentRequestPart.findUnique({ where: { id: partId } });
+  const part = await prisma.paymentRequestPart.findUnique({ where: { id: partId }, include: { paymentRequest: { select: { currency: true } } } });
   if (!part) return fail("Часть оплаты не найдена");
   if (part.paidAt) return fail("Эта часть уже оплачена");
   const parsed = parseNewDue(dateRaw, timeRaw, part.dueTime);
@@ -182,7 +182,7 @@ export async function reschedulePart(
   revalidatePlan([`/payment-requests/${part.paymentRequestId}`]);
   return {
     ok: true,
-    message: `Часть на ${formatMoney(part.amount)} перенесена: ${showDueDate(part.dueDate, part.dueTime)} → ${showDueDate(parsed.date, parsed.time)}`,
+    message: `Часть на ${formatMoneyIn(part.amount.toString(), part.paymentRequest.currency)} перенесена: ${showDueDate(part.dueDate, part.dueTime)} → ${showDueDate(parsed.date, parsed.time)}`,
   };
 }
 
@@ -455,8 +455,8 @@ export async function markPartPaid(session: SessionPayload, partId: string): Pro
   return {
     ok: true,
     message: result.allPaid
-      ? `Часть на ${formatMoney(part.amount)} оплачена — заявка оплачена полностью`
-      : `Часть на ${formatMoney(part.amount)} оплачена (${result.paidCount} из ${result.total}), осталось ${formatMoney(result.remainingAmount)}`,
+      ? `Часть на ${formatMoneyIn(part.amount.toString(), part.paymentRequest.currency)} оплачена — заявка оплачена полностью`
+      : `Часть на ${formatMoneyIn(part.amount.toString(), part.paymentRequest.currency)} оплачена (${result.paidCount} из ${result.total}), осталось ${formatMoneyIn(result.remainingAmount, part.paymentRequest.currency)}`,
   };
 }
 

@@ -16,6 +16,8 @@ import { postAccrualDocumentAction, cancelAccrualDocumentAction, rescheduleDocum
 import { PaymentAccountOptions } from "@/components/payment-account-options";
 import { accountKey, localDateKey, showDueDate } from "@/lib/payment-calendar";
 import { PrimaryContact } from "@/components/primary-contact";
+import { allocationDocumentSide, documentTotal, isForeign } from "@/lib/accruals/currency";
+import { formatMoneyIn } from "@/lib/currency";
 import { canPlanDocuments } from "@/lib/payment-plan/service";
 
 export default async function AccrualDocumentPage({
@@ -63,8 +65,12 @@ export default async function AccrualDocumentPage({
     : [[], []];
   const todayKey = localDateKey();
 
-  const total = doc.lines.reduce((acc, l) => acc + Number(l.amount), 0);
-  const allocated = doc.allocations.reduce((acc, a) => acc + Number(a.amount), 0);
+  // A document in a foreign currency: totals and payments in its currency, roubles at the document rate below.
+  const foreign = isForeign(doc.currency);
+  const money = (value: unknown) => formatMoneyIn(Number(value), doc.currency);
+  const total = documentTotal(doc.lines, foreign).toNumber();
+  const allocated = doc.allocations.reduce((acc, a) => acc + allocationDocumentSide(a).toNumber(), 0);
+  const totalRub = doc.lines.reduce((acc, l) => acc + Number(l.amount), 0);
 
   return (
     <div className="page">
@@ -114,11 +120,16 @@ export default async function AccrualDocumentPage({
       <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label">Сумма документа</div>
-          <div className="stat-value">{formatMoney(total)}</div>
+          <div className="stat-value">{money(total)}</div>
+          {foreign ? (
+            <div className="text-muted" style={{ fontSize: 12 }}>
+              = {formatMoney(totalRub)} по курсу {doc.exchangeRate?.toString()} на {doc.date.toLocaleDateString("ru-RU")}
+            </div>
+          ) : null}
         </div>
         <div className="stat-card">
           <div className="stat-label">Оплачено</div>
-          <div className="stat-value">{formatMoney(allocated)}</div>
+          <div className="stat-value">{money(allocated)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Статус проведения</div>
@@ -220,8 +231,15 @@ export default async function AccrualDocumentPage({
                   <td>{line.project?.name ?? "—"}</td>
                   <td>{line.productService?.name ?? "—"}</td>
                   <td>{line.pnlArticle?.name ?? "—"}</td>
-                  <td className="mono">{formatMoney(line.amount)}</td>
-                  <td className="mono">{line.vatAmount ? formatMoney(line.vatAmount) : "—"}</td>
+                  <td className="mono">
+                    {money(line.currencyAmount ?? line.amount)}
+                    {foreign ? (
+                      <div className="text-muted" style={{ fontSize: 11 }}>
+                        {formatMoney(line.amount)}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="mono">{(line.currencyVatAmount ?? line.vatAmount) ? money(line.currencyVatAmount ?? line.vatAmount) : "—"}</td>
                   <td>{line.description ?? "—"}</td>
                 </tr>
               ))}
@@ -247,7 +265,14 @@ export default async function AccrualDocumentPage({
                 <tr key={a.id}>
                   <td className="mono">{a.bankTransaction.operationDate.toLocaleDateString("ru-RU")}</td>
                   <td>{a.bankTransaction.bankAccount?.bankName ?? a.bankTransaction.cashAccount?.name}</td>
-                  <td className="mono">{formatMoney(a.amount)}</td>
+                  <td className="mono">
+                    {money(allocationDocumentSide(a))}
+                    {foreign && a.transactionAmount && !a.currencyAmount?.equals(a.transactionAmount) ? (
+                      <div className="text-muted" style={{ fontSize: 11 }}>
+                        оплачено {formatMoney(a.transactionAmount)}
+                      </div>
+                    ) : null}
+                  </td>
                   <td>
                     {canManage ? (
                       <form action={cancelAllocationAction.bind(null, a.id)}>

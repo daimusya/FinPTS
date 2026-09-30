@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney } from "@/lib/money";
+import { documentTotal, isForeign } from "@/lib/accruals/currency";
+import { formatMoneyIn } from "@/lib/currency";
 import {
   ACCRUAL_DIRECTION_LABELS,
   ACCRUAL_DOCUMENT_TYPE_LABELS,
@@ -127,6 +129,7 @@ export default async function AccrualsPage({
           <tbody>
             {documents.map((doc) => {
               const total = doc.lines.reduce((acc, l) => acc + Number(l.amount), 0);
+              const foreign = isForeign(doc.currency);
               return (
                 <tr key={doc.id}>
                   <td className="mono">{doc.date.toLocaleDateString("ru-RU")}</td>
@@ -137,7 +140,14 @@ export default async function AccrualsPage({
                   <td>{doc.organization.shortName || doc.organization.name}</td>
                   <td>{doc.counterparty.shortName || doc.counterparty.fullName}</td>
                   <td>{ACCRUAL_DIRECTION_LABELS[doc.direction]}</td>
-                  <td className="mono">{formatMoney(total)}</td>
+                  <td className="mono">
+                    {foreign ? formatMoneyIn(documentTotal(doc.lines, true), doc.currency) : formatMoney(total)}
+                    {foreign ? (
+                      <div className="text-muted" style={{ fontSize: 11 }}>
+                        {formatMoney(total)}
+                      </div>
+                    ) : null}
+                  </td>
                   <td>
                     <span className="badge badge-orange">{ACCRUAL_STATUS_LABELS[doc.status]}</span>
                   </td>

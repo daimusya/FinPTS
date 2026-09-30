@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
+import { CURRENCY_OPTIONS } from "@/lib/currency";
 import { createPaymentRequestAction } from "../actions";
 
 export default async function NewPaymentRequestPage({
@@ -77,6 +78,16 @@ export default async function NewPaymentRequestPage({
             <label className="field">
               <span>Сумма *</span>
               <input type="number" step="0.01" name="amount" required />
+            </label>
+            <label className="field">
+              <span>Валюта</span>
+              <select name="currency" id="pr-currency" defaultValue={"RUB"}>
+                {CURRENCY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.value}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="field">
               <span>Срок оплаты *</span>

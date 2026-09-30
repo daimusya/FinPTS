@@ -6,6 +6,7 @@ import { ACCRUAL_DOCUMENT_TYPE_LABELS } from "@/lib/accruals/labels";
 import { extractFilters, type ReportSearchParams } from "@/lib/reports/filters";
 import { computeDebtsReport, type DebtRow } from "@/lib/reports/debts";
 import { prisma } from "@/lib/db";
+import { formatMoneyIn } from "@/lib/currency";
 import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 
 export default async function DebtsReportPage({
@@ -129,7 +130,7 @@ function DebtTable({ title, rows }: { title: string; rows: DebtRow[] }) {
                         key={d.id}
                         href={`/accruals/${d.id}`}
                         className={`badge ${d.overdue ? "badge-danger" : "badge-orange"}`}
-                        title={`${ACCRUAL_DOCUMENT_TYPE_LABELS[d.documentType]} · остаток ${formatMoney(d.remaining)}`}
+                        title={`${ACCRUAL_DOCUMENT_TYPE_LABELS[d.documentType]} · остаток ${d.remainingInCurrency ? `${formatMoneyIn(d.remainingInCurrency.amount, d.remainingInCurrency.currency)} ≈ ` : ""}${formatMoney(d.remaining)}`}
                       >
                         № {d.number}
                       </Link>

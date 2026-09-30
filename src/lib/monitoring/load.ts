@@ -3,7 +3,7 @@ import path from "node:path";
 import { prisma } from "@/lib/db";
 import { formatMoney, sumMoney } from "@/lib/money";
 import { loadBackupFreshness } from "@/lib/backup/status";
-import { accountCurrencies } from "@/lib/currency-rates";
+import { accountCurrencies, amountInRub, loadRateLookup } from "@/lib/currency-rates";
 import { localDateKey } from "@/lib/payment-calendar";
 import {
   checkBackup,
@@ -59,7 +59,7 @@ export async function runChecks(now: Date = new Date()): Promise<CheckResult[]> 
     diskSpace(),
     prisma.accountingPeriod.count({ where: { OR: [{ status: "CLOSED" }, { closedAt: { not: null } }] } }),
     prisma.accountingPeriod.findUnique({ where: { year_month: { year: previous.getUTCFullYear(), month: previous.getUTCMonth() + 1 } } }),
-    prisma.paymentRequest.findMany({ where: { status: "APPROVED", dueDate: { lt: today } }, select: { amount: true } }),
+    prisma.paymentRequest.findMany({ where: { status: "APPROVED", dueDate: { lt: today } }, select: { amount: true, currency: true } }),
     prisma.paymentRequest.count({ where: { status: "PENDING_APPROVAL", updatedAt: { lt: new Date(now.getTime() - 3 * DAY) } } }),
     prisma.bankTransaction.count({ where: { matchStatus: "UNMATCHED", isTransfer: false, operationDate: { lt: new Date(today.getTime() - 14 * DAY) } } }),
     prisma.notification.findMany({
@@ -69,6 +69,7 @@ export async function runChecks(now: Date = new Date()): Promise<CheckResult[]> 
     }),
     prisma.notification.count({ where: { deliveryState: "pending", createdAt: { lt: new Date(now.getTime() - DAY / 24) } } }),
   ]);
+  const rates = await loadRateLookup();
   const latestRates = await Promise.all(
     currencies.map(async (currency) => ({
       currency,
@@ -96,7 +97,7 @@ export async function runChecks(now: Date = new Date()): Promise<CheckResult[]> 
       previousLabel: `${MONTHS[previous.getUTCMonth()]} ${previous.getUTCFullYear()}`,
       dayOfMonth: Number(todayKey.slice(8, 10)),
     }),
-    checkPayments({ overdue: overdue.length, overdueSum: formatMoney(sumMoney(overdue.map((r) => r.amount))), stuck }),
+    checkPayments({ overdue: overdue.length, overdueSum: formatMoney(sumMoney(overdue.map((r) => amountInRub(r.amount.toString(), r.currency, rates, now) ?? r.amount))), stuck }),
     checkUnmatched(unmatched),
     checkDelivery({ failedLastDay: failedDelivery.length, stuck: stuckDelivery, lastError: failedDelivery[0]?.deliveryError ?? null }),
   ];

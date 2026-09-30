@@ -30,6 +30,8 @@ import { canPlanRequests } from "@/lib/payment-plan/service";
 import { PaymentScheduleEditor } from "@/components/payment-schedule-editor";
 import { PaymentAccountOptions } from "@/components/payment-account-options";
 import { PrimaryContact } from "@/components/primary-contact";
+import { CURRENCY_OPTIONS, formatMoneyIn } from "@/lib/currency";
+import { amountInRub, loadRateLookup } from "@/lib/currency-rates";
 import { currentDeciders } from "@/lib/payment-requests/notify";
 
 const STATE_LABELS: Record<TimelineState, string> = {
@@ -103,6 +105,9 @@ export default async function PaymentRequestPage({
   const payAccountName = request.payBankAccount
     ? `${request.payBankAccount.bankName} · ${request.payBankAccount.accountNumber}`
     : (request.payCashAccount?.name ?? null);
+  // A request in a foreign currency: amounts in its currency, the rouble equivalent at today's rate next to them.
+  const money = (value: unknown) => formatMoneyIn(Number(value), request.currency);
+  const amountRub = request.currency !== "RUB" ? amountInRub(request.amount.toString(), request.currency, await loadRateLookup()) : null;
   const firstDueKey = request.dueDate.toISOString().slice(0, 10);
 
   const steps = request.route?.steps ?? [];
@@ -150,7 +155,7 @@ export default async function PaymentRequestPage({
       <div className="page-header">
         <div>
           <h1>
-            Заявка на оплату · {formatMoney(request.amount)}
+            Заявка на оплату · {money(request.amount)}
           </h1>
           <p>
             {counterpartyName} · срок оплаты {showDueDate(request.dueDate, request.dueTime)}{" "}
@@ -215,7 +220,10 @@ export default async function PaymentRequestPage({
           <dt>Статья ДДС</dt>
           <dd>{request.cashFlowArticle?.name ?? "—"}</dd>
           <dt>Сумма</dt>
-          <dd className="mono">{formatMoney(request.amount)}</dd>
+          <dd className="mono">
+            {money(request.amount)}
+            {request.currency !== "RUB" && amountRub ? <span className="text-muted"> ≈ {formatMoney(amountRub)} по курсу ЦБ на сегодня</span> : null}
+          </dd>
           <dt>Срок оплаты</dt>
           <dd>{showDueDate(request.dueDate, request.dueTime)}</dd>
           <dt>Создал</dt>
@@ -241,7 +249,7 @@ export default async function PaymentRequestPage({
         <p className="text-muted" style={{ fontSize: 13, marginBottom: 10 }}>
           Счёт оплаты: {payAccountName ?? "не назначен"}
           {hasParts
-            ? ` · оплачено ${formatMoney(summary.paidAmount)} из ${formatMoney(request.amount)}, осталось ${formatMoney(summary.remainingAmount)}`
+            ? ` · оплачено ${money(summary.paidAmount)} из ${money(request.amount)}, осталось ${money(summary.remainingAmount)}`
             : ""}
         </p>
 
@@ -277,7 +285,7 @@ export default async function PaymentRequestPage({
                         </span>
                       ) : null}
                     </td>
-                    <td className="mono">{formatMoney(part.amount)}</td>
+                    <td className="mono">{money(part.amount)}</td>
                     <td>
                       {part.paidAt ? (
                         <span>
@@ -332,6 +340,7 @@ export default async function PaymentRequestPage({
             <PaymentScheduleEditor
               action={savePaymentScheduleAction.bind(null, request.id)}
               toSchedule={(hasParts ? summary.remainingAmount : new Decimal(request.amount.toString())).toFixed(2)}
+              currency={request.currency}
               initialRows={
                 hasParts
                   ? unpaidParts.map((part) => ({
@@ -479,8 +488,18 @@ export default async function PaymentRequestPage({
               </select>
             </label>
             <label className="field">
-              <span>Сумма, ₽ *</span>
+              <span>Сумма *</span>
               <input type="text" inputMode="decimal" name="amount" id="rework-amount" required defaultValue={request.amount.toFixed(2)} style={{ width: 140 }} />
+            </label>
+            <label className="field">
+              <span>Валюта</span>
+              <select name="currency" id="rework-currency" defaultValue={request.currency}>
+                {CURRENCY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.value}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="field">
               <span>Срок оплаты *</span>

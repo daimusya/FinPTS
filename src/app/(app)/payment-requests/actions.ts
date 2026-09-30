@@ -28,6 +28,8 @@ import {
   type ApprovalRouteCandidate,
 } from "@/lib/payment-requests/approval";
 import { stepAuthority } from "@/lib/payment-requests/delegation";
+import { normalizeCurrency } from "@/lib/currency";
+import { amountInRub, loadRateLookup } from "@/lib/currency-rates";
 import { currentDeciders, notifyAuthor, notifyDeciders } from "@/lib/payment-requests/notify";
 
 async function loadActiveRoutes(): Promise<ApprovalRouteCandidate[]> {
@@ -73,8 +75,12 @@ export async function createPaymentRequestAction(formData: FormData) {
     redirect(`/payment-requests/new?error=${encodeURIComponent("Счёт оплаты должен принадлежать организации заявки")}`);
   }
 
+  // A request in a foreign currency is routed by its rouble equivalent at today's rate (route limits are in roubles).
+  const currency = normalizeCurrency(formData.get("currency"));
+  const amountRub = amountInRub(amountRaw, currency, await loadRateLookup());
+  if (!amountRub) redirect(`/payment-requests/new?error=${encodeURIComponent(`Нет курса ЦБ ${currency} — загрузите курсы в справочнике «Курсы валют»`)}`);
   const routes = await loadActiveRoutes();
-  const route = selectApprovalRoute(routes, { amount: amountRaw, organizationId });
+  const route = selectApprovalRoute(routes, { amount: amountRub!.toString(), organizationId });
 
   const created = await prisma.paymentRequest.create({
     data: {
@@ -82,6 +88,7 @@ export async function createPaymentRequestAction(formData: FormData) {
       counterpartyId,
       cashFlowArticleId,
       amount: amountRaw,
+      currency,
       dueDate: new Date(dueDateRaw),
       dueTime: "time" in dueTime ? dueTime.time : null,
       comment,
@@ -320,8 +327,11 @@ export async function resubmitPaymentRequestAction(id: string, formData: FormDat
   const dueTime = parseDueTime(formData.get("dueTime"));
   if ("error" in dueTime) fail(dueTime.error);
 
-  const route = selectApprovalRoute(await loadActiveRoutes(), { amount: amountRaw, organizationId: request.organizationId });
-  const amountChanged = Number(request.amount.toString()) !== Number(amountRaw);
+  const currency = normalizeCurrency(formData.get("currency") ?? request.currency);
+  const amountRub = amountInRub(amountRaw, currency, await loadRateLookup());
+  if (!amountRub) fail(`Нет курса ЦБ ${currency} — загрузите курсы в справочнике «Курсы валют»`);
+  const route = selectApprovalRoute(await loadActiveRoutes(), { amount: amountRub!.toString(), organizationId: request.organizationId });
+  const amountChanged = Number(request.amount.toString()) !== Number(amountRaw) || request.currency !== currency;
   const updated = await prisma.$transaction(async (db) => {
     const moved = await db.paymentRequest.updateMany({
       where: { id, status: { in: reworkable } },
@@ -329,6 +339,7 @@ export async function resubmitPaymentRequestAction(id: string, formData: FormDat
         counterpartyId,
         cashFlowArticleId,
         amount: amountRaw,
+        currency,
         dueDate: new Date(`${dueDateRaw}T00:00:00Z`),
         dueTime: "time" in dueTime ? dueTime.time : null,
         comment,

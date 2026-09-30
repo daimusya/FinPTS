@@ -165,3 +165,13 @@ export async function ensureRecentRates(now: Date = new Date()): Promise<string 
   const result = await loadCbrRates(new Date(today.getTime() - 7 * 86_400_000), today, need);
   return `курсы ЦБ: ${result.currencies.join(", ") || "—"}, записей ${result.saved}${result.unknown.length ? `; ЦБ не устанавливает: ${result.unknown.join(", ")}` : ""}`;
 }
+
+/**
+ * Сумма в рублях по курсу ЦБ на дату (заявка на оплату в валюте: маршрут
+ * согласования, календарь, дашборд). null — курса этой валюты на дату нет.
+ */
+export function amountInRub(amount: Decimal | string | number, currency: string, rates: RateLookup, date: Date = new Date()): Decimal | null {
+  if (normalizeCurrency(currency) === BASE_CURRENCY) return toDecimal(amount);
+  const rate = rates.rateOn(currency, date);
+  return rate ? toDecimal(amount).times(rate).toDecimalPlaces(2, Decimal.ROUND_HALF_UP) : null;
+}

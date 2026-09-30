@@ -11,6 +11,10 @@ import { recomputeAccrualDocumentStatus } from "@/lib/matching";
 import { PERMISSIONS } from "@/lib/permissions";
 import { AccrualDocumentStatus } from "@prisma/client";
 import type { LineDraft } from "@/components/accrual-lines-editor";
+import type Decimal from "decimal.js";
+import { isForeign, lineAmounts, parseRate } from "@/lib/accruals/currency";
+import { normalizeCurrency } from "@/lib/currency";
+import { loadRateLookup } from "@/lib/currency-rates";
 import { enqueueProjectResultsForDocument } from "@/lib/integrations/project-results";
 
 interface DocumentHeaderInput {
@@ -24,6 +28,8 @@ interface DocumentHeaderInput {
   dueDate: Date | null;
   responsibleId: string | null;
   comment: string | null;
+  currency: string;
+  exchangeRate: Decimal | null;
 }
 
 function parseHeader(formData: FormData): DocumentHeaderInput {
@@ -54,10 +60,29 @@ function parseHeader(formData: FormData): DocumentHeaderInput {
     dueDate: dueDateRaw ? new Date(dueDateRaw) : null,
     responsibleId: responsibleIdRaw || null,
     comment: comment || null,
+    currency: normalizeCurrency(formData.get("currency")),
+    exchangeRate: null,
   };
 }
 
-function parseLines(formData: FormData) {
+/**
+ * Курс документа в валюте: из формы или курс ЦБ на дату документа (последний
+ * установленный не позже неё). Для рублёвого документа — null.
+ */
+async function resolveDocumentRate(header: DocumentHeaderInput, formData: FormData): Promise<Decimal | null> {
+  if (!isForeign(header.currency)) return null;
+  const parsed = parseRate(String(formData.get("exchangeRate") ?? ""));
+  if ("error" in parsed) throw new Error(parsed.error);
+  if (parsed.rate) return parsed.rate;
+  const rates = await loadRateLookup();
+  const rate = rates.rateOn(header.currency, header.date);
+  if (!rate || rates.missingText()) {
+    throw new Error(`Нет курса ЦБ ${header.currency} на дату документа — загрузите курсы в справочнике «Курсы валют» или укажите курс вручную`);
+  }
+  return rate;
+}
+
+function parseLines(formData: FormData, rate: Decimal | null) {
   const raw = String(formData.get("linesJson") ?? "[]");
   let drafts: LineDraft[];
   try {
@@ -74,8 +99,8 @@ function parseLines(formData: FormData) {
       projectId: l.projectId || null,
       productServiceId: l.productServiceId || null,
       pnlArticleId: l.pnlArticleId || null,
-      amount: Number(l.amount),
-      vatAmount: l.vatAmount ? Number(l.vatAmount) : null,
+      // A document in a foreign currency: amounts are entered in the currency, roubles at the document rate.
+      ...lineAmounts({ amount: Number(l.amount), vatAmount: l.vatAmount ? Number(l.vatAmount) : null }, rate),
       description: l.description || null,
     }));
 
@@ -93,7 +118,8 @@ export async function createAccrualDocumentAction(formData: FormData) {
   let lines: ReturnType<typeof parseLines>;
   try {
     header = parseHeader(formData);
-    lines = parseLines(formData);
+    header.exchangeRate = await resolveDocumentRate(header, formData);
+    lines = parseLines(formData, header.exchangeRate);
     await assertPeriodOpenForDate(header.date);
   } catch (error) {
     redirect(`/accruals/new?error=${encodeURIComponent((error as Error).message)}`);
@@ -134,7 +160,8 @@ export async function updateAccrualDocumentAction(id: string, formData: FormData
   let lines: ReturnType<typeof parseLines>;
   try {
     header = parseHeader(formData);
-    lines = parseLines(formData);
+    header.exchangeRate = await resolveDocumentRate(header, formData);
+    lines = parseLines(formData, header.exchangeRate);
     await assertPeriodOpenForDate(header.date);
   } catch (error) {
     redirect(`/accruals/${id}/edit?error=${encodeURIComponent((error as Error).message)}`);

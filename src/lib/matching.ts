@@ -3,6 +3,7 @@ import { sumMoney, toDecimal } from "./money";
 import { PaymentStatus, BankTransactionMatchStatus } from "@prisma/client";
 import { enqueueOutboxEvent } from "./integrations/outbox";
 import { enqueueProjectResultsForDocument } from "./integrations/project-results";
+import { allocationDocumentSide, allocationTransactionSide, documentTotal, isForeign } from "./accruals/currency";
 
 export function computePaymentStatus(total: number | string, allocated: number | string): PaymentStatus {
   const t = toDecimal(total);
@@ -32,8 +33,10 @@ export async function recomputeAccrualDocumentStatus(documentId: string) {
     }),
   ]);
 
-  const total = sumMoney(document.lines.map((l) => l.amount));
-  const allocated = sumMoney(allocations.map((a) => a.amount));
+  // A document in a foreign currency is paid when its currency amount is covered, whatever the rouble rate did.
+  const foreign = isForeign(document.currency);
+  const total = documentTotal(document.lines, foreign);
+  const allocated = sumMoney(allocations.map(allocationDocumentSide));
   const paymentStatus = computePaymentStatus(total.toString(), allocated.toString());
 
   await prisma.accrualDocument.update({
@@ -55,6 +58,7 @@ export async function recomputeAccrualDocumentStatus(documentId: string) {
         documentNumber: document.number,
         counterpartyId: document.counterpartyId,
         paymentStatus,
+        currency: document.currency,
         totalAmount: total.toFixed(2),
         allocatedAmount: allocated.toFixed(2),
         outstandingAmount: total.minus(allocated).toFixed(2),
@@ -78,7 +82,8 @@ export async function recomputeBankTransactionStatus(transactionId: string) {
     }),
   ]);
 
-  const allocated = sumMoney(allocations.map((a) => a.amount));
+  // In the currency of the operation's account.
+  const allocated = sumMoney(allocations.map(allocationTransactionSide));
   const matchStatus = computeMatchStatus(transaction.amount.toString(), allocated.toString());
 
   await prisma.bankTransaction.update({

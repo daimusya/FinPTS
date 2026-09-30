@@ -2,6 +2,8 @@ import { prisma } from "@/lib/db";
 import { sumMoney } from "@/lib/money";
 import Decimal from "decimal.js";
 import type { ReportFilters } from "./filters";
+import { isForeign, outstanding } from "@/lib/accruals/currency";
+import { loadRateLookup } from "@/lib/currency-rates";
 import { accrualScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
 
 export interface DebtDocument {
@@ -9,7 +11,10 @@ export interface DebtDocument {
   number: string;
   documentType: string;
   dueDate: Date | null;
+  /** Остаток в рублях; у валютного документа — по курсу ЦБ на сегодня. */
   remaining: Decimal;
+  /** Остаток в валюте документа (не рубль), иначе null. */
+  remainingInCurrency: { amount: Decimal; currency: string } | null;
   overdue: boolean;
 }
 
@@ -48,14 +53,15 @@ export async function computeDebtsReport(
   });
 
   const now = new Date();
+  const rates = await loadRateLookup();
   const receivables = new Map<string, DebtRow>();
   const payables = new Map<string, DebtRow>();
 
   for (const doc of documents) {
-    const total = sumMoney(doc.lines.map((l) => l.amount));
-    const allocated = sumMoney(doc.allocations.map((a) => a.amount));
-    const remaining = total.minus(allocated);
-    if (remaining.lessThanOrEqualTo(0)) continue;
+    const foreign = isForeign(doc.currency);
+    const left = outstanding(doc, foreign ? rates.rateOn(doc.currency, now) : null);
+    const remaining = left.rub;
+    if (left.native.lessThanOrEqualTo(0)) continue;
 
     const isOverdue = Boolean(doc.dueDate && doc.dueDate < now);
     const bucket = doc.direction === "INCOME" ? receivables : payables;
@@ -78,6 +84,7 @@ export async function computeDebtsReport(
       documentType: doc.documentType,
       dueDate: doc.dueDate,
       remaining,
+      remainingInCurrency: foreign ? { amount: left.native, currency: doc.currency } : null,
       overdue: isOverdue,
     });
     bucket.set(key, row);

@@ -17,6 +17,7 @@ import { lineNetAmount, loadInputVatRule } from "@/lib/accruals/vat";
 import { loadNonCashCharges, organizationFilter } from "./non-cash-load";
 import { accrualScopeWhere, bankTransactionScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
 import { addNative, revalueBalances, transactionCurrency } from "@/lib/currency";
+import { allocationDocumentSide, documentTotal, isForeign, realizedFx, revaluedRemaining } from "@/lib/accruals/currency";
 import { loadRateLookup } from "@/lib/currency-rates";
 
 export type ManagementBalance = AssembledBalance & {
@@ -85,7 +86,7 @@ export async function computeManagementBalance(
         cashAccount: { select: { currency: true } },
         allocations: {
           where: { cancelledAt: null, accrualDocument: { status: "POSTED" } },
-          select: { amount: true, accrualDocument: { select: { date: true } } },
+          select: { amount: true, transactionAmount: true, accrualDocument: { select: { date: true } } },
         },
         cashFlowArticle: { select: { balanceArticleId: true, balanceArticle: { select: { category: true } } } },
       },
@@ -95,7 +96,15 @@ export async function computeManagementBalance(
       where: { AND: accrualAndBase },
       include: {
         lines: { include: { pnlArticle: true } },
-        allocations: { where: { cancelledAt: null }, select: { amount: true, bankTransaction: { select: { operationDate: true } } } },
+        allocations: {
+          where: { cancelledAt: null },
+          select: {
+            amount: true,
+            currencyAmount: true,
+            transactionAmount: true,
+            bankTransaction: { select: { operationDate: true, bankAccount: { select: { currency: true } }, cashAccount: { select: { currency: true } } } },
+          },
+        },
       },
     }),
     prisma.balanceEntry.findMany({ where: entryWhere, select: { balanceArticleId: true, amount: true } }),
@@ -122,11 +131,17 @@ export async function computeManagementBalance(
       const effect = linkedFlowEffect(tx.cashFlowArticle.balanceArticle.category as BalanceCategory, tx.direction, amount);
       linkedFlows.set(linked, (linkedFlows.get(linked) ?? toDecimal(0)).plus(effect));
     }
+    // The allocated part in the roubles actually paid (the payment's own currency at its date), not at the document rate:
+    // a rate difference on a document in a foreign currency is an FX gain or loss, not an advance.
     const advance = advanceFromTransaction({
       direction: tx.direction,
       amount,
       allocated: allocatedAsOf(
-        tx.allocations.map((a) => ({ amount: toDecimal(a.amount), paymentDate: tx.operationDate, documentDate: a.accrualDocument.date })),
+        tx.allocations.map((a) => ({
+          amount: a.transactionAmount ? rates.toRub(a.transactionAmount, currency, tx.operationDate) : toDecimal(a.amount),
+          paymentDate: tx.operationDate,
+          documentDate: a.accrualDocument.date,
+        })),
         asOfDate,
       ),
       hasCounterparty: Boolean(tx.counterpartyId),
@@ -138,17 +153,37 @@ export async function computeManagementBalance(
   }
 
   const cash = revalueBalances(cashNative, asOfDate, rates);
-  const fxRevaluation = cash.minus(cashAtOperationRates);
+  let fxRevaluation = cash.minus(cashAtOperationRates);
 
   let receivable = toDecimal(0);
   let payable = toDecimal(0);
   let payrollPayable = toDecimal(0);
   for (const doc of allDocuments) {
+    const effective = doc.allocations.filter(
+      (a) => Math.max(a.bankTransaction.operationDate.getTime(), doc.date.getTime()) <= asOfDate.getTime(),
+    );
     const paid = allocatedAsOf(
       doc.allocations.map((a) => ({ amount: toDecimal(a.amount), paymentDate: a.bankTransaction.operationDate, documentDate: doc.date })),
       asOfDate,
     );
-    const remaining = sumMoney(doc.lines.map((l) => l.amount)).minus(paid);
+    let remaining = sumMoney(doc.lines.map((l) => l.amount)).minus(paid);
+    // Payments in another currency than the document's (roubles for a document in «у.е.»): the rate difference is realized.
+    const direction = doc.direction as "INCOME" | "EXPENSE";
+    for (const a of effective) {
+      if (!a.transactionAmount) continue;
+      const paymentCurrency = transactionCurrency(a.bankTransaction);
+      const paidRub = rates.toRub(a.transactionAmount, paymentCurrency, a.bankTransaction.operationDate);
+      fxRevaluation = fxRevaluation.plus(realizedFx(direction, paidRub, a.amount));
+    }
+    // A document in a foreign currency: the unpaid remainder at the rate of the report date.
+    if (isForeign(doc.currency) && doc.exchangeRate) {
+      const remainingInCurrency = documentTotal(doc.lines, true).minus(sumMoney(effective.map(allocationDocumentSide)));
+      if (!remainingInCurrency.isZero()) {
+        const revalued = revaluedRemaining(direction, remainingInCurrency, doc.exchangeRate, rates.rateOn(doc.currency, asOfDate) ?? doc.exchangeRate);
+        remaining = revalued.revalued;
+        fxRevaluation = fxRevaluation.plus(revalued.difference);
+      }
+    }
     if (remaining.isZero()) continue;
     if (doc.direction === "INCOME") receivable = receivable.plus(remaining);
     else if (doc.sourceSystem === "payroll") payrollPayable = payrollPayable.plus(remaining);

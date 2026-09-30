@@ -2,10 +2,10 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
-import { formatMoney } from "@/lib/money";
 import { roleForStep, totalSteps, type ApprovalRouteCandidate } from "@/lib/payment-requests/approval";
 import { approvePaymentRequestAction, cancelPaymentRequestAction, markPaymentRequestPaidAction } from "./actions";
 import { PAYMENT_REQUEST_STATUS_BADGE as STATUS_BADGE, PAYMENT_REQUEST_STATUS_LABELS as STATUS_LABELS } from "@/lib/payment-requests/labels";
+import { formatMoneyIn } from "@/lib/currency";
 import { isDelegationActive } from "@/lib/payment-requests/delegation";
 
 export default async function PaymentRequestsPage({
@@ -146,7 +146,7 @@ export default async function PaymentRequestsPage({
                   <td>{req.counterparty ? req.counterparty.shortName || req.counterparty.fullName : "—"}</td>
                   <td>{req.cashFlowArticle?.name ?? "—"}</td>
                   <td className="mono">
-                    {formatMoney(req.amount)}
+                    {formatMoneyIn(req.amount, req.currency)}
                     {req.parts.length > 0 ? (
                       <div className="text-muted" style={{ fontSize: 11 }}>
                         частями: оплачено {req.parts.filter((p) => p.paidAt).length} из {req.parts.length}

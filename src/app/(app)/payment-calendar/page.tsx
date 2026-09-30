@@ -23,7 +23,8 @@ import { ACCRUAL_DOCUMENT_TYPE_LABELS } from "@/lib/accruals/labels";
 import { canPlanDocuments, canPlanRequests } from "@/lib/payment-plan/service";
 import { PaymentCalendarBoard, type AccountOption, type BoardDay, type BoardItem } from "@/components/payment-calendar-board";
 import { formatMoneyIn, normalizeCurrency } from "@/lib/currency";
-import { loadRateLookup } from "@/lib/currency-rates";
+import { amountInRub, loadRateLookup } from "@/lib/currency-rates";
+import { isForeign, outstanding } from "@/lib/accruals/currency";
 import { MissingRatesWarning } from "@/components/missing-rates-warning";
 
 const MONTH_NAMES = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
@@ -160,8 +161,12 @@ export default async function PaymentCalendarPage({
       accountKey: accountKey(r.payBankAccountId, r.payCashAccountId),
     };
     const look = r.status === "APPROVED" ? "approved" : placement.movable ? "pending" : "done";
+    // A request in a foreign currency: roubles at today's rate (the forecast is in roubles).
+    const toRub = (value: { toString(): string }) =>
+      r.currency === "RUB" ? new Decimal(value.toString()) : (amountInRub(value.toString(), r.currency, rates, todayDate) ?? new Decimal(value.toString()));
+    const inCurrency = (value: { toString(): string }) => (r.currency === "RUB" ? "" : ` · ${formatMoneyIn(value.toString(), r.currency)}`);
     if (r.parts.length === 0) {
-      const amount = new Decimal(r.amount.toString());
+      const amount = toRub(r.amount);
       items.push({
         ...base,
         kind: "request",
@@ -171,7 +176,7 @@ export default async function PaymentCalendarPage({
         amount: short(amount),
         amountFull: formatMoney(amount),
         amountValue: amount,
-        subtitle: `Заявка · ${statusLabel}`,
+        subtitle: `Заявка · ${statusLabel}${inCurrency(r.amount)}`,
         look,
         counted: placement.counted,
         movable: placement.movable && planRequests,
@@ -180,7 +185,7 @@ export default async function PaymentCalendarPage({
       continue;
     }
     r.parts.forEach((part, i) => {
-      const amount = new Decimal(part.amount.toString());
+      const amount = toRub(part.amount);
       const ownAccount = accountKey(part.payBankAccountId, part.payCashAccountId);
       items.push({
         ...base,
@@ -194,7 +199,7 @@ export default async function PaymentCalendarPage({
         amount: short(amount),
         amountFull: formatMoney(amount),
         amountValue: amount,
-        subtitle: `Часть ${i + 1} из ${r.parts.length} · ${part.paidAt ? "оплачена" : statusLabel}`,
+        subtitle: `Часть ${i + 1} из ${r.parts.length} · ${part.paidAt ? "оплачена" : statusLabel}${inCurrency(part.amount)}`,
         look: part.paidAt ? "done" : look,
         counted: placement.counted && !part.paidAt,
         movable: placement.movable && planRequests && !part.paidAt,
@@ -203,8 +208,11 @@ export default async function PaymentCalendarPage({
     });
   }
   for (const doc of unpaidDocuments) {
-    const remaining = sumMoney(doc.lines.map((l) => l.amount)).minus(sumMoney(doc.allocations.map((a) => a.amount)));
-    if (remaining.lessThanOrEqualTo(0)) continue;
+    // A document in a foreign currency: the remainder at today's rate (the forecast is in roubles).
+    const foreignDoc = isForeign(doc.currency);
+    const left = outstanding(doc, foreignDoc ? rates.rateOn(doc.currency, todayDate) : null);
+    const remaining = left.rub;
+    if (left.native.lessThanOrEqualTo(0)) continue;
     const income = doc.direction === "INCOME";
     items.push({
       kind: "document",
@@ -217,7 +225,7 @@ export default async function PaymentCalendarPage({
       amountFull: formatMoney(remaining),
       amountValue: remaining,
       title: doc.counterparty.shortName || doc.counterparty.fullName,
-      subtitle: `${ACCRUAL_DOCUMENT_TYPE_LABELS[doc.documentType]} № ${doc.number} · ${income ? "к получению" : "к оплате"}${doc.paymentStatus === "PARTIALLY_PAID" ? " (остаток)" : ""}`,
+      subtitle: `${ACCRUAL_DOCUMENT_TYPE_LABELS[doc.documentType]} № ${doc.number} · ${income ? "к получению" : "к оплате"}${doc.paymentStatus === "PARTIALLY_PAID" ? " (остаток)" : ""}${foreignDoc ? ` · ${formatMoneyIn(left.native, doc.currency)}` : ""}`,
       organizationId: doc.organizationId,
       organization: doc.organization.shortName || doc.organization.name,
       article: null,
