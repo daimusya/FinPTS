@@ -100,6 +100,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/periods", label: "Периоды" },
       { href: "/admin/audit-log", label: "Журнал аудита" },
       { href: "/admin/backups", label: "Резервные копии" },
+      { href: "/admin/monitoring", label: "Мониторинг" },
     ],
   },
 ];

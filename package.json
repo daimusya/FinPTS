@@ -14,6 +14,7 @@
     "db:backup:verify": "node scripts/backup.mjs --verify-restore",
     "db:backup:decrypt": "node scripts/backup-decrypt.mjs",
     "bank:sync": "tsx --tsconfig tsconfig.json scripts/bank-sync.ts",
+    "monitor": "tsx --tsconfig tsconfig.json scripts/monitor.ts",
     "db:studio": "prisma studio"
   },
   "prisma": {

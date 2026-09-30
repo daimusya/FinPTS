@@ -2,7 +2,8 @@
  * Загрузка выписки по API банков для всех включённых подключений
  * (Интеграции → «Банки: выписка по API»). Запускается Планировщиком Windows
  * (scripts/register-bank-sync-task.ps1) или вручную: npm run bank:sync.
- * Заодно загружает сегодняшние курсы ЦБ для валютных счетов.
+ * Заодно загружает сегодняшние курсы ЦБ для валютных счетов и запускает
+ * проверки мониторинга с оповещениями администраторам (src/lib/monitoring).
  * Код выхода 2 — хотя бы по одному счёту ошибка (Планировщик покажет её).
  */
 import fs from "node:fs";
@@ -14,6 +15,7 @@ async function main() {
   const { syncAllConnections } = await import("@/lib/bank-api/sync");
   const { prisma } = await import("@/lib/db");
   const { ensureRecentRates } = await import("@/lib/currency-rates");
+  const { runMonitoring } = await import("@/lib/monitoring/alerts");
   try {
     const outcomes = await syncAllConnections();
     const stamp = new Date().toISOString();
@@ -26,6 +28,14 @@ async function main() {
       if (rates) console.log(`${stamp} [ok] ${rates}`);
     } catch (error) {
       console.error(`${stamp} [error] курсы ЦБ: ${(error as Error).message}`);
+    }
+    // Monitoring checks and alerts to administrators (in-app notifications), on the same schedule.
+    try {
+      const monitoring = await runMonitoring();
+      const bad = monitoring.checks.filter((c) => c.status !== "ok");
+      console.log(`${stamp} [${bad.length ? "warn" : "ok"}] мониторинг: ${bad.length ? bad.map((c) => `${c.title} — ${c.message}`).join("; ") : "всё в порядке"}${monitoring.notices.length ? `; оповещений ${monitoring.notices.length}` : ""}`);
+    } catch (error) {
+      console.error(`${stamp} [error] мониторинг: ${(error as Error).message}`);
     }
   } finally {
     await prisma.$disconnect();

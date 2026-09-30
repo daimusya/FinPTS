@@ -1672,3 +1672,20 @@ model CurrencyRate {
   @@unique([currency, date])
   @@map("currency_rates")
 }
+
+// Состояние оповещений мониторинга (src/lib/monitoring): по одной строке на
+// проверку, пока она не в порядке. Нужна, чтобы не слать одно и то же
+// оповещение каждые полчаса и сообщить, когда проблема ушла.
+model MonitorAlert {
+  /// Код проверки: backup, bank_api, disk…
+  key            String    @id
+  /// warn / fail
+  status         String
+  message        String
+  firstSeenAt    DateTime  @default(now())
+  lastNotifiedAt DateTime
+  /// Когда проверка снова стала в порядке (оповещение «восстановлено» отправлено).
+  resolvedAt     DateTime?
+
+  @@map("monitor_alerts")
+}
