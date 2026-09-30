@@ -1,12 +1,14 @@
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { markAllNotificationsReadAction, openNotificationAction } from "./actions";
+import { MyNotificationChannels } from "@/components/my-notification-channels";
 
 const dateTime = (d: Date) => d.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", dateStyle: "short", timeStyle: "short" });
 
-export default async function NotificationsPage() {
+export default async function NotificationsPage({ searchParams }: { searchParams: Promise<{ channelError?: string; channelNotice?: string }> }) {
   const session = await getSession();
   if (!session) return null;
+  const sp = await searchParams;
   const notifications = await prisma.notification.findMany({
     where: { userId: session.userId },
     orderBy: { createdAt: "desc" },
@@ -55,6 +57,8 @@ export default async function NotificationsPage() {
           </ul>
         )}
       </div>
+
+      <MyNotificationChannels userId={session.userId} error={sp.channelError} notice={sp.channelNotice} />
     </div>
   );
 }

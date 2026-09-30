@@ -16,6 +16,7 @@ async function main() {
   const { prisma } = await import("@/lib/db");
   const { ensureRecentRates } = await import("@/lib/currency-rates");
   const { runMonitoring } = await import("@/lib/monitoring/alerts");
+  const { deliverPendingNotifications } = await import("@/lib/notify-channels/deliver");
   try {
     const outcomes = await syncAllConnections();
     const stamp = new Date().toISOString();
@@ -28,6 +29,15 @@ async function main() {
       if (rates) console.log(`${stamp} [ok] ${rates}`);
     } catch (error) {
       console.error(`${stamp} [error] курсы ЦБ: ${(error as Error).message}`);
+    }
+    // Notifications that did not reach e-mail or Telegram right away: retried here.
+    try {
+      const delivery = await deliverPendingNotifications();
+      if (delivery.sent + delivery.pending + delivery.failed > 0) {
+        console.log(`${stamp} [${delivery.failed ? "warn" : "ok"}] доставка уведомлений: отправлено ${delivery.sent}, ждут ${delivery.pending}, не удалось ${delivery.failed}`);
+      }
+    } catch (error) {
+      console.error(`${stamp} [error] доставка уведомлений: ${(error as Error).message}`);
     }
     // Monitoring checks and alerts to administrators (in-app notifications), on the same schedule.
     try {

@@ -117,6 +117,16 @@ export function checkUnmatched(count: number): CheckResult {
     : { ...base, status: "ok", message: "Старых несопоставленных операций нет" };
 }
 
+/** Доставка уведомлений на почту и в Telegram: не ушедшие после всех попыток за сутки и застрявшие в очереди. */
+export function checkDelivery(input: { failedLastDay: number; stuck: number; lastError: string | null }): CheckResult {
+  const base = { key: "delivery", title: "Доставка уведомлений", link: "/admin/notification-channels" };
+  if (input.failedLastDay > 0) {
+    return { ...base, status: "warn", message: `За сутки не доставлено ${input.failedLastDay}${input.lastError ? `: ${input.lastError}` : ""}` };
+  }
+  if (input.stuck > 0) return { ...base, status: "warn", message: `${input.stuck} ждут отправки дольше часа` };
+  return { ...base, status: "ok", message: "Очередь пуста" };
+}
+
 /** Худшее состояние из проверок — общий итог. */
 export function overallStatus(checks: CheckResult[]): CheckStatus {
   return checks.some((c) => c.status === "fail") ? "fail" : checks.some((c) => c.status === "warn") ? "warn" : "ok";

@@ -20,6 +20,15 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  /// Дублировать уведомления на почту (адрес — email пользователя).
+  notifyEmail      Boolean @default(false)
+  /// Дублировать уведомления в Telegram (нужен привязанный чат).
+  notifyTelegram   Boolean @default(false)
+  /// Чат с ботом, куда слать уведомления; привязывается кодом со страницы «Уведомления».
+  telegramChatId   String?
+  /// Код привязки Telegram, который пользователь отправляет боту.
+  telegramLinkCode String?
+
   roles              UserRole[]
   orgAccess          UserOrganizationAccess[]
   departmentAccess   UserDepartmentAccess[]
@@ -56,9 +65,19 @@ model Notification {
   readAt    DateTime?
   createdAt DateTime  @default(now())
 
+  /// Доставка на почту и в Telegram: null — никуда не нужно; pending — ждёт; sent — отправлено; failed — не удалось после повторов.
+  deliveryState    String?
+  deliveryAttempts Int       @default(0)
+  deliveryError    String?
+  deliveredAt      DateTime?
+  /// Когда ушло письмо и сообщение в Telegram — при повторе после частичного сбоя уже доставленное не дублируется.
+  emailSentAt      DateTime?
+  telegramSentAt   DateTime?
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt])
+  @@index([deliveryState])
   @@map("notifications")
 }
 

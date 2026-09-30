@@ -8,6 +8,7 @@ import { localDateKey } from "@/lib/payment-calendar";
 import {
   checkBackup,
   checkBankApi,
+  checkDelivery,
   checkCurrencyRates,
   checkDatabase,
   checkDisk,
@@ -51,7 +52,7 @@ export async function runChecks(now: Date = new Date()): Promise<CheckResult[]> 
   const todayKey = localDateKey(now);
   const today = new Date(`${todayKey}T00:00:00Z`);
   const previous = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
-  const [backup, connections, currencies, disk, closedCount, previousPeriod, overdue, stuck, unmatched] = await Promise.all([
+  const [backup, connections, currencies, disk, closedCount, previousPeriod, overdue, stuck, unmatched, failedDelivery, stuckDelivery] = await Promise.all([
     loadBackupFreshness(now),
     prisma.bankConnection.findMany({ where: { isActive: true }, include: { bankAccount: true } }),
     accountCurrencies(),
@@ -61,6 +62,12 @@ export async function runChecks(now: Date = new Date()): Promise<CheckResult[]> 
     prisma.paymentRequest.findMany({ where: { status: "APPROVED", dueDate: { lt: today } }, select: { amount: true } }),
     prisma.paymentRequest.count({ where: { status: "PENDING_APPROVAL", updatedAt: { lt: new Date(now.getTime() - 3 * DAY) } } }),
     prisma.bankTransaction.count({ where: { matchStatus: "UNMATCHED", isTransfer: false, operationDate: { lt: new Date(today.getTime() - 14 * DAY) } } }),
+    prisma.notification.findMany({
+      where: { deliveryState: "failed", createdAt: { gte: new Date(now.getTime() - DAY) } },
+      select: { deliveryError: true },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.notification.count({ where: { deliveryState: "pending", createdAt: { lt: new Date(now.getTime() - DAY / 24) } } }),
   ]);
   const latestRates = await Promise.all(
     currencies.map(async (currency) => ({
@@ -91,6 +98,7 @@ export async function runChecks(now: Date = new Date()): Promise<CheckResult[]> 
     }),
     checkPayments({ overdue: overdue.length, overdueSum: formatMoney(sumMoney(overdue.map((r) => r.amount))), stuck }),
     checkUnmatched(unmatched),
+    checkDelivery({ failedLastDay: failedDelivery.length, stuck: stuckDelivery, lastError: failedDelivery[0]?.deliveryError ?? null }),
   ];
 }
 
