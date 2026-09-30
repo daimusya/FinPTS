@@ -6,6 +6,7 @@ import type { Prisma } from "@prisma/client";
 import { bankTransactionScopeWhere, getAccessScope } from "@/lib/access-scope";
 import { deleteBankTransactionsAction } from "../actions";
 import { formatMoneyIn, transactionCurrency } from "@/lib/currency";
+import { OperationsWithoutCounterparty } from "@/components/registry-by-inn";
 import { SelectAllCheckbox } from "@/components/select-all-checkbox";
 
 const BULK_FORM = "bulk-delete";
@@ -115,6 +116,7 @@ export default async function CashTransactionsPage({
 
       {notice ? <p className="form-success" style={{ marginBottom: 14 }}>{notice}</p> : null}
       {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
+      {canManage && hasPermission(session, PERMISSIONS.MASTERDATA_MANAGE) ? <OperationsWithoutCounterparty returnTo={returnTo} /> : null}
 
       <form className="filter-bar">
         <label className="field">

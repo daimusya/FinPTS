@@ -5,6 +5,7 @@ import { recomputeAccrualDocumentStatus } from "@/lib/matching";
 import { ONEC_REQUIRED_TARGETS, type OnecColumnMapping } from "./onec-mapping";
 import { describeRows, groupOnecRows, type OnecDocumentGroup, type OnecLine } from "./onec-grouping";
 import { AccrualDocumentStatus } from "@prisma/client";
+import { ensureCounterpartyByInn, isAutoCreateEnabled } from "./inn-service";
 import { enqueueProjectResultsForDocument } from "./project-results";
 
 export interface OnecImportResult {
@@ -69,6 +70,11 @@ async function importDocument(doc: OnecDocumentGroup, batchId: string): Promise<
   if (!organization) throw new Error(`организация с ИНН «${h.organizationInn}» не найдена в платформе`);
 
   let counterparty = await prisma.counterparty.findFirst({ where: { inn: h.counterpartyInn! } });
+  // With automatic creation switched on, a new counterparty gets its requisites from the registry.
+  if (!counterparty && (await isAutoCreateEnabled())) {
+    const outcome = await ensureCounterpartyByInn(h.counterpartyInn!);
+    if (outcome.id) counterparty = await prisma.counterparty.findUnique({ where: { id: outcome.id } });
+  }
   if (!counterparty) {
     counterparty = await prisma.counterparty.create({
       data: {

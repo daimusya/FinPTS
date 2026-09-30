@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import { toDecimal } from "@/lib/money";
 import { computeStatementFingerprints } from "./fingerprint";
 import { classifyTransaction, type ClassificationRuleInput } from "./classification";
+import { ensureCounterpartyByInn, isAutoCreateEnabled } from "@/lib/integrations/inn-service";
+import { validateInn } from "@/lib/integrations/inn";
 
 /** Операция выписки, готовая к записи: из файла или из API банка. */
 export interface StatementOperation {
@@ -22,6 +24,8 @@ export interface StatementImportResult {
   autoClassified: number;
   /** Сколько одинаковых операций (одна дата, сумма и назначение) загружено как разные. */
   repeatedImported: number;
+  /** Контрагентов создано по ИНН из реестра (если включено автосоздание). */
+  counterpartiesCreated: number;
 }
 
 /**
@@ -86,6 +90,9 @@ export async function importStatementOperations(params: {
   let autoClassified = 0;
   let repeatedImported = 0;
   const counterparties = new Map<string, string | null>();
+  // New INNs become counterparties from the registry when that is switched on (Integrations → INN lookup).
+  const autoCreate = await isAutoCreateEnabled();
+  let counterpartiesCreated = 0;
   for (const [i, op] of operations.entries()) {
     const { fingerprint, occurrence } = fingerprints[i];
     if (await prisma.bankTransaction.findUnique({ where: { fingerprint } })) {
@@ -97,7 +104,16 @@ export async function importStatementOperations(params: {
     let counterpartyId: string | null = null;
     if (op.counterpartyInn) {
       if (!counterparties.has(op.counterpartyInn)) {
-        counterparties.set(op.counterpartyInn, (await prisma.counterparty.findFirst({ where: { inn: op.counterpartyInn } }))?.id ?? null);
+        let found = (await prisma.counterparty.findFirst({ where: { inn: op.counterpartyInn } }))?.id ?? null;
+        if (!found && autoCreate && !validateInn(op.counterpartyInn)) {
+          // An INN missing from the registry (a private person) or a service error just leaves the operation without one.
+          const outcome = await ensureCounterpartyByInn(op.counterpartyInn);
+          if (outcome.id) {
+            found = outcome.id;
+            if (outcome.created) counterpartiesCreated += 1;
+          }
+        }
+        counterparties.set(op.counterpartyInn, found);
       }
       counterpartyId = counterparties.get(op.counterpartyInn) ?? null;
     }
@@ -135,5 +151,5 @@ export async function importStatementOperations(params: {
     where: { id: batch.id },
     data: { importedRows: imported, duplicateRows: duplicates, errorRows: params.errorRows ?? 0 },
   });
-  return { batchId: batch.id, imported, duplicates, autoClassified, repeatedImported };
+  return { batchId: batch.id, imported, duplicates, autoClassified, repeatedImported, counterpartiesCreated };
 }

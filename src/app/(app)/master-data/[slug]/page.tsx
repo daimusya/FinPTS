@@ -5,6 +5,7 @@ import { DICTIONARY_REGISTRY, getDictionaryConfig } from "@/lib/dictionaries/reg
 import { archiveDictionaryItem, restoreDictionaryItem } from "../actions";
 import { CounterpartyCreateByInn } from "@/components/counterparty-inn";
 import { CurrencyRatesLoader } from "@/components/currency-rates-loader";
+import { CounterpartyEnrich, OrganizationCreateByInn } from "@/components/registry-by-inn";
 
 function formatCell(value: unknown): string {
   if (value === null || value === undefined) return "—";
@@ -106,6 +107,8 @@ export default async function DictionaryListPage({
       </div>
 
       {slug === "counterparties" && canManage ? <CounterpartyCreateByInn error={innError} /> : null}
+      {slug === "counterparties" && canManage ? <CounterpartyEnrich /> : null}
+      {slug === "organizations" && canManage ? <OrganizationCreateByInn error={innError} /> : null}
       {slug === "currency-rates" && canManage ? <CurrencyRatesLoader error={ratesError} /> : null}
       {config.listLimit && items.length >= config.listLimit ? (
         <p className="text-muted" style={{ fontSize: 12 }}>

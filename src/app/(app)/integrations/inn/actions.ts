@@ -21,15 +21,16 @@ export async function saveInnLookupSettingsAction(formData: FormData) {
     newKey = (normalized as { key: string }).key;
   }
   const isEnabled = formData.get("isEnabled") === "on";
+  const autoCreate = formData.get("autoCreate") === "on";
   const existing = await prisma.integrationProfile.findFirst({ where: { system: INN_PROFILE_SYSTEM } });
   // Empty field = keep the stored key (the form only shows a mask, never the key itself).
   const apiKeyEnc = newKey ? encryptSecret(newKey) : (existing?.config as { apiKeyEnc?: string } | null)?.apiKeyEnc;
   if (isEnabled && !apiKeyEnc) redirect(`/integrations/inn?error=${encodeURIComponent("Укажите ключ API перед включением")}`);
 
   const profile = existing
-    ? await prisma.integrationProfile.update({ where: { id: existing.id }, data: { isEnabled, config: { apiKeyEnc } } })
+    ? await prisma.integrationProfile.update({ where: { id: existing.id }, data: { isEnabled, config: { apiKeyEnc, autoCreate } } })
     : await prisma.integrationProfile.create({
-        data: { system: INN_PROFILE_SYSTEM, name: "DaData — реквизиты по ИНН", isEnabled, config: { apiKeyEnc } },
+        data: { system: INN_PROFILE_SYSTEM, name: "DaData — реквизиты по ИНН", isEnabled, config: { apiKeyEnc, autoCreate } },
       });
 
   await logAudit({
@@ -37,7 +38,7 @@ export async function saveInnLookupSettingsAction(formData: FormData) {
     entityType: "integration_profile",
     entityId: profile.id,
     action: "update",
-    after: { system: INN_PROFILE_SYSTEM, isEnabled, hasKey: Boolean(apiKeyEnc), keyChanged: Boolean(newKey) } as never,
+    after: { system: INN_PROFILE_SYSTEM, isEnabled, autoCreate, hasKey: Boolean(apiKeyEnc), keyChanged: Boolean(newKey) } as never,
   });
 
   revalidatePath("/integrations/inn");

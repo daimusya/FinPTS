@@ -89,7 +89,7 @@ export async function syncConnection(connectionId: string, options: { http?: Htt
           entityType: "bank_import_batch",
           entityId: saved.batchId,
           action: "import_api",
-          after: { provider, from: window.from, to: window.to, imported: saved.imported, duplicates: saved.duplicates, autoClassified: saved.autoClassified } as never,
+          after: { provider, from: window.from, to: window.to, imported: saved.imported, duplicates: saved.duplicates, autoClassified: saved.autoClassified, counterpartiesCreated: saved.counterpartiesCreated } as never,
         });
       }
     }

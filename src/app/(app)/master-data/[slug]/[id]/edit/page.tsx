@@ -6,6 +6,7 @@ import { DictionaryFormFields, resolveFieldDefault, type ResolvedField } from "@
 import { updateDictionaryItem } from "../../../actions";
 import { CounterpartyDetails } from "@/components/counterparty-details";
 import { CounterpartyInnCard } from "@/components/counterparty-inn";
+import { OrganizationInnCard } from "@/components/registry-by-inn";
 import { OrganizationTaxes } from "@/components/organization-taxes";
 
 export default async function EditDictionaryItemPage({
@@ -89,6 +90,7 @@ export default async function EditDictionaryItemPage({
         />
       ) : null}
       {slug === "counterparties" ? <CounterpartyInnCard counterpartyId={id} /> : null}
+      {slug === "organizations" ? <OrganizationInnCard organizationId={id} /> : null}
       {slug === "counterparties" ? <CounterpartyDetails
           counterpartyId={id}
           state={{

@@ -181,6 +181,9 @@ model Organization {
   /// Регистрация и прекращение деятельности: взносы ИП за неполный год, начало и конец начислений в прогнозе.
   registrationDate DateTime?     @db.Date
   closureDate      DateTime?     @db.Date
+  /// Откуда реквизиты: DADATA — заполнены по ИНН из ЕГРЮЛ/ЕГРИП; null — вручную.
+  dataSource       String?
+  dataUpdatedAt    DateTime?
   isArchived    Boolean          @default(false)
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt

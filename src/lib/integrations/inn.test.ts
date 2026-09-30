@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DADATA_FIND_PARTY_URL, lookupPartyByInn, mapDadataParty, normalizeApiKey, validateInn } from "./inn";
+import { DADATA_FIND_PARTY_URL, lookupPartyByInn, mapDadataParty, normalizeApiKey, validateInn, dadataDate } from "./inn";
 
 describe("normalizeApiKey", () => {
   const key = "0123456789abcdef0123456789abcdef01234567";
@@ -63,7 +63,17 @@ describe("mapDadataParty", () => {
       director: "Греф Герман Оскарович (президент, председатель правления)",
       status: "Действует",
       type: "LEGAL_ENTITY",
+      registrationDate: null,
+      liquidationDate: null,
     });
+  });
+
+  it("reads registration and liquidation dates given as Moscow midnight", () => {
+    // 20.06.1991 00:00 MSK = 19.06.1991 21:00 UTC
+    const r = mapDadataParty({ ...legal, state: { status: "LIQUIDATED", registration_date: 677365200000, liquidation_date: 1735678800000 } }, "7707083893");
+    expect(r.registrationDate?.toISOString()).toBe("1991-06-20T00:00:00.000Z");
+    expect(r.liquidationDate?.toISOString()).toBe("2025-01-01T00:00:00.000Z");
+    expect(dadataDate(null)).toBeNull();
   });
 
   it("maps a sole proprietor without KPP or management", () => {
@@ -116,5 +126,20 @@ describe("lookupPartyByInn", () => {
       found: false,
       error: expect.stringContaining("недоступен"),
     });
+  });
+
+  it("retries once, and explains a timeout in plain words", async () => {
+    const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+    const slow = vi.fn().mockRejectedValue(timeout);
+    expect(await lookupPartyByInn("7707083893", KEY, slow as unknown as typeof fetch)).toEqual({
+      found: false,
+      error: "Сервис DaData недоступен: не ответил за 10 секунд — повторите позже",
+    });
+    expect(slow).toHaveBeenCalledTimes(2);
+    const flaky = vi
+      .fn()
+      .mockRejectedValueOnce(timeout)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ suggestions: [{ data: legal }] }), { status: 200 }));
+    expect(await lookupPartyByInn("7707083893", KEY, flaky as unknown as typeof fetch)).toMatchObject({ found: true });
   });
 });

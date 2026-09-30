@@ -15,7 +15,12 @@ const FIELD_LABELS: Array<[keyof import("@/lib/integrations/inn").PartyRequisite
   ["legalAddress", "Юридический адрес"],
   ["director", "Руководитель"],
   ["status", "Статус"],
+  ["registrationDate", "Дата регистрации"],
+  ["liquidationDate", "Дата прекращения деятельности"],
 ];
+
+const showValue = (value: string | Date | null) =>
+  value instanceof Date ? value.toLocaleDateString("ru-RU", { timeZone: "UTC" }) : (value ?? "—");
 
 export default async function InnLookupSettingsPage({
   searchParams,
@@ -32,7 +37,8 @@ export default async function InnLookupSettingsPage({
   }
   const sp = await searchParams;
   const profile = await prisma.integrationProfile.findFirst({ where: { system: INN_PROFILE_SYSTEM } });
-  const apiKeyEnc = (profile?.config as { apiKeyEnc?: string } | null)?.apiKeyEnc;
+  const config = (profile?.config ?? {}) as { apiKeyEnc?: string; autoCreate?: boolean };
+  const apiKeyEnc = config.apiKeyEnc;
   const keyMasked = apiKeyEnc ? maskSecret(decryptSecret(apiKeyEnc)) : null;
   const test = sp.testInn ? await lookupRequisitesByInn(sp.testInn) : null;
 
@@ -77,6 +83,17 @@ export default async function InnLookupSettingsPage({
             <input type="checkbox" name="isEnabled" defaultChecked={profile?.isEnabled ?? false} />
             Поиск по ИНН включён (без ключа включить нельзя)
           </label>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 10, fontSize: 13 }}>
+            <input type="checkbox" name="autoCreate" id="inn-auto-create" defaultChecked={config.autoCreate ?? false} style={{ marginTop: 3 }} />
+            <span>
+              Создавать контрагентов по ИНН автоматически
+              <span className="text-muted" style={{ display: "block", fontSize: 12 }}>
+                При загрузке выписки (из файла и по API банков) и документов 1С контрагент с новым ИНН создаётся с реквизитами
+                из ЕГРЮЛ/ЕГРИП и сразу привязывается. ИНН, которых нет в реестре (например, физлиц), пропускаются. Выключено —
+                контрагентов можно создать кнопкой в списке операций банка.
+              </span>
+            </span>
+          </label>
           <div className="form-actions">
             <button type="submit" className="btn btn-primary">
               Сохранить
@@ -103,7 +120,7 @@ export default async function InnLookupSettingsPage({
                 {FIELD_LABELS.map(([key, label]) => (
                   <tr key={key}>
                     <td className="text-muted">{label}</td>
-                    <td>{test.requisites[key] ?? "—"}</td>
+                    <td>{showValue(test.requisites[key])}</td>
                   </tr>
                 ))}
               </tbody>

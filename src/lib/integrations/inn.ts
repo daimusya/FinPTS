@@ -25,6 +25,10 @@ export interface PartyRequisites {
   /** Статус по ЕГРЮЛ/ЕГРИП по-русски: «Действует», «Ликвидирована» и т.д. */
   status: string | null;
   type: "LEGAL_ENTITY" | "SOLE_PROPRIETOR";
+  /** Дата регистрации по реестру (для организаций — начало деятельности). */
+  registrationDate: Date | null;
+  /** Дата ликвидации или прекращения деятельности ИП; null — действует. */
+  liquidationDate: Date | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -44,7 +48,17 @@ interface DadataParty {
   name?: { full_with_opf?: string | null; short_with_opf?: string | null } | null;
   address?: { unrestricted_value?: string | null; value?: string | null } | null;
   management?: { name?: string | null; post?: string | null } | null;
-  state?: { status?: string | null } | null;
+  state?: { status?: string | null; registration_date?: number | null; liquidation_date?: number | null } | null;
+}
+
+/**
+ * Дата из DaData — миллисекунды на полночь по Москве (UTC+3), то есть 21:00
+ * предыдущего дня по UTC. Храним календарную дату (полночь UTC того же дня).
+ */
+export function dadataDate(ms: number | null | undefined): Date | null {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return null;
+  const moscow = new Date(ms + 3 * 3_600_000);
+  return new Date(Date.UTC(moscow.getUTCFullYear(), moscow.getUTCMonth(), moscow.getUTCDate()));
 }
 
 /** Переводит карточку организации или ИП из ответа DaData в наши поля контрагента. */
@@ -63,6 +77,8 @@ export function mapDadataParty(data: DadataParty, fallbackInn: string): PartyReq
     director: management,
     status: data.state?.status ? (STATUS_LABELS[data.state.status] ?? data.state.status) : null,
     type: data.type === "INDIVIDUAL" ? "SOLE_PROPRIETOR" : "LEGAL_ENTITY",
+    registrationDate: dadataDate(data.state?.registration_date),
+    liquidationDate: dadataDate(data.state?.liquidation_date),
   };
 }
 
@@ -100,17 +116,29 @@ export async function lookupPartyByInn(inn: string, apiKey: string, fetchImpl: t
   if (invalid) return { found: false, error: invalid };
   const normalized = normalizeApiKey(apiKey);
   if ("error" in normalized) return { found: false, error: `${normalized.error} (раздел «Реквизиты по ИНН»)` };
-  let response: Response;
-  try {
-    response = await fetchImpl(DADATA_FIND_PARTY_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Token ${normalized.key}` },
-      body: JSON.stringify({ query: inn.replace(/\s/g, ""), branch_type: "MAIN", count: 1 }),
-      signal: AbortSignal.timeout(10000),
-    });
-  } catch (error) {
-    return { found: false, error: `Сервис DaData недоступен: ${error instanceof Error ? error.message : "ошибка сети"}` };
+  let response: Response | null = null;
+  // One retry: a single network hiccup or a slow answer should not stop a batch of lookups.
+  for (let attempt = 0; attempt < 2 && !response; attempt++) {
+    try {
+      response = await fetchImpl(DADATA_FIND_PARTY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Token ${normalized.key}` },
+        body: JSON.stringify({ query: inn.replace(/\s/g, ""), branch_type: "MAIN", count: 1 }),
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (error) {
+      if (attempt === 1) {
+        const timeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+        return {
+          found: false,
+          error: timeout
+            ? "Сервис DaData недоступен: не ответил за 10 секунд — повторите позже"
+            : `Сервис DaData недоступен: ${error instanceof Error ? error.message : "ошибка сети"}`,
+        };
+      }
+    }
   }
+  if (!response) return { found: false, error: "Сервис DaData недоступен — повторите позже" };
   if (response.status === 401 || response.status === 403) {
     return { found: false, error: "DaData отклонил ключ — проверьте ключ API в настройках «Реквизиты по ИНН»" };
   }

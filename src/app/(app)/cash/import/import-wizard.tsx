@@ -43,6 +43,7 @@ export function ImportWizard({ bankAccounts }: { bankAccounts: FieldOption[] }) 
         <p className="form-success">
           Импорт завершён: загружено {importState.imported}, дубликатов пропущено {importState.duplicates}, ошибок{" "}
           {importState.errors}. Автоклассифицировано по правилам: {importState.autoClassified ?? 0}.
+          {importState.counterpartiesCreated ? ` Новых контрагентов по ИНН из ЕГРЮЛ/ЕГРИП: ${importState.counterpartiesCreated}.` : ""}
         </p>
         {importState.repeatedImported ? (
           <p className="text-muted" style={{ marginTop: 8 }}>
