@@ -24,6 +24,7 @@ import type { Prisma } from "@prisma/client";
 import { allocationTransactionSide, planAllocation, type AllocationAmounts } from "@/lib/accruals/currency";
 import { normalizeCurrency } from "@/lib/currency";
 import { loadRateLookup } from "@/lib/currency-rates";
+import { checkAllocation } from "@/lib/cash/allocation";
 import crypto from "node:crypto";
 
 export async function createBankTransactionAction(formData: FormData) {
@@ -496,23 +497,34 @@ export async function allocatePaymentAction(transactionId: string, formData: For
   const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
 
   const accrualDocumentId = String(formData.get("accrualDocumentId") ?? "");
-  const amountRaw = String(formData.get("amount") ?? "");
-  if (!accrualDocumentId || !amountRaw || Number(amountRaw) <= 0) {
-    redirect(`/cash/transactions/${transactionId}?error=${encodeURIComponent("Выберите документ и укажите сумму сопоставления")}`);
+  const amountRaw = String(formData.get("amount") ?? "").replace(/\s/g, "").replace(",", ".");
+  const back = (message: string): never => redirect(`/cash/transactions/${transactionId}?error=${encodeURIComponent(message)}`);
+  if (!accrualDocumentId || !/^\d+(\.\d{1,2})?$/.test(amountRaw) || Number(amountRaw) <= 0) {
+    back("Выберите документ и укажите сумму сопоставления (не больше двух знаков после запятой)");
   }
 
-  const document = await prisma.accrualDocument.findUniqueOrThrow({ where: { id: accrualDocumentId } });
-  await assertPeriodOpenForDate(document.date).catch((e) => {
-    redirect(`/cash/transactions/${transactionId}?error=${encodeURIComponent((e as Error).message)}`);
+  const document = await prisma.accrualDocument.findUnique({ where: { id: accrualDocumentId } });
+  if (!document) back("Документ не найден");
+  // The operation must be visible to this user, like on its page.
+  const { tx: transaction } = await loadTransactionWithPair(session, transactionId);
+  const problem = checkAllocation({
+    transactionDirection: transaction.direction,
+    isTransfer: transaction.isTransfer,
+    documentDirection: document!.direction,
+    documentStatus: document!.status,
+    entered: amountRaw,
+    transactionAmount: transaction.amount,
+    alreadyAllocated: allocatedSum(transaction),
   });
-
+  if (problem) back(problem);
+  // The allocation takes effect on the later of the two dates: that month must be open (and the document's month).
+  const effective = transaction.operationDate > document!.date ? transaction.operationDate : document!.date;
+  for (const date of [document!.date, effective]) {
+    await assertPeriodOpenForDate(date).catch((e) => back((e as Error).message));
+  }
   // Currencies of the payment and of the document: a rouble payment of a document in «у.е.» is converted at the payment day rate.
-  const transaction = await prisma.bankTransaction.findUniqueOrThrow({
-    where: { id: transactionId },
-    include: { bankAccount: { select: { currency: true } }, cashAccount: { select: { currency: true } } },
-  });
-  const transactionCurrency = normalizeCurrency(transaction.bankAccount?.currency ?? transaction.cashAccount?.currency);
-  const documentCurrency = normalizeCurrency(document.currency);
+  const transactionCurrency = await accountCurrency(transaction.bankAccountId, transaction.cashAccountId);
+  const documentCurrency = normalizeCurrency(document!.currency);
   const foreignCurrency = transactionCurrency !== "RUB" ? transactionCurrency : documentCurrency;
   let paymentDayRate = null;
   if (transactionCurrency !== documentCurrency) {
@@ -525,7 +537,7 @@ export async function allocatePaymentAction(transactionId: string, formData: For
     entered: amountRaw.replace(",", "."),
     transactionCurrency,
     documentCurrency,
-    documentRate: document.exchangeRate,
+    documentRate: document!.exchangeRate,
     paymentDayRate,
   });
   if ("error" in planned) redirect(`/cash/transactions/${transactionId}?error=${encodeURIComponent(planned.error)}`);
