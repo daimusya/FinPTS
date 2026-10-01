@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { checkAllocation } from "./allocation";
+import { formatMoneyIn } from "@/lib/currency";
 
 const base = {
   transactionDirection: "INFLOW" as const,
@@ -20,7 +21,7 @@ describe("checkAllocation", () => {
 
   it("refuses more than the operation still has", () => {
     expect(checkAllocation({ ...base, entered: "400.01" })).toBe(
-      "Сумма больше несопоставленного остатка операции (400.00) — нельзя сопоставить больше, чем прошло по счёту",
+      `Сумма больше несопоставленного остатка операции (${formatMoneyIn(400, "RUB")}) — нельзя сопоставить больше, чем прошло по счёту`,
     );
   });
 

@@ -1,5 +1,6 @@
 import Decimal from "decimal.js";
 import { toDecimal, type MoneyInput } from "@/lib/money";
+import { formatMoneyIn } from "@/lib/currency";
 
 /**
  * Проверка сопоставления оплаты с документом на сервере (форма предлагает
@@ -19,6 +20,8 @@ export function checkAllocation(input: {
   entered: MoneyInput;
   transactionAmount: MoneyInput;
   alreadyAllocated: MoneyInput;
+  /** Валюта счёта операции — для суммы в сообщении. */
+  currency?: string;
 }): string | null {
   if (input.isTransfer) return "Перевод между собственными счетами — не оплата, сопоставлять его с документами нельзя";
   if (input.documentStatus !== "POSTED") return "Сопоставлять оплату можно только с проведённым документом";
@@ -31,7 +34,7 @@ export function checkAllocation(input: {
   const remaining = toDecimal(input.transactionAmount).minus(toDecimal(input.alreadyAllocated));
   const entered = toDecimal(input.entered);
   if (entered.greaterThan(remaining)) {
-    return `Сумма больше несопоставленного остатка операции (${remaining.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toFixed(2)}) — нельзя сопоставить больше, чем прошло по счёту`;
+    return `Сумма больше несопоставленного остатка операции (${formatMoneyIn(remaining.toDecimalPlaces(2, Decimal.ROUND_HALF_UP), input.currency ?? "RUB")}) — нельзя сопоставить больше, чем прошло по счёту`;
   }
   return null;
 }

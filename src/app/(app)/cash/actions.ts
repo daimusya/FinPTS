@@ -515,6 +515,7 @@ export async function allocatePaymentAction(transactionId: string, formData: For
     entered: amountRaw,
     transactionAmount: transaction.amount,
     alreadyAllocated: allocatedSum(transaction),
+    currency: await accountCurrency(transaction.bankAccountId, transaction.cashAccountId),
   });
   if (problem) back(problem);
   // The allocation takes effect on the later of the two dates: that month must be open (and the document's month).
