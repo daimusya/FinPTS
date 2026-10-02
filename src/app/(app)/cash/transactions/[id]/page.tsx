@@ -6,6 +6,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { ACCRUAL_DOCUMENT_TYPE_LABELS } from "@/lib/accruals/labels";
 import { formatMoneyIn, normalizeCurrency, transactionCurrency } from "@/lib/currency";
 import { allocationDocumentSide, allocationTransactionSide, documentTotal, isForeign } from "@/lib/accruals/currency";
+import { isVisible } from "@/lib/access-guard";
 import {
   allocatePaymentAction,
   updateTransactionClassificationAction,
@@ -51,6 +52,7 @@ export default async function CashTransactionDetailPage({
     },
   });
   if (!tx) notFound();
+  if (!(await isVisible(session, "transaction", id))) notFound();
 
   const linkedTransfer = tx.transferGroupId
     ? await prisma.bankTransaction.findFirst({

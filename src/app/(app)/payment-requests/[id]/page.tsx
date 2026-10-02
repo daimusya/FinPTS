@@ -33,6 +33,7 @@ import { PrimaryContact } from "@/components/primary-contact";
 import { CURRENCY_OPTIONS, formatMoneyIn } from "@/lib/currency";
 import { amountInRub, loadRateLookup } from "@/lib/currency-rates";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
+import { isVisible } from "@/lib/access-guard";
 import { currentDeciders } from "@/lib/payment-requests/notify";
 
 const STATE_LABELS: Record<TimelineState, string> = {
@@ -86,6 +87,7 @@ export default async function PaymentRequestPage({
     },
   });
   if (!request) notFound();
+  if (!(await isVisible(session, "request", id))) notFound();
 
   const isAdmin = hasPermission(session, PERMISSIONS.ADMIN_FULL);
   const canApprove = hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE);

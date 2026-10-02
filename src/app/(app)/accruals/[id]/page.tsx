@@ -18,6 +18,7 @@ import { accountKey, localDateKey, showDueDate } from "@/lib/payment-calendar";
 import { PrimaryContact } from "@/components/primary-contact";
 import { allocationDocumentSide, documentTotal, isForeign } from "@/lib/accruals/currency";
 import { formatMoneyIn } from "@/lib/currency";
+import { isVisible } from "@/lib/access-guard";
 import { canPlanDocuments } from "@/lib/payment-plan/service";
 
 export default async function AccrualDocumentPage({
@@ -55,6 +56,7 @@ export default async function AccrualDocumentPage({
     },
   });
   if (!doc) notFound();
+  if (!(await isVisible(session, "accrual", id))) notFound();
 
   const canPlan = canPlanDocuments(session) && doc.status !== "CANCELLED" && doc.paymentStatus !== "PAID" && doc.paymentStatus !== "OVERPAID";
   const [orgBankAccounts, orgCashAccounts] = canPlan

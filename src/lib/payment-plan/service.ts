@@ -7,6 +7,7 @@ import { logAudit } from "@/lib/audit";
 import { formatMoneyIn } from "@/lib/currency";
 import { compareDueTime, localDateKey, parseAccountKey, parseDueTime, parseRescheduleDate, requestPlacement, showDueDate } from "@/lib/payment-calendar";
 import { PAYMENT_REQUEST_STATUS_LABELS } from "@/lib/payment-requests/labels";
+import { isVisible, NOT_VISIBLE } from "@/lib/access-guard";
 import { scheduleSummary, validateSchedule, type ScheduleRowInput } from "@/lib/payment-requests/parts";
 
 /**
@@ -86,6 +87,7 @@ export async function rescheduleRequest(
   timeRaw?: unknown,
 ): Promise<PlanResult> {
   if (!canPlanRequests(session)) return fail("Переносить срок оплаты могут согласующие заявки и те, кто ведёт банк и кассу");
+  if (!(await isVisible(session, "request", id))) return fail(NOT_VISIBLE);
   const loaded = await loadMovableRequest(id);
   if ("error" in loaded) return fail(loaded.error!);
   const { request } = loaded;
@@ -140,6 +142,7 @@ export async function reschedulePart(
   if (!canPlanRequests(session)) return fail("Переносить срок оплаты могут согласующие заявки и те, кто ведёт банк и кассу");
   const part = await prisma.paymentRequestPart.findUnique({ where: { id: partId }, include: { paymentRequest: { select: { currency: true } } } });
   if (!part) return fail("Часть оплаты не найдена");
+  if (!(await isVisible(session, "request", part.paymentRequestId))) return fail(NOT_VISIBLE);
   if (part.paidAt) return fail("Эта часть уже оплачена");
   const parsed = parseNewDue(dateRaw, timeRaw, part.dueTime);
   if ("error" in parsed) return fail(parsed.error);
@@ -200,6 +203,7 @@ export async function rescheduleDocument(
   timeRaw?: unknown,
 ): Promise<PlanResult> {
   if (!canPlanDocuments(session)) return fail("Переносить срок оплаты документа могут те, кто ведёт начисления или деньги");
+  if (!(await isVisible(session, "accrual", id))) return fail(NOT_VISIBLE);
   const doc = await prisma.accrualDocument.findUnique({ where: { id } });
   if (!doc) return fail("Документ не найден");
   const parsed = parseNewDue(dateRaw, timeRaw, doc.dueTime);
@@ -259,6 +263,7 @@ export async function assignPaymentAccount(session: SessionPayload, kind: PlanIt
   let requestId: string | null = null;
   if (kind === "document") {
     if (!canPlanDocuments(session)) return fail("Назначать счёт оплаты документа могут те, кто ведёт начисления или деньги");
+    if (!(await isVisible(session, "accrual", id))) return fail(NOT_VISIBLE);
     const doc = await prisma.accrualDocument.findUnique({ where: { id } });
     if (!doc || doc.status === "CANCELLED") return fail("Документ не найден или отменён");
     organizationId = doc.organizationId;
@@ -267,6 +272,7 @@ export async function assignPaymentAccount(session: SessionPayload, kind: PlanIt
     const part = kind === "part" ? await prisma.paymentRequestPart.findUnique({ where: { id } }) : null;
     if (kind === "part" && (!part || part.paidAt)) return fail(part ? "Эта часть уже оплачена" : "Часть оплаты не найдена");
     requestId = kind === "part" ? part!.paymentRequestId : id;
+    if (!requestId || !(await isVisible(session, "request", requestId))) return fail(NOT_VISIBLE);
     const request = requestId ? await prisma.paymentRequest.findUnique({ where: { id: requestId } }) : null;
     if (!request) return fail("Заявка не найдена");
     if (!requestPlacement(request.status, true).movable) return fail("Заявка уже оплачена, отклонена или отменена");
@@ -338,6 +344,7 @@ export async function assignPaymentAccount(session: SessionPayload, kind: PlanIt
  */
 export async function savePaymentSchedule(session: SessionPayload, requestId: string, rows: ScheduleRowInput[]): Promise<PlanResult> {
   if (!canPlanRequests(session)) return fail("Менять график оплаты могут согласующие заявки и те, кто ведёт банк и кассу");
+  if (!(await isVisible(session, "request", requestId))) return fail(NOT_VISIBLE);
   const loaded = await loadMovableRequest(requestId);
   if ("error" in loaded) return fail(loaded.error!);
   const { request } = loaded;
@@ -397,6 +404,7 @@ export async function savePaymentSchedule(session: SessionPayload, requestId: st
 /** Объединение графика обратно в один платёж — только пока ни одна часть не оплачена. */
 export async function removePaymentSchedule(session: SessionPayload, requestId: string): Promise<PlanResult> {
   if (!canPlanRequests(session)) return fail("Менять график оплаты могут согласующие заявки и те, кто ведёт банк и кассу");
+  if (!(await isVisible(session, "request", requestId))) return fail(NOT_VISIBLE);
   const loaded = await loadMovableRequest(requestId);
   if ("error" in loaded) return fail(loaded.error!);
   const { request } = loaded;
@@ -428,6 +436,7 @@ export async function markPartPaid(session: SessionPayload, partId: string): Pro
   }
   const part = await prisma.paymentRequestPart.findUnique({ where: { id: partId }, include: { paymentRequest: true } });
   if (!part) return fail("Часть оплаты не найдена");
+  if (!(await isVisible(session, "request", part.paymentRequestId))) return fail(NOT_VISIBLE);
   if (part.paymentRequest.status !== PaymentRequestStatus.APPROVED) return fail("Оплачивать можно только согласованную заявку");
 
   const result = await prisma.$transaction(async (db) => {

@@ -5,6 +5,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { EMPLOYEE_STATUS_BADGE, EMPLOYEE_STATUS_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/payroll/labels";
 import { formatMoney } from "@/lib/money";
+import { isVisible } from "@/lib/access-guard";
 import { setProjectAllocationAction, removeProjectAllocationAction } from "../actions";
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
@@ -47,6 +48,7 @@ export default async function EmployeeDetailPage({
     },
   });
   if (!employee) notFound();
+  if (!(await isVisible(session, "employee", id))) notFound();
 
   const projects = await prisma.project.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } });
 

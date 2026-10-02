@@ -31,6 +31,7 @@ import { stepAuthority } from "@/lib/payment-requests/delegation";
 import { normalizeCurrency } from "@/lib/currency";
 import { amountInRub, loadRateLookup } from "@/lib/currency-rates";
 import { currencyNotAllowed } from "@/lib/foreign-currency";
+import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
 import { currentDeciders, notifyAuthor, notifyDeciders } from "@/lib/payment-requests/notify";
 
 async function loadActiveRoutes(): Promise<ApprovalRouteCandidate[]> {
@@ -50,6 +51,7 @@ async function loadActiveRoutes(): Promise<ApprovalRouteCandidate[]> {
 
 export async function createPaymentRequestAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYMENT_REQUEST_CREATE);
+  if (!(await organizationAllowed(session, String(formData.get("organizationId") ?? "")))) redirect(`/payment-requests/new?error=${encodeURIComponent(ORGANIZATION_NOT_ALLOWED)}`);
 
   const organizationId = String(formData.get("organizationId") ?? "");
   const counterpartyId = String(formData.get("counterpartyId") ?? "") || null;
@@ -129,6 +131,7 @@ const TRANSITION_FROM: Partial<Record<PaymentRequestStatus, PaymentRequestStatus
 
 async function transition(id: string, status: PaymentRequestStatus, action: string, formData?: FormData) {
   const session = await requirePermission(TRANSITION_PERMISSION[status]);
+  if (!(await isVisible(session, "request", id))) redirect(`/payment-requests?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
   const before = await prisma.paymentRequest.findUniqueOrThrow({ where: { id } });
   // A stale page must not mark a cancelled request as paid or cancel a paid one.
@@ -170,6 +173,7 @@ async function transition(id: string, status: PaymentRequestStatus, action: stri
  */
 async function decideStep(id: string, decision: ApprovalDecision, formData: FormData) {
   const session = await requireSession();
+  if (!(await isVisible(session, "request", id))) redirect(`/payment-requests?error=${encodeURIComponent(NOT_VISIBLE)}`);
   // Decisions come from the request page or from the list; errors go back to the same place.
   const backTo = formData.get("returnTo") === "detail" ? `/payment-requests/${id}` : "/payment-requests";
   const fail = (message: string): never => redirect(`${backTo}?error=${encodeURIComponent(message)}`);
@@ -313,6 +317,7 @@ export async function returnPaymentRequestAction(id: string, formData: FormData)
  */
 export async function resubmitPaymentRequestAction(id: string, formData: FormData) {
   const session = await requireSession();
+  if (!(await isVisible(session, "request", id))) redirect(`/payment-requests?error=${encodeURIComponent(NOT_VISIBLE)}`);
   const fail = (message: string): never => redirect(`/payment-requests/${id}?error=${encodeURIComponent(message)}`);
   const request = await prisma.paymentRequest.findUniqueOrThrow({ where: { id }, include: { parts: true } });
   if (request.createdById !== session.userId && !hasPermission(session, PERMISSIONS.ADMIN_FULL)) fail("Дорабатывать заявку может её автор");

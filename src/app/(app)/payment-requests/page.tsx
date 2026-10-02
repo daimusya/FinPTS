@@ -6,6 +6,7 @@ import { roleForStep, totalSteps, type ApprovalRouteCandidate } from "@/lib/paym
 import { approvePaymentRequestAction, cancelPaymentRequestAction, markPaymentRequestPaidAction } from "./actions";
 import { PAYMENT_REQUEST_STATUS_BADGE as STATUS_BADGE, PAYMENT_REQUEST_STATUS_LABELS as STATUS_LABELS } from "@/lib/payment-requests/labels";
 import { formatMoneyIn } from "@/lib/currency";
+import { getAccessScope, paymentRequestScopeWhere } from "@/lib/access-scope";
 import { isDelegationActive } from "@/lib/payment-requests/delegation";
 
 export default async function PaymentRequestsPage({
@@ -22,8 +23,11 @@ export default async function PaymentRequestsPage({
   const isAdmin = hasPermission(session, PERMISSIONS.ADMIN_FULL);
 
   const today = new Date();
+  const scope = await getAccessScope(session);
   const [requests, myRoleRows, myDelegations] = await Promise.all([
     prisma.paymentRequest.findMany({
+      // Only the organizations this user may see.
+      where: paymentRequestScopeWhere(scope),
       orderBy: { dueDate: "asc" },
       include: {
         organization: true,

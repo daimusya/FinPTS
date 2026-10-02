@@ -1,16 +1,22 @@
 "use server";
 
+import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
+import { isVisible, NOT_VISIBLE } from "@/lib/access-guard";
 import { isWorkingDay, type CalendarOverrides, toCalendarOverrides } from "@/lib/payroll/work-calendar";
 
 export async function bulkFillTimesheetAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
 
   const employeeIds = formData.getAll("employeeIds").map(String);
+  // Only employees visible to this user.
+  for (const employeeId of employeeIds) {
+    if (!(await isVisible(session, "employee", employeeId))) redirect(`/timesheet?error=${encodeURIComponent(NOT_VISIBLE)}`);
+  }
   const dateFromRaw = String(formData.get("dateFrom") ?? "");
   const dateToRaw = String(formData.get("dateTo") ?? "");
   const dayType = String(formData.get("dayType") ?? "");
@@ -67,6 +73,7 @@ export async function deleteTimesheetEntryAction(id: string) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
 
   const entry = await prisma.timeSheet.findUniqueOrThrow({ where: { id } });
+  if (!(await isVisible(session, "employee", entry.employeeId))) redirect(`/timesheet?error=${encodeURIComponent(NOT_VISIBLE)}`);
   await prisma.timeSheet.delete({ where: { id } });
 
   await logAudit({

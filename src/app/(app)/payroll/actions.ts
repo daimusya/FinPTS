@@ -23,10 +23,12 @@ import {
 } from "@/lib/payroll/average-earnings-db";
 import { accrualDateForRun, postPayrollRunToAccrual } from "@/lib/payroll/post-to-accrual";
 import { toDecimal } from "@/lib/money";
+import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
 import { PayrollRunStatus } from "@prisma/client";
 
 export async function createPayrollRunAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  if (!(await organizationAllowed(session, String(formData.get("organizationId") ?? "")))) redirect(`/payroll/new?error=${encodeURIComponent(ORGANIZATION_NOT_ALLOWED)}`);
 
   const organizationId = String(formData.get("organizationId") ?? "");
   const kind = String(formData.get("kind") ?? "");
@@ -63,6 +65,7 @@ export async function createPayrollRunAction(formData: FormData) {
 
 export async function calculatePayrollRunAction(id: string) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  if (!(await isVisible(session, "payrollRun", id))) redirect(`/payroll?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
   const run = await prisma.payrollRun.findUniqueOrThrow({ where: { id } });
   if (run.status !== "DRAFT" && run.status !== "CALCULATED") {
@@ -96,6 +99,7 @@ export async function calculatePayrollRunAction(id: string) {
 
 export async function addPayrollLineAction(runId: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  if (!(await isVisible(session, "payrollRun", runId)) || !(await isVisible(session, "employee", String(formData.get("employeeId") ?? "")))) redirect(`/payroll?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
   const employeeId = String(formData.get("employeeId") ?? "");
   const accrualTypeId = String(formData.get("accrualTypeId") ?? "");
@@ -147,6 +151,7 @@ export async function addPayrollLineAction(runId: string, formData: FormData) {
  */
 export async function addAverageEarningsLineAction(runId: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  if (!(await isVisible(session, "payrollRun", runId)) || !(await isVisible(session, "employee", String(formData.get("avgEmployeeId") ?? "")))) redirect(`/payroll?error=${encodeURIComponent(NOT_VISIBLE)}`);
   const back = (message: string): never => redirect(`/payroll/${runId}?error=${encodeURIComponent(message)}`);
 
   const run = await prisma.payrollRun.findUniqueOrThrow({ where: { id: runId } });
@@ -275,6 +280,7 @@ export async function addAverageEarningsLineAction(runId: string, formData: Form
 
 export async function removePayrollLineAction(runId: string, lineId: string) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  if (!(await isVisible(session, "payrollRun", runId))) redirect(`/payroll?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
   const line = await prisma.payrollLine.findUniqueOrThrow({ where: { id: lineId } });
   await prisma.payrollLine.delete({ where: { id: lineId } });
@@ -303,6 +309,7 @@ async function transitionRun(id: string, from: PayrollRunStatus[], to: PayrollRu
 
 export async function approvePayrollRunAction(id: string) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  if (!(await isVisible(session, "payrollRun", id))) redirect(`/payroll?error=${encodeURIComponent(NOT_VISIBLE)}`);
   // The expense goes to the month the run is for; a closed month must be reopened first.
   const run = await prisma.payrollRun.findUniqueOrThrow({ where: { id } });
   const accrualDate = accrualDateForRun(run.kind, run.payoutDate);
@@ -331,5 +338,6 @@ export async function approvePayrollRunAction(id: string) {
 
 export async function markPayrollRunPaidAction(id: string) {
   const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
+  if (!(await isVisible(session, "payrollRun", id))) redirect(`/payroll?error=${encodeURIComponent(NOT_VISIBLE)}`);
   await transitionRun(id, [PayrollRunStatus.APPROVED], PayrollRunStatus.PAID, "mark_paid", session.userId);
 }

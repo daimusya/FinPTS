@@ -16,6 +16,7 @@ import { isForeign, lineAmounts, parseRate } from "@/lib/accruals/currency";
 import { normalizeCurrency } from "@/lib/currency";
 import { loadRateLookup } from "@/lib/currency-rates";
 import { currencyNotAllowed } from "@/lib/foreign-currency";
+import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
 import { enqueueProjectResultsForDocument } from "@/lib/integrations/project-results";
 
 interface DocumentHeaderInput {
@@ -116,6 +117,7 @@ function parseLines(formData: FormData, rate: Decimal | null) {
 
 export async function createAccrualDocumentAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.ACCRUALS_MANAGE);
+  if (!(await organizationAllowed(session, String(formData.get("organizationId") ?? "")))) redirect(`/accruals/new?error=${encodeURIComponent(ORGANIZATION_NOT_ALLOWED)}`);
 
   let header: DocumentHeaderInput;
   let lines: ReturnType<typeof parseLines>;
@@ -153,6 +155,7 @@ export async function createAccrualDocumentAction(formData: FormData) {
 
 export async function updateAccrualDocumentAction(id: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.ACCRUALS_MANAGE);
+  if (!(await isVisible(session, "accrual", id))) redirect(`/accruals?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
   const existing = await prisma.accrualDocument.findUniqueOrThrow({ where: { id } });
   if (existing.status !== AccrualDocumentStatus.DRAFT) {
@@ -202,6 +205,7 @@ export async function updateAccrualDocumentAction(id: string, formData: FormData
 
 export async function postAccrualDocumentAction(id: string) {
   const session = await requirePermission(PERMISSIONS.ACCRUALS_MANAGE);
+  if (!(await isVisible(session, "accrual", id))) redirect(`/accruals?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
   const existing = await prisma.accrualDocument.findUniqueOrThrow({ where: { id } });
   if (existing.status !== AccrualDocumentStatus.DRAFT) {
@@ -235,6 +239,7 @@ export async function postAccrualDocumentAction(id: string) {
 
 export async function cancelAccrualDocumentAction(id: string) {
   const session = await requirePermission(PERMISSIONS.ACCRUALS_MANAGE);
+  if (!(await isVisible(session, "accrual", id))) redirect(`/accruals?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
   const existing = await prisma.accrualDocument.findUniqueOrThrow({
     where: { id },
@@ -274,6 +279,7 @@ export async function cancelAccrualDocumentAction(id: string) {
 /** Срок оплаты документа (в т. ч. проведённого): меняется только срок, с причиной и историей. */
 export async function rescheduleDocumentAction(id: string, formData: FormData) {
   const session = await requireSession();
+  if (!(await isVisible(session, "accrual", id))) redirect(`/accruals?error=${encodeURIComponent(NOT_VISIBLE)}`);
   const result = await rescheduleDocument(session, id, formData.get("dueDate"), formData.get("reason"), formData.get("dueTime") ?? "");
   const param = result.ok ? `notice=${encodeURIComponent(result.message)}` : `error=${encodeURIComponent((result as { error: string }).error)}`;
   redirect(`/accruals/${id}?${param}`);
@@ -282,6 +288,7 @@ export async function rescheduleDocumentAction(id: string, formData: FormData) {
 /** Плановый счёт оплаты документа — для прогноза по счетам в платёжном календаре. */
 export async function assignDocumentAccountAction(id: string, formData: FormData) {
   const session = await requireSession();
+  if (!(await isVisible(session, "accrual", id))) redirect(`/accruals?error=${encodeURIComponent(NOT_VISIBLE)}`);
   const result = await assignPaymentAccount(session, "document", id, formData.get("payAccount"));
   const param = result.ok ? `notice=${encodeURIComponent(result.message)}` : `error=${encodeURIComponent((result as { error: string }).error)}`;
   redirect(`/accruals/${id}?${param}`);

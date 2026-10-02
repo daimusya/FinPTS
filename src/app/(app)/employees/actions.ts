@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
+import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
 import { EmployeeStatus, Prisma } from "@prisma/client";
 
 /** Страховой стаж до приёма: целое число месяцев 0–720 или пусто. */
@@ -19,6 +20,7 @@ function parsePriorMonths(raw: unknown): { value: number | null } | { error: str
 
 export async function hireEmployeeAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  if (!(await organizationAllowed(session, String(formData.get("organizationId") ?? "")))) redirect(`/employees/new?error=${encodeURIComponent(ORGANIZATION_NOT_ALLOWED)}`);
 
   const fullName = String(formData.get("fullName") ?? "").trim();
   const organizationId = String(formData.get("organizationId") ?? "");
@@ -78,6 +80,7 @@ export async function hireEmployeeAction(formData: FormData) {
 
 export async function updateEmployeeAction(id: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  if (!(await isVisible(session, "employee", id))) redirect(`/employees?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
   const before = await prisma.employee.findUniqueOrThrow({ where: { id } });
 
@@ -142,6 +145,7 @@ export async function updateEmployeeAction(id: string, formData: FormData) {
 
 export async function transferEmployeeAction(id: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  if (!(await isVisible(session, "employee", id))) redirect(`/employees?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
   const before = await prisma.employee.findUniqueOrThrow({ where: { id } });
 
@@ -188,6 +192,7 @@ export async function transferEmployeeAction(id: string, formData: FormData) {
 
 export async function terminateEmployeeAction(id: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  if (!(await isVisible(session, "employee", id))) redirect(`/employees?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
   const before = await prisma.employee.findUniqueOrThrow({ where: { id } });
   const eventDateRaw = String(formData.get("eventDate") ?? "");
@@ -228,6 +233,7 @@ export async function terminateEmployeeAction(id: string, formData: FormData) {
 
 export async function setProjectAllocationAction(employeeId: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  if (!(await isVisible(session, "employee", employeeId))) redirect(`/employees?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
   const projectId = String(formData.get("projectId") ?? "");
   const sharePctRaw = String(formData.get("sharePct") ?? "");
@@ -253,6 +259,7 @@ export async function setProjectAllocationAction(employeeId: string, formData: F
 
 export async function removeProjectAllocationAction(employeeId: string, allocationId: string) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
+  if (!(await isVisible(session, "employee", employeeId))) redirect(`/employees?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
   await prisma.employeeProjectAllocation.update({
     where: { id: allocationId },

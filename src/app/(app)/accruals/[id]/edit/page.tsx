@@ -6,6 +6,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { AccrualLinesEditor, type LineDraft } from "@/components/accrual-lines-editor";
 import { DocumentCurrencyFields } from "@/components/document-currency-fields";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
+import { isVisible } from "@/lib/access-guard";
 import { updateAccrualDocumentAction } from "../../actions";
 
 function toDateInput(date: Date): string {
@@ -44,6 +45,7 @@ export default async function EditAccrualDocumentPage({
       prisma.pnlArticle.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     ]);
   if (!doc) notFound();
+  if (!(await isVisible(session, "accrual", id))) notFound();
   if (doc.status !== "DRAFT") {
     return (
       <div className="page">

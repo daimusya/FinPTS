@@ -25,6 +25,7 @@ import { allocationTransactionSide, planAllocation, type AllocationAmounts } fro
 import { normalizeCurrency } from "@/lib/currency";
 import { loadRateLookup } from "@/lib/currency-rates";
 import { checkAllocation } from "@/lib/cash/allocation";
+import { ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
 import crypto from "node:crypto";
 
 export async function createBankTransactionAction(formData: FormData) {
@@ -48,6 +49,19 @@ export async function createBankTransactionAction(formData: FormData) {
 
   if ((!bankAccountId && !cashAccountId) || (bankAccountId && cashAccountId)) {
     redirect(`/cash/transactions/new?error=${encodeURIComponent("Выберите либо банковский счёт, либо кассу")}`);
+  }
+  // Both accounts (and the transfer's second one) must belong to organizations this user may see.
+  for (const [bank, cash] of [
+    [bankAccountId, cashAccountId],
+    [secondBankAccountId, secondCashAccountId],
+  ] as const) {
+    if (!bank && !cash) continue;
+    const organizationId = bank
+      ? (await prisma.bankAccount.findUnique({ where: { id: bank } }))?.organizationId
+      : (await prisma.cashAccount.findUnique({ where: { id: cash! } }))?.organizationId;
+    if (!organizationId || !(await organizationAllowed(session, organizationId))) {
+      redirect(`/cash/transactions/new?error=${encodeURIComponent(ORGANIZATION_NOT_ALLOWED)}`);
+    }
   }
   if (!operationDateRaw || !direction || !amountRaw || Number(amountRaw) <= 0) {
     redirect(`/cash/transactions/new?error=${encodeURIComponent("Заполните дату, направление и сумму")}`);
@@ -575,14 +589,31 @@ export async function allocatePaymentAction(transactionId: string, formData: For
   redirect(`/cash/transactions/${transactionId}`);
 }
 
+/**
+ * Отмена сопоставления: операция должна быть видна пользователю, месяц, с
+ * которого сопоставление действует (позже из дат платежа и документа), —
+ * открыт (иначе задним числом изменились бы долги закрытого месяца), а уже
+ * отменённое не отменяется повторно.
+ */
 export async function cancelAllocationAction(allocationId: string) {
   const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
 
-  const allocation = await prisma.paymentAllocation.findUniqueOrThrow({ where: { id: allocationId } });
-  const updated = await prisma.paymentAllocation.update({
+  const allocation = await prisma.paymentAllocation.findUniqueOrThrow({
     where: { id: allocationId },
-    data: { cancelledAt: new Date() },
+    include: { accrualDocument: { select: { date: true } }, bankTransaction: { select: { operationDate: true } } },
   });
+  const back = (message: string): never =>
+    redirect(`/cash/transactions/${allocation.bankTransactionId}?error=${encodeURIComponent(message)}`);
+  await loadTransactionWithPair(session, allocation.bankTransactionId);
+  if (allocation.cancelledAt) back("Это сопоставление уже отменено");
+  const effective =
+    allocation.bankTransaction.operationDate > allocation.accrualDocument.date ? allocation.bankTransaction.operationDate : allocation.accrualDocument.date;
+  await assertPeriodOpenForDate(effective).catch((e) => back((e as Error).message));
+
+  // Conditional on «not cancelled yet», so two clicks in two tabs don't both count.
+  const cancelled = await prisma.paymentAllocation.updateMany({ where: { id: allocationId, cancelledAt: null }, data: { cancelledAt: new Date() } });
+  if (cancelled.count === 0) back("Это сопоставление уже отменено");
+  const updated = await prisma.paymentAllocation.findUniqueOrThrow({ where: { id: allocationId } });
 
   await Promise.all([
     recomputeAccrualDocumentStatus(allocation.accrualDocumentId),

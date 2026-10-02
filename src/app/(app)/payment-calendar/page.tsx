@@ -25,6 +25,14 @@ import { PaymentCalendarBoard, type AccountOption, type BoardDay, type BoardItem
 import { formatMoneyIn, normalizeCurrency } from "@/lib/currency";
 import { amountInRub, loadRateLookup } from "@/lib/currency-rates";
 import { isForeign, outstanding } from "@/lib/accruals/currency";
+import {
+  accrualScopeWhere,
+  bankTransactionScopeWhere,
+  getAccessScope,
+  organizationIdScopeWhere,
+  organizationScopeWhere,
+  paymentRequestScopeWhere,
+} from "@/lib/access-scope";
 import { MissingRatesWarning } from "@/components/missing-rates-warning";
 
 const MONTH_NAMES = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
@@ -77,17 +85,20 @@ export default async function PaymentCalendarPage({
   const { prev, next } = adjacentMonths(month);
   const [year, monthNumber] = month.split("-").map(Number);
 
+  // Only the organizations, accounts, documents and requests this user may see.
+  const access = await getAccessScope(session);
+  const orgScope = organizationIdScopeWhere(access);
   const [organizations, bankAccounts, cashAccounts, flows, unpaidDocuments, requests, calendarDays, rates] = await Promise.all([
-    prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
-    prisma.bankAccount.findMany({ include: { organization: true }, orderBy: { bankName: "asc" } }),
-    prisma.cashAccount.findMany({ include: { organization: true }, orderBy: { name: "asc" } }),
-    prisma.bankTransaction.groupBy({ by: ["bankAccountId", "cashAccountId", "direction"], _sum: { amount: true } }),
+    prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(access) }, orderBy: { name: "asc" } }),
+    prisma.bankAccount.findMany({ where: orgScope, include: { organization: true }, orderBy: { bankName: "asc" } }),
+    prisma.cashAccount.findMany({ where: orgScope, include: { organization: true }, orderBy: { name: "asc" } }),
+    prisma.bankTransaction.groupBy({ by: ["bankAccountId", "cashAccountId", "direction"], where: bankTransactionScopeWhere(access), _sum: { amount: true } }),
     prisma.accrualDocument.findMany({
-      where: { status: "POSTED", paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID"] } },
+      where: { status: "POSTED", paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID"] }, ...accrualScopeWhere(access) },
       include: { lines: true, allocations: { where: { cancelledAt: null } }, counterparty: true, organization: true },
     }),
     prisma.paymentRequest.findMany({
-      where: { status: { notIn: [...HIDDEN_REQUEST_STATUSES] } },
+      where: { status: { notIn: [...HIDDEN_REQUEST_STATUSES] }, ...paymentRequestScopeWhere(access) },
       include: { organization: true, counterparty: true, cashFlowArticle: true, parts: { orderBy: [{ dueDate: "asc" }, { sortOrder: "asc" }] } },
       orderBy: [{ dueDate: "asc" }, { amount: "desc" }],
     }),

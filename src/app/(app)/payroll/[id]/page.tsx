@@ -13,6 +13,7 @@ import {
   removePayrollLineAction,
 } from "../actions";
 import { AverageEarningsCard } from "./average-earnings-card";
+import { isVisible } from "@/lib/access-guard";
 import type { AverageParams } from "@/lib/payroll/average-earnings-db";
 
 export default async function PayrollRunDetailPage({
@@ -44,6 +45,7 @@ export default async function PayrollRunDetailPage({
     },
   });
   if (!run) notFound();
+  if (!(await isVisible(session, "payrollRun", id))) notFound();
 
   // The main document on the payout date and, for vacations running into later months, one per month.
   const accrualDocuments = await prisma.accrualDocument.findMany({
