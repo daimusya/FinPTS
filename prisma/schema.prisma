@@ -1727,3 +1727,15 @@ model MonitorAlert {
 
   @@map("monitor_alerts")
 }
+
+// Неудачные попытки входа (защита от подбора пароля): по адресу, в том числе
+// несуществующему — чтобы ответ не выдавал, есть ли такой пользователь.
+// Успешный вход очищает попытки адреса; записи старше суток удаляются.
+model LoginFailure {
+  id        String   @id @default(cuid())
+  email     String
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@map("login_failures")
+}

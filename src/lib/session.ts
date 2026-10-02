@@ -1,6 +1,9 @@
+import { cache } from "react";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { PERMISSIONS, type PermissionCode } from "./permissions";
+import { prisma } from "./db";
+import { getUserPermissions } from "./auth";
 
 const COOKIE_NAME = "pts_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
@@ -42,17 +45,26 @@ export async function destroySession() {
   store.delete(COOKIE_NAME);
 }
 
-export async function getSession(): Promise<SessionPayload | null> {
+/**
+ * Сессия текущего запроса. Подпись куки проверяется, а пользователь и его
+ * права берутся из базы при каждом запросе (один раз за запрос): выключенный
+ * («Активен» снят) или удалённый пользователь сразу теряет доступ, а смена
+ * ролей действует сразу, а не через 12 часов, когда истечёт кука.
+ */
+export const getSession = cache(async (): Promise<SessionPayload | null> => {
   const store = await cookies();
   const token = store.get(COOKIE_NAME)?.value;
   if (!token) return null;
+  let payload: SessionPayload;
   try {
-    const { payload } = await jwtVerify(token, getSecret());
-    return payload as unknown as SessionPayload;
+    payload = (await jwtVerify(token, getSecret())).payload as unknown as SessionPayload;
   } catch {
     return null;
   }
-}
+  const user = await prisma.user.findUnique({ where: { id: payload.userId }, select: { id: true, email: true, fullName: true, isActive: true } });
+  if (!user || !user.isActive) return null;
+  return { userId: user.id, email: user.email, fullName: user.fullName, permissions: await getUserPermissions(user.id) };
+});
 
 export async function requireSession(): Promise<SessionPayload> {
   const session = await getSession();
