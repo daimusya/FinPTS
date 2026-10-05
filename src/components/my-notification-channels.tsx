@@ -6,6 +6,7 @@ import {
   startTelegramLinkAction,
   unlinkTelegramAction,
 } from "@/app/(app)/notifications/actions";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 /** Страница «Уведомления»: куда ещё дублировать уведомления этому пользователю. */
 export async function MyNotificationChannels({ userId, error, notice }: { userId: string; error?: string; notice?: string }) {
@@ -56,9 +57,9 @@ export async function MyNotificationChannels({ userId, error, notice }: { userId
         <div style={{ marginTop: 14, fontSize: 13 }}>
           {user.telegramChatId ? (
             <form action={unlinkTelegramAction}>
-              <button type="submit" className="btn btn-ghost btn-sm">
+              <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Отвязать Telegram? Уведомления туда приходить перестанут, для повторной привязки понадобится новый код.">
                 Отвязать Telegram
-              </button>
+              </ConfirmSubmitButton>
             </form>
           ) : user.telegramLinkCode ? (
             <div style={{ display: "grid", gap: 8 }}>

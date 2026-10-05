@@ -21,6 +21,7 @@ import {
   validUntil,
   type TaxRateRecord,
 } from "@/lib/organizations/taxes";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 export interface OrganizationTaxesState {
   editTaxRateId?: string;
@@ -171,9 +172,9 @@ export async function OrganizationTaxes({ organizationId, state = {} }: { organi
                         Изменить
                       </Link>
                       <form action={removeTaxRateAction.bind(null, organizationId, r.id)}>
-                        <button type="submit" className="btn btn-ghost btn-sm">
+                        <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Удалить налоговую ставку?">
                           Удалить
-                        </button>
+                        </ConfirmSubmitButton>
                       </form>
                     </div>
                   </td>

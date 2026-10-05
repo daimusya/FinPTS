@@ -10,6 +10,7 @@ import { prisma } from "@/lib/db";
 import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 import { addBalanceEntryAction, deleteBalanceEntryAction } from "./actions";
 import type Decimal from "decimal.js";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 const CATEGORY_LABELS: Record<string, string> = { ASSET: "актив", LIABILITY: "обязательство", EQUITY: "капитал" };
 
@@ -208,9 +209,9 @@ export default async function BalanceReportPage({
                     {canManage ? (
                       <form action={deleteBalanceEntryAction.bind(null, e.id)}>
                         {keepFilters}
-                        <button type="submit" className="btn btn-ghost btn-sm">
+                        <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Удалить запись остатка баланса?">
                           Удалить
-                        </button>
+                        </ConfirmSubmitButton>
                       </form>
                     ) : null}
                   </td>

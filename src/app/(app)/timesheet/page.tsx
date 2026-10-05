@@ -4,6 +4,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { TIME_SHEET_DAY_TYPE_LABELS } from "@/lib/payroll/labels";
 import { bulkFillTimesheetAction, deleteTimesheetEntryAction } from "./actions";
 import { employeeScopeWhere, getAccessScope, projectScopeWhere } from "@/lib/access-scope";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 export default async function TimesheetPage({
   searchParams,
@@ -173,9 +174,9 @@ export default async function TimesheetPage({
                       <td>
                         {canManage ? (
                           <form action={deleteTimesheetEntryAction.bind(null, entry.id)}>
-                            <button type="submit" className="btn btn-ghost btn-sm">
+                            <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Удалить запись табеля?">
                               Удалить
-                            </button>
+                            </ConfirmSubmitButton>
                           </form>
                         ) : null}
                       </td>

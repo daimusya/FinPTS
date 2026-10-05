@@ -20,6 +20,7 @@ import { allocationDocumentSide, documentTotal, isForeign } from "@/lib/accruals
 import { formatMoneyIn } from "@/lib/currency";
 import { isVisible } from "@/lib/access-guard";
 import { canPlanDocuments } from "@/lib/payment-plan/service";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 export default async function AccrualDocumentPage({
   params,
@@ -108,9 +109,9 @@ export default async function AccrualDocumentPage({
           ) : null}
           {canManage && doc.status !== "CANCELLED" ? (
             <form action={cancelAccrualDocumentAction.bind(null, doc.id)}>
-              <button type="submit" className="btn btn-danger">
+              <ConfirmSubmitButton className="btn btn-danger" message="Отменить документ начисления? Он перестанет учитываться в ОПиУ и расчётах с контрагентом.">
                 Отменить
-              </button>
+              </ConfirmSubmitButton>
             </form>
           ) : null}
         </div>
@@ -278,9 +279,9 @@ export default async function AccrualDocumentPage({
                   <td>
                     {canManage ? (
                       <form action={cancelAllocationAction.bind(null, a.id)}>
-                        <button type="submit" className="btn btn-ghost btn-sm">
+                        <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Отменить сопоставление оплаты с документом? Документ снова будет ждать оплаты.">
                           Отменить сопоставление
-                        </button>
+                        </ConfirmSubmitButton>
                       </form>
                     ) : null}
                   </td>

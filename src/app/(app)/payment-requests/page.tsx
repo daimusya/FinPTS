@@ -12,6 +12,7 @@ import type { PaymentRequestStatus } from "@prisma/client";
 import { pageWindow } from "@/lib/paging";
 import { Pager } from "@/components/pager";
 import { textSearchWhere } from "@/lib/text-search";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 /** «В работе» — всё, с чем ещё что-то делают (отклонённую автор может доработать); «Завершённые» — оплаченные и отменённые. */
 const IN_WORK: PaymentRequestStatus[] = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "RETURNED", "REJECTED"];
@@ -247,9 +248,9 @@ export default async function PaymentRequestsPage({
                       ) : null}
                       {canApprove && (req.status === "PENDING_APPROVAL" || req.status === "APPROVED" || req.status === "RETURNED") ? (
                         <form action={cancelPaymentRequestAction.bind(null, req.id)}>
-                          <button type="submit" className="btn btn-ghost btn-sm">
+                          <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Отменить заявку на оплату? Вернуть отменённую заявку в работу нельзя.">
                             Отменить
-                          </button>
+                          </ConfirmSubmitButton>
                         </form>
                       ) : null}
                       {(req.status === "RETURNED" || req.status === "REJECTED") && (req.createdById === session.userId || isAdmin) ? (

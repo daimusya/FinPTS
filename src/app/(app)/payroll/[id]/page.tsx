@@ -15,6 +15,7 @@ import {
 import { AverageEarningsCard } from "./average-earnings-card";
 import { isVisible } from "@/lib/access-guard";
 import type { AverageParams } from "@/lib/payroll/average-earnings-db";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 export default async function PayrollRunDetailPage({
   params,
@@ -199,9 +200,9 @@ export default async function PayrollRunDetailPage({
                   <td>
                     {canManage && run.status !== "PAID" ? (
                       <form action={removePayrollLineAction.bind(null, run.id, line.id)}>
-                        <button type="submit" className="btn btn-ghost btn-sm">
+                        <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Удалить строку из расчёта зарплаты?">
                           Удалить
-                        </button>
+                        </ConfirmSubmitButton>
                       </form>
                     ) : null}
                   </td>

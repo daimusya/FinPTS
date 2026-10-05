@@ -25,6 +25,7 @@ import { organizationScopeWhere } from "@/lib/access-scope";
 import { DEFAULT_TAX_RATES, TAX_REGIME_LABELS, TAX_REGIMES, usnVatLimit } from "@/lib/financial-model/taxes";
 import { LOAN_REPAYMENT_LABELS, type LoanRepayment } from "@/lib/financial-model/cash-timing";
 import { loadNewServices, MAX_PAYMENT_DAYS, MAX_RAMP_UP_MONTHS } from "@/lib/financial-model/new-services";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 const HORIZON_MONTHS = 12;
 
@@ -453,9 +454,9 @@ export default async function ScenarioDetailPage({
                         </Link>
                         <form action={removeNewServiceAction.bind(null, id, service.id)}>
                           {keepStart}
-                          <button type="submit" className="btn btn-ghost btn-sm">
+                          <ConfirmSubmitButton className="btn btn-ghost btn-sm" message={`Удалить услугу «${service.name}» из сценария?`}>
                             Удалить
-                          </button>
+                          </ConfirmSubmitButton>
                         </form>
                       </div>
                     ) : null}
@@ -584,9 +585,9 @@ export default async function ScenarioDetailPage({
                     {canManage ? (
                       <form action={removeLoanAction.bind(null, id, loan.id)}>
                         {keepStart}
-                        <button type="submit" className="btn btn-ghost btn-sm">
+                        <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Удалить кредит из сценария?">
                           Удалить
-                        </button>
+                        </ConfirmSubmitButton>
                       </form>
                     ) : null}
                   </td>

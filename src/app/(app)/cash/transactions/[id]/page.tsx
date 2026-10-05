@@ -15,6 +15,7 @@ import {
   deleteBankTransactionAction,
 } from "../../actions";
 import { departmentScopeWhere, getAccessScope, organizationIdScopeWhere, projectScopeWhere } from "@/lib/access-scope";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 export default async function CashTransactionDetailPage({
   params,
@@ -262,9 +263,9 @@ export default async function CashTransactionDetailPage({
                   <td>
                     {canManage ? (
                       <form action={cancelAllocationAction.bind(null, a.id)}>
-                        <button type="submit" className="btn btn-ghost btn-sm">
+                        <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Отменить сопоставление оплаты с документом? Операция снова станет несопоставленной на эту сумму.">
                           Отменить
-                        </button>
+                        </ConfirmSubmitButton>
                       </form>
                     ) : null}
                   </td>

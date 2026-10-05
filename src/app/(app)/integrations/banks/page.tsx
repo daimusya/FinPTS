@@ -11,6 +11,7 @@ import {
   syncBankConnectionAction,
   toggleBankConnectionAction,
 } from "./actions";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 const dateTime = (d: Date | null) => (d ? d.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", dateStyle: "short", timeStyle: "short" }) : "—");
 
@@ -122,9 +123,9 @@ export default async function BankApiPage({ searchParams }: { searchParams: Prom
                           Заменить реквизиты
                         </Link>
                         <form action={removeBankConnectionAction.bind(null, c.id)}>
-                          <button type="submit" className="btn btn-ghost btn-sm">
+                          <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Удалить подключение банка? Ключи доступа будут стёрты, загрузка выписок по API для этого счёта прекратится.">
                             Удалить
-                          </button>
+                          </ConfirmSubmitButton>
                         </form>
                       </div>
                     </td>

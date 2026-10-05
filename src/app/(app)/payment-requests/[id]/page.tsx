@@ -35,6 +35,7 @@ import { amountInRub, loadRateLookup } from "@/lib/currency-rates";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { isVisible } from "@/lib/access-guard";
 import { currentDeciders, hasDecidersIgnoringAccess, noDecidersReason } from "@/lib/payment-requests/notify";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 const STATE_LABELS: Record<TimelineState, string> = {
   approved: "Согласовано",
@@ -583,9 +584,9 @@ export default async function PaymentRequestPage({
           {canApprove && (pending || request.status === "APPROVED" || request.status === "RETURNED") ? (
             <form action={cancelPaymentRequestAction.bind(null, request.id)}>
               <input type="hidden" name="returnTo" value="detail" />
-              <button type="submit" className="btn btn-ghost">
+              <ConfirmSubmitButton className="btn btn-ghost" message="Отменить заявку на оплату? Вернуть отменённую заявку в работу нельзя.">
                 Отменить заявку
-              </button>
+              </ConfirmSubmitButton>
             </form>
           ) : null}
         </div>

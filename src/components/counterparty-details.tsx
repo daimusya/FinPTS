@@ -10,6 +10,7 @@ import {
   updateBankDetailAction,
   updateContactAction,
 } from "@/app/(app)/master-data/counterparty-actions";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 export interface CounterpartyDetailsState {
   /** Строка, открытая для правки (из адреса ?editBank= / ?editContact=). */
@@ -109,9 +110,9 @@ export async function CounterpartyDetails({ counterpartyId, state = {} }: { coun
                           Изменить
                         </Link>
                         <form action={removeBankDetailAction.bind(null, counterpartyId, d.id)}>
-                          <button type="submit" className="btn btn-ghost btn-sm">
+                          <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Удалить банковские реквизиты контрагента?">
                             Удалить
-                          </button>
+                          </ConfirmSubmitButton>
                         </form>
                       </div>
                     </td>
@@ -235,9 +236,9 @@ export async function CounterpartyDetails({ counterpartyId, state = {} }: { coun
                           Изменить
                         </Link>
                         <form action={removeContactAction.bind(null, counterpartyId, c.id)}>
-                          <button type="submit" className="btn btn-ghost btn-sm">
+                          <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Удалить контакт контрагента?">
                             Удалить
-                          </button>
+                          </ConfirmSubmitButton>
                         </form>
                       </div>
                     </td>
