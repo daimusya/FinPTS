@@ -4,6 +4,8 @@
  * telegram.ts, очередь — deliver.ts.
  */
 
+import { isInternalPath } from "@/lib/internal-path";
+
 export type SmtpSecurity = "ssl" | "starttls" | "none";
 
 export interface SmtpSettings {
@@ -94,7 +96,7 @@ export interface NotificationContent {
 
 export function absoluteLink(appUrl: string, link: string | null): string | null {
   if (!link) return null;
-  if (!link.startsWith("/")) return null; // only links inside the app
+  if (!isInternalPath(link)) return null; // only links inside the app
   return `${appUrl}${link}`;
 }
 

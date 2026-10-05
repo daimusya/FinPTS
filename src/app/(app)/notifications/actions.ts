@@ -9,6 +9,7 @@ import { decryptSecret } from "@/lib/crypto/secret-box";
 import { findChatByCode, makeLinkCode } from "@/lib/notify-channels/compose";
 import { loadChannelSettings } from "@/lib/notify-channels/deliver";
 import { telegramCall, type TelegramUpdate } from "@/lib/notify-channels/transport";
+import { isInternalPath } from "@/lib/internal-path";
 
 /** Открыть уведомление: отметить прочитанным и перейти по его ссылке. */
 export async function openNotificationAction(id: string) {
@@ -18,7 +19,7 @@ export async function openNotificationAction(id: string) {
   if (!notification!.readAt) await prisma.notification.update({ where: { id }, data: { readAt: new Date() } });
   revalidatePath("/", "layout");
   // Only links inside the app.
-  redirect(notification!.link && notification!.link.startsWith("/") ? notification!.link : "/notifications");
+  redirect(isInternalPath(notification!.link) ? notification!.link : "/notifications");
 }
 
 export async function markAllNotificationsReadAction() {

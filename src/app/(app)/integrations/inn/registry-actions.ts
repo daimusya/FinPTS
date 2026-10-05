@@ -16,6 +16,7 @@ import {
   organizationDataFromRegistry,
 } from "@/lib/integrations/inn-service";
 import { ORGANIZATION_REGISTRY_LABELS } from "@/lib/integrations/inn-labels";
+import { isInternalPath } from "@/lib/internal-path";
 import { getAccessScope } from "@/lib/access-scope";
 import { NEW_ORGANIZATION_NOT_ALLOWED } from "@/lib/dictionaries/scope";
 import { NOT_VISIBLE, organizationAllowed } from "@/lib/access-guard";
@@ -25,7 +26,7 @@ const BATCH = 50;
 
 const safeReturn = (raw: unknown, fallback: string) => {
   const path = String(raw ?? "");
-  return path.startsWith("/") && !path.startsWith("//") ? path : fallback;
+  return isInternalPath(path) ? path : fallback;
 };
 const withParam = (path: string, key: string, value: string) => `${path}${path.includes("?") ? "&" : "?"}${key}=${encodeURIComponent(value)}`;
 
