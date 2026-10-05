@@ -25,6 +25,7 @@ export interface FieldConfig {
 
 export interface DictionaryDelegate {
   findMany: (args?: unknown) => Promise<Array<Record<string, unknown>>>;
+  count: (args?: unknown) => Promise<number>;
   findUnique: (args: unknown) => Promise<Record<string, unknown> | null>;
   create: (args: unknown) => Promise<Record<string, unknown>>;
   update: (args: unknown) => Promise<Record<string, unknown>>;
@@ -41,7 +42,7 @@ export interface DictionaryConfig {
   permissionView: PermissionCode;
   permissionManage: PermissionCode;
   orderBy?: Record<string, "asc" | "desc">;
-  /** Сколько записей показывать в списке (для больших справочников, например курсов валют). */
+  /** Сколько записей на странице списка (по умолчанию 100; у курсов валют больше). */
   listLimit?: number;
   /**
    * Проверка записи целиком перед сохранением (форма и загрузка из Excel):

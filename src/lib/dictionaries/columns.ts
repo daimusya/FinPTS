@@ -44,3 +44,11 @@ export function dictionaryModelKey(config: DictionaryConfig): string {
   if (!model) throw new Error(`Модель справочника «${config.slug}» не найдена в схеме`);
   return model.name[0].toLowerCase() + model.name.slice(1);
 }
+
+/** Текстовые колонки справочника из его полей (название, ИНН, номер, код…) — для поиска в списке. */
+export function dictionaryTextColumns(config: DictionaryConfig): string[] {
+  const client = prisma as unknown as Record<string, unknown>;
+  const model = Prisma.dmmf.datamodel.models.find((m) => client[m.name[0].toLowerCase() + m.name.slice(1)] === config.delegate);
+  const stringColumns = new Set((model?.fields ?? []).filter((f) => f.kind === "scalar" && f.type === "String").map((f) => f.name));
+  return config.fields.filter((f) => f.type === "text" && stringColumns.has(f.name)).map((f) => f.name);
+}

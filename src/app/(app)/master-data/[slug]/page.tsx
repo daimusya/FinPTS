@@ -9,6 +9,12 @@ import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { getAccessScope } from "@/lib/access-scope";
 import { dictionaryScopeWhere } from "@/lib/dictionaries/scope";
 import { CounterpartyEnrich, OrganizationCreateByInn } from "@/components/registry-by-inn";
+import { dictionaryTextColumns } from "@/lib/dictionaries/columns";
+import { dictionarySearchWhere } from "@/lib/dictionaries/search";
+import { pageWindow } from "@/lib/paging";
+import { Pager } from "@/components/pager";
+
+const PAGE_SIZE = 100;
 
 function formatCell(value: unknown): string {
   if (value === null || value === undefined) return "—";
@@ -60,10 +66,10 @@ export default async function DictionaryListPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ imported?: string; importResult?: string; innError?: string; ratesError?: string }>;
+  searchParams: Promise<{ imported?: string; importResult?: string; innError?: string; ratesError?: string; q?: string; page?: string }>;
 }) {
   const { slug } = await params;
-  const { imported, importResult, innError, ratesError } = await searchParams;
+  const { imported, importResult, innError, ratesError, q, page } = await searchParams;
   if (!DICTIONARY_REGISTRY[slug]) notFound();
   const config = getDictionaryConfig(slug);
 
@@ -77,10 +83,15 @@ export default async function DictionaryListPage({
   }
   const canManage = hasPermission(session, config.permissionManage);
 
+  // Search by name, INN, number… and pages: active records first, then archived ones.
+  const textColumns = dictionaryTextColumns(config);
+  const where = { AND: [dictionaryScopeWhere(config, await getAccessScope(session)), dictionarySearchWhere(textColumns, q)] };
+  const window = pageWindow(await config.delegate.count({ where }), page, config.listLimit ?? PAGE_SIZE);
   const items = await config.delegate.findMany({
-    where: dictionaryScopeWhere(config, await getAccessScope(session)),
-    orderBy: config.orderBy ?? { name: "asc" },
-    ...(config.listLimit ? { take: config.listLimit } : {}),
+    where,
+    orderBy: [{ isArchived: "asc" }, config.orderBy ?? { name: "asc" }, { id: "asc" }],
+    skip: window.skip,
+    take: window.take,
   });
 
   const foreignCurrency = await isForeignCurrencyEnabled();
@@ -116,11 +127,36 @@ export default async function DictionaryListPage({
       {slug === "counterparties" && canManage ? <CounterpartyEnrich /> : null}
       {slug === "organizations" && canManage ? <OrganizationCreateByInn error={innError} /> : null}
       {slug === "currency-rates" && canManage ? <CurrencyRatesLoader error={ratesError} /> : null}
-      {config.listLimit && items.length >= config.listLimit ? (
-        <p className="text-muted" style={{ fontSize: 12 }}>
-          Показаны последние {config.listLimit} записей; все — в выгрузке в Excel.
-        </p>
-      ) : null}
+      <form className="filter-bar" style={{ alignItems: "flex-end" }}>
+        {textColumns.length > 0 ? (
+          <label className="field" style={{ minWidth: 280 }}>
+            <span>Поиск</span>
+            <input
+              type="search"
+              name="q"
+              id="dictionary-search"
+              defaultValue={q ?? ""}
+              placeholder={textColumns
+                .slice(0, 3)
+                .map((c) => config.fields.find((f) => f.name === c)?.label.split(" (")[0].toLowerCase())
+                .join(", ")}
+            />
+          </label>
+        ) : null}
+        {textColumns.length > 0 ? (
+          <button type="submit" className="btn btn-secondary">
+            Найти
+          </button>
+        ) : null}
+        {q ? (
+          <Link href={`/master-data/${slug}`} className="btn btn-ghost">
+            Сбросить
+          </Link>
+        ) : null}
+        <span className="text-muted" style={{ fontSize: 12 }}>
+          {window.caption}
+        </span>
+      </form>
 
       {importResult || imported ? (
         <div className="card" style={{ marginBottom: 16 }}>
@@ -182,13 +218,14 @@ export default async function DictionaryListPage({
             {items.length === 0 ? (
               <tr>
                 <td colSpan={listColumns.length + 2} className="empty-state">
-                  Записей пока нет.
+                  {q ? `По запросу «${q}» ничего не найдено.` : "Записей пока нет."}
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
       </div>
+      <Pager window={window} basePath={`/master-data/${slug}`} params={{ q }} />
     </div>
   );
 }
