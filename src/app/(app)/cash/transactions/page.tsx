@@ -8,6 +8,8 @@ import { deleteBankTransactionsAction } from "../actions";
 import { formatMoneyIn, transactionCurrency } from "@/lib/currency";
 import { OperationsWithoutCounterparty } from "@/components/registry-by-inn";
 import { SelectAllCheckbox } from "@/components/select-all-checkbox";
+import { pageWindow } from "@/lib/paging";
+import { Pager } from "@/components/pager";
 
 const BULK_FORM = "bulk-delete";
 
@@ -23,6 +25,8 @@ const MATCH_STATUS_BADGE: Record<string, string> = {
   MATCHED: "badge-active",
 };
 
+const PAGE_SIZE = 300;
+
 export default async function CashTransactionsPage({
   searchParams,
 }: {
@@ -35,6 +39,7 @@ export default async function CashTransactionsPage({
     batchId?: string;
     notice?: string;
     error?: string;
+    page?: string;
   }>;
 }) {
   const session = await getSession();
@@ -64,11 +69,14 @@ export default async function CashTransactionsPage({
     };
   }
 
+  // Pages instead of a silent cut at 300: older operations stay reachable from the list.
+  const window = pageWindow(await prisma.bankTransaction.count({ where }), sp.page, PAGE_SIZE);
   const [transactions, unmatchedCount, batch] = await Promise.all([
     prisma.bankTransaction.findMany({
       where,
-      orderBy: { operationDate: "desc" },
-      take: 300,
+      orderBy: [{ operationDate: "desc" }, { id: "desc" }],
+      skip: window.skip,
+      take: window.take,
       include: { bankAccount: true, cashAccount: true, counterparty: true, cashFlowArticle: true },
     }),
     prisma.bankTransaction.count({ where: { matchStatus: "UNMATCHED", ...scopeWhere } }),
@@ -76,7 +84,7 @@ export default async function CashTransactionsPage({
   ]);
   // Back to the same filtered list after a bulk delete.
   const query = new URLSearchParams(
-    Object.entries({ matchStatus, direction, cashFlowArticleId, from, to, batchId }).filter((e): e is [string, string] => Boolean(e[1])),
+    Object.entries({ matchStatus, direction, cashFlowArticleId, from, to, batchId, page: window.page > 1 ? String(window.page) : undefined }).filter((e): e is [string, string] => Boolean(e[1])),
   ).toString();
   const returnTo = query ? `/cash/transactions?${query}` : "/cash/transactions";
 
@@ -158,6 +166,10 @@ export default async function CashTransactionsPage({
         </form>
       ) : null}
 
+      <p className="text-muted" style={{ fontSize: 12, margin: "8px 0" }}>
+        {window.caption}
+      </p>
+
       <div className="table-wrap">
         <table>
           <thead>
@@ -211,6 +223,11 @@ export default async function CashTransactionsPage({
           </tbody>
         </table>
       </div>
+      <Pager
+        window={window}
+        basePath="/cash/transactions"
+        params={{ matchStatus, direction, cashFlowArticleId, from, to, batchId }}
+      />
     </div>
   );
 }

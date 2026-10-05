@@ -8,15 +8,24 @@ import { PAYMENT_REQUEST_STATUS_BADGE as STATUS_BADGE, PAYMENT_REQUEST_STATUS_LA
 import { formatMoneyIn } from "@/lib/currency";
 import { getAccessScope, paymentRequestScopeWhere } from "@/lib/access-scope";
 import { isDelegationActive } from "@/lib/payment-requests/delegation";
+import type { PaymentRequestStatus } from "@prisma/client";
+import { pageWindow } from "@/lib/paging";
+import { Pager } from "@/components/pager";
+
+/** «В работе» — всё, с чем ещё что-то делают (отклонённую автор может доработать); «Завершённые» — оплаченные и отменённые. */
+const IN_WORK: PaymentRequestStatus[] = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "RETURNED", "REJECTED"];
+const DONE: PaymentRequestStatus[] = ["PAID", "CANCELLED"];
+const DONE_PAGE_SIZE = 100;
 
 export default async function PaymentRequestsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; view?: string; page?: string }>;
 }) {
   const session = await getSession();
   if (!session) return null;
-  const { error } = await searchParams;
+  const { error, view, page } = await searchParams;
+  const showDone = view === "done";
   const canApprove = hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE);
   const canPay = hasPermission(session, PERMISSIONS.CASH_MANAGE);
   const canCreate = hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_CREATE);
@@ -24,11 +33,19 @@ export default async function PaymentRequestsPage({
 
   const today = new Date();
   const scope = await getAccessScope(session);
+  // Only the organizations this user may see.
+  const scopeWhere = paymentRequestScopeWhere(scope);
+  const [inWorkCount, doneCount] = await Promise.all([
+    prisma.paymentRequest.count({ where: { ...scopeWhere, status: { in: IN_WORK } } }),
+    prisma.paymentRequest.count({ where: { ...scopeWhere, status: { in: DONE } } }),
+  ]);
+  // Requests in work are all shown, nearest due date first; finished ones — newest first, by pages.
+  const window = showDone ? pageWindow(doneCount, page, DONE_PAGE_SIZE) : null;
   const [requests, myRoleRows, myDelegations] = await Promise.all([
     prisma.paymentRequest.findMany({
-      // Only the organizations this user may see.
-      where: paymentRequestScopeWhere(scope),
-      orderBy: { dueDate: "asc" },
+      where: { ...scopeWhere, status: { in: showDone ? DONE : IN_WORK } },
+      orderBy: showDone ? [{ dueDate: "desc" }, { id: "desc" }] : [{ dueDate: "asc" }, { id: "asc" }],
+      ...(window ? { skip: window.skip, take: window.take } : {}),
       include: {
         organization: true,
         counterparty: true,
@@ -107,6 +124,20 @@ export default async function PaymentRequestsPage({
           </p>
         </div>
       ) : null}
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+        <Link href="/payment-requests" className={`btn btn-sm ${showDone ? "btn-ghost" : "btn-secondary"}`} aria-current={showDone ? undefined : "page"}>
+          В работе ({inWorkCount})
+        </Link>
+        <Link href="/payment-requests?view=done" className={`btn btn-sm ${showDone ? "btn-secondary" : "btn-ghost"}`} aria-current={showDone ? "page" : undefined}>
+          Завершённые ({doneCount})
+        </Link>
+        {window ? (
+          <span className="text-muted" style={{ fontSize: 12 }}>
+            {window.caption}
+          </span>
+        ) : null}
+      </div>
 
       <div className="table-wrap">
         <table>
@@ -222,13 +253,14 @@ export default async function PaymentRequestsPage({
             {requests.length === 0 ? (
               <tr>
                 <td colSpan={9} className="empty-state">
-                  Заявок пока нет.
+                  {showDone ? "Оплаченных и отменённых заявок пока нет." : "Заявок в работе нет."}
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
       </div>
+      {window ? <Pager window={window} basePath="/payment-requests" params={{ view: "done" }} /> : null}
     </div>
   );
 }

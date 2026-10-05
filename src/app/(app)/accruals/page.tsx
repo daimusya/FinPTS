@@ -14,6 +14,10 @@ import {
 } from "@/lib/accruals/labels";
 import type { Prisma } from "@prisma/client";
 import { accrualScopeWhere, getAccessScope } from "@/lib/access-scope";
+import { pageWindow } from "@/lib/paging";
+import { Pager } from "@/components/pager";
+
+const PAGE_SIZE = 200;
 
 export default async function AccrualsPage({
   searchParams,
@@ -25,6 +29,7 @@ export default async function AccrualsPage({
     pnlArticleId?: string;
     from?: string;
     to?: string;
+    page?: string;
   }>;
 }) {
   const session = await getSession();
@@ -36,7 +41,8 @@ export default async function AccrualsPage({
     );
   }
   const canManage = hasPermission(session, PERMISSIONS.ACCRUALS_MANAGE);
-  const { direction, status, paymentStatus, pnlArticleId, from, to } = await searchParams;
+  const filters = await searchParams;
+  const { direction, status, paymentStatus, pnlArticleId, from, to } = filters;
 
   const scope = await getAccessScope(session);
 
@@ -52,10 +58,13 @@ export default async function AccrualsPage({
     };
   }
 
+  // Pages instead of a silent cut at 200: older documents stay reachable from the list.
+  const window = pageWindow(await prisma.accrualDocument.count({ where }), filters.page, PAGE_SIZE);
   const documents = await prisma.accrualDocument.findMany({
     where,
-    orderBy: { date: "desc" },
-    take: 200,
+    orderBy: [{ date: "desc" }, { id: "desc" }],
+    skip: window.skip,
+    take: window.take,
     include: { organization: true, counterparty: true, lines: true },
   });
 
@@ -110,6 +119,10 @@ export default async function AccrualsPage({
           Применить
         </button>
       </form>
+
+      <p className="text-muted" style={{ fontSize: 12, margin: "8px 0" }}>
+        {window.caption}
+      </p>
 
       <div className="table-wrap">
         <table>
@@ -169,6 +182,7 @@ export default async function AccrualsPage({
           </tbody>
         </table>
       </div>
+      <Pager window={window} basePath="/accruals" params={filters} />
     </div>
   );
 }
