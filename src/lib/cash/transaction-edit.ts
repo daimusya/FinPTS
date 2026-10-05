@@ -1,5 +1,6 @@
 import { toDecimal } from "@/lib/money";
 import { validateTransferAccounts, type AccountRef, type BankTransactionDirection } from "./transfer";
+import { parseFormDate } from "@/lib/form-values";
 
 export interface TransactionEditInput {
   operationDate: Date;
@@ -18,8 +19,9 @@ export function parseTransactionEdit(get: (name: string) => unknown): Transactio
   if (Boolean(bankAccountId) === Boolean(cashAccountId)) return { error: "Выберите либо банковский счёт, либо кассу" };
 
   const dateRaw = text("operationDate");
-  const operationDate = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? new Date(dateRaw) : null;
-  if (!operationDate || Number.isNaN(operationDate.getTime())) return { error: "Укажите дату операции" };
+  const dateInput = parseFormDate(dateRaw, "Дата операции");
+  if ("error" in dateInput) return { error: dateInput.error };
+  const operationDate = dateInput.date;
 
   const direction = text("direction");
   if (direction !== "INFLOW" && direction !== "OUTFLOW") return { error: "Укажите направление: поступление или списание" };

@@ -33,6 +33,7 @@ import { amountInRub, loadRateLookup } from "@/lib/currency-rates";
 import { currencyNotAllowed } from "@/lib/foreign-currency";
 import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
 import { currentDeciders, notifyAuthor, notifyDeciders } from "@/lib/payment-requests/notify";
+import { parseFormAmount, parseFormDate } from "@/lib/form-values";
 
 async function loadActiveRoutes(): Promise<ApprovalRouteCandidate[]> {
   const routes = await prisma.paymentApprovalRoute.findMany({
@@ -56,13 +57,17 @@ export async function createPaymentRequestAction(formData: FormData) {
   const organizationId = String(formData.get("organizationId") ?? "");
   const counterpartyId = String(formData.get("counterpartyId") ?? "") || null;
   const cashFlowArticleId = String(formData.get("cashFlowArticleId") ?? "") || null;
-  const amountRaw = String(formData.get("amount") ?? "");
+  const amountInput = parseFormAmount(formData.get("amount"));
+  const amountRaw = "value" in amountInput ? amountInput.value : "";
   const dueDateRaw = String(formData.get("dueDate") ?? "");
   const comment = String(formData.get("comment") ?? "").trim() || null;
 
-  if (!organizationId || !amountRaw || Number(amountRaw) <= 0 || !dueDateRaw) {
+  if (!organizationId || !dueDateRaw) {
     redirect(`/payment-requests/new?error=${encodeURIComponent("Заполните организацию, сумму и срок оплаты")}`);
   }
+  if ("error" in amountInput) redirect(`/payment-requests/new?error=${encodeURIComponent(amountInput.error)}`);
+  const dueInput = parseFormDate(dueDateRaw, "Срок оплаты");
+  if ("error" in dueInput) redirect(`/payment-requests/new?error=${encodeURIComponent(dueInput.error)}`);
   const dueTime = parseDueTime(formData.get("dueTime"));
   if ("error" in dueTime) redirect(`/payment-requests/new?error=${encodeURIComponent(dueTime.error)}`);
 
@@ -94,7 +99,7 @@ export async function createPaymentRequestAction(formData: FormData) {
       cashFlowArticleId,
       amount: amountRaw,
       currency,
-      dueDate: new Date(dueDateRaw),
+      dueDate: (dueInput as { date: Date }).date,
       dueTime: "time" in dueTime ? dueTime.time : null,
       comment,
       createdById: session.userId,

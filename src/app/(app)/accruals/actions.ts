@@ -18,6 +18,7 @@ import { loadRateLookup } from "@/lib/currency-rates";
 import { currencyNotAllowed } from "@/lib/foreign-currency";
 import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
 import { enqueueProjectResultsForDocument } from "@/lib/integrations/project-results";
+import { parseFormDate } from "@/lib/form-values";
 
 interface DocumentHeaderInput {
   organizationId: string;
@@ -46,8 +47,12 @@ function parseHeader(formData: FormData): DocumentHeaderInput {
     throw new Error("Заполните все обязательные поля документа");
   }
 
+  const dateInput = parseFormDate(dateRaw, "Дата документа");
+  if ("error" in dateInput) throw new Error(dateInput.error);
   const contractIdRaw = String(formData.get("contractId") ?? "");
   const dueDateRaw = String(formData.get("dueDate") ?? "");
+  const dueDateInput = dueDateRaw ? parseFormDate(dueDateRaw, "Срок оплаты") : null;
+  if (dueDateInput && "error" in dueDateInput) throw new Error(dueDateInput.error);
   const responsibleIdRaw = String(formData.get("responsibleId") ?? "");
   const comment = String(formData.get("comment") ?? "").trim();
 
@@ -56,10 +61,10 @@ function parseHeader(formData: FormData): DocumentHeaderInput {
     counterpartyId,
     contractId: contractIdRaw || null,
     number,
-    date: new Date(dateRaw),
+    date: dateInput.date,
     documentType,
     direction,
-    dueDate: dueDateRaw ? new Date(dueDateRaw) : null,
+    dueDate: dueDateInput && "date" in dueDateInput ? dueDateInput.date : null,
     responsibleId: responsibleIdRaw || null,
     comment: comment || null,
     currency: normalizeCurrency(formData.get("currency")),

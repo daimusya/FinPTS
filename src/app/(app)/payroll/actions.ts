@@ -25,6 +25,7 @@ import { accrualDateForRun, postPayrollRunToAccrual } from "@/lib/payroll/post-t
 import { toDecimal } from "@/lib/money";
 import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
 import { PayrollRunStatus } from "@prisma/client";
+import { parseFormAmount, parseFormDate } from "@/lib/form-values";
 
 export async function createPayrollRunAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
@@ -38,7 +39,9 @@ export async function createPayrollRunAction(formData: FormData) {
     redirect(`/payroll/new?error=${encodeURIComponent("Заполните организацию, вид расчёта и дату выплаты")}`);
   }
 
-  const payoutDate = new Date(payoutDateRaw);
+  const payoutInput = parseFormDate(payoutDateRaw, "Дата выплаты");
+  if ("error" in payoutInput) redirect(`/payroll/new?error=${encodeURIComponent(payoutInput.error)}`);
+  const payoutDate = (payoutInput as { date: Date }).date;
   try {
     await assertPeriodOpenForDate(payoutDate);
   } catch (e) {
@@ -103,13 +106,15 @@ export async function addPayrollLineAction(runId: string, formData: FormData) {
 
   const employeeId = String(formData.get("employeeId") ?? "");
   const accrualTypeId = String(formData.get("accrualTypeId") ?? "");
-  const amountRaw = String(formData.get("amount") ?? "");
+  const amountInput = parseFormAmount(formData.get("amount"));
+  const amountRaw = "value" in amountInput ? amountInput.value : "";
   const departmentId = String(formData.get("departmentId") ?? "") || null;
   const projectId = String(formData.get("projectId") ?? "") || null;
 
-  if (!employeeId || !accrualTypeId || !amountRaw || Number(amountRaw) <= 0) {
+  if (!employeeId || !accrualTypeId) {
     redirect(`/payroll/${runId}?error=${encodeURIComponent("Выберите сотрудника, вид начисления и укажите сумму")}`);
   }
+  if ("error" in amountInput) redirect(`/payroll/${runId}?error=${encodeURIComponent(amountInput.error)}`);
 
   const [run, accrualType] = await Promise.all([
     prisma.payrollRun.findUniqueOrThrow({ where: { id: runId } }),

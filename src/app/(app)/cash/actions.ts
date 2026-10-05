@@ -27,6 +27,7 @@ import { loadRateLookup } from "@/lib/currency-rates";
 import { checkAllocation } from "@/lib/cash/allocation";
 import { ORGANIZATION_NOT_ALLOWED, accountAllowed } from "@/lib/access-guard";
 import crypto from "node:crypto";
+import { parseFormAmount, parseFormDate } from "@/lib/form-values";
 
 export async function createBankTransactionAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
@@ -35,7 +36,8 @@ export async function createBankTransactionAction(formData: FormData) {
   const cashAccountId = String(formData.get("cashAccountId") ?? "") || null;
   const operationDateRaw = String(formData.get("operationDate") ?? "");
   const direction = String(formData.get("direction") ?? "");
-  const amountRaw = String(formData.get("amount") ?? "");
+  const amountInput = parseFormAmount(formData.get("amount"));
+  const amountRaw = "value" in amountInput ? amountInput.value : "";
   const purpose = String(formData.get("purpose") ?? "").trim() || null;
   const counterpartyId = String(formData.get("counterpartyId") ?? "") || null;
   const cashFlowArticleId = String(formData.get("cashFlowArticleId") ?? "") || null;
@@ -63,9 +65,12 @@ export async function createBankTransactionAction(formData: FormData) {
       redirect(`/cash/transactions/new?error=${encodeURIComponent(ORGANIZATION_NOT_ALLOWED)}`);
     }
   }
-  if (!operationDateRaw || !direction || !amountRaw || Number(amountRaw) <= 0) {
+  if (!operationDateRaw || !direction) {
     redirect(`/cash/transactions/new?error=${encodeURIComponent("Заполните дату, направление и сумму")}`);
   }
+  if ("error" in amountInput) redirect(`/cash/transactions/new?error=${encodeURIComponent(amountInput.error)}`);
+  const dateInput = parseFormDate(operationDateRaw, "Дата операции");
+  if ("error" in dateInput) redirect(`/cash/transactions/new?error=${encodeURIComponent(dateInput.error)}`);
   // A transfer between accounts in different currencies (buying or selling currency) has its own amount on each leg.
   let secondAmount = amountRaw;
   let dealRate: string | null = null;
@@ -88,7 +93,7 @@ export async function createBankTransactionAction(formData: FormData) {
     dealRate = (amounts as { dealRate: string | null }).dealRate;
   }
 
-  const operationDate = new Date(operationDateRaw);
+  const operationDate = (dateInput as { date: Date }).date;
   await assertPeriodOpenForDate(operationDate).catch((e) => {
     redirect(`/cash/transactions/new?error=${encodeURIComponent((e as Error).message)}`);
   });

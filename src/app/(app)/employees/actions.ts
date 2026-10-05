@@ -9,6 +9,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
 import { analyticsProblem, getAccessScope } from "@/lib/access-scope";
 import { EmployeeStatus, Prisma } from "@prisma/client";
+import { parseFormAmount, parseFormDate } from "@/lib/form-values";
 
 /** Страховой стаж до приёма: целое число месяцев 0–720 или пусто. */
 function parsePriorMonths(raw: unknown): { value: number | null } | { error: string } {
@@ -41,6 +42,10 @@ export async function hireEmployeeAction(formData: FormData) {
   if (!fullName || !organizationId || !hireDateRaw) {
     redirect(`/employees/new?error=${encodeURIComponent("Заполните ФИО, организацию и дату приёма")}`);
   }
+  const hireInput = parseFormDate(hireDateRaw, "Дата приёма");
+  if ("error" in hireInput) redirect(`/employees/new?error=${encodeURIComponent(hireInput.error)}`);
+  const hireSalary = salaryRaw.trim() ? parseFormAmount(salaryRaw, "Оклад") : null;
+  if (hireSalary && "error" in hireSalary) redirect(`/employees/new?error=${encodeURIComponent(hireSalary.error)}`);
 
   const employee = await prisma.employee.create({
     data: {
@@ -49,10 +54,10 @@ export async function hireEmployeeAction(formData: FormData) {
       departmentId,
       positionId,
       workScheduleId,
-      hireDate: new Date(hireDateRaw),
+      hireDate: (hireInput as { date: Date }).date,
       paymentMethod: paymentMethod as never,
       bankAccount,
-      salary: salaryRaw ? salaryRaw : null,
+      salary: hireSalary && "value" in hireSalary ? hireSalary.value : null,
       personnelNumber,
       priorInsuranceMonths: "error" in prior ? null : prior.value,
       status: EmployeeStatus.ACTIVE,
@@ -63,10 +68,10 @@ export async function hireEmployeeAction(formData: FormData) {
     data: {
       employeeId: employee.id,
       eventType: "hire",
-      eventDate: new Date(hireDateRaw),
+      eventDate: (hireInput as { date: Date }).date,
       toDepartmentId: departmentId,
       toPositionId: positionId,
-      toSalary: salaryRaw ? salaryRaw : null,
+      toSalary: hireSalary && "value" in hireSalary ? hireSalary.value : null,
     },
   });
 
@@ -96,8 +101,10 @@ export async function updateEmployeeAction(id: string, formData: FormData) {
   const prior = parsePriorMonths(formData.get("priorInsuranceMonths"));
   if ("error" in prior) redirect(`/employees/${id}/edit?error=${encodeURIComponent(prior.error)}`);
 
+  const salaryInput = salaryRaw.trim() ? parseFormAmount(salaryRaw, "Оклад") : null;
+  if (salaryInput && "error" in salaryInput) redirect(`/employees/${id}/edit?error=${encodeURIComponent(salaryInput.error)}`);
   // A changed salary goes into the employment history with its effective date — the average earnings need it.
-  const newSalary = salaryRaw ? new Prisma.Decimal(salaryRaw) : null;
+  const newSalary = salaryInput && "value" in salaryInput ? new Prisma.Decimal(salaryInput.value) : null;
   const oldSalary = before.salary ? new Prisma.Decimal(before.salary) : null;
   const salaryChanged = Boolean(newSalary) && (!oldSalary || !newSalary!.equals(oldSalary));
   const salaryFromRaw = String(formData.get("salaryFrom") ?? "");
@@ -112,7 +119,7 @@ export async function updateEmployeeAction(id: string, formData: FormData) {
         workScheduleId,
         paymentMethod: paymentMethod as never,
         bankAccount,
-        salary: salaryRaw ? salaryRaw : null,
+        salary: salaryInput && "value" in salaryInput ? salaryInput.value : null,
         personnelNumber,
         priorInsuranceMonths: (prior as { value: number | null }).value,
       },
@@ -160,9 +167,8 @@ export async function transferEmployeeAction(id: string, formData: FormData) {
   const eventDateRaw = String(formData.get("eventDate") ?? "");
   const comment = String(formData.get("comment") ?? "").trim() || null;
 
-  if (!eventDateRaw) {
-    redirect(`/employees/${id}/transfer?error=${encodeURIComponent("Укажите дату перевода")}`);
-  }
+  const transferInput = parseFormDate(eventDateRaw, "Дата перевода");
+  if ("error" in transferInput) redirect(`/employees/${id}/transfer?error=${encodeURIComponent(transferInput.error)}`);
 
   const updated = await prisma.employee.update({
     where: { id },
@@ -173,7 +179,7 @@ export async function transferEmployeeAction(id: string, formData: FormData) {
     data: {
       employeeId: id,
       eventType: "transfer",
-      eventDate: new Date(eventDateRaw),
+      eventDate: (transferInput as { date: Date }).date,
       fromDepartmentId: before.departmentId,
       toDepartmentId: departmentId,
       fromPositionId: before.positionId,
@@ -204,20 +210,20 @@ export async function terminateEmployeeAction(id: string, formData: FormData) {
   const eventDateRaw = String(formData.get("eventDate") ?? "");
   const comment = String(formData.get("comment") ?? "").trim() || null;
 
-  if (!eventDateRaw) {
-    redirect(`/employees/${id}/terminate?error=${encodeURIComponent("Укажите дату увольнения")}`);
-  }
+  const terminationInput = parseFormDate(eventDateRaw, "Дата увольнения");
+  if ("error" in terminationInput) redirect(`/employees/${id}/terminate?error=${encodeURIComponent(terminationInput.error)}`);
+  const terminationDate = (terminationInput as { date: Date }).date;
 
   const updated = await prisma.employee.update({
     where: { id },
-    data: { status: EmployeeStatus.TERMINATED, terminationDate: new Date(eventDateRaw) },
+    data: { status: EmployeeStatus.TERMINATED, terminationDate },
   });
 
   await prisma.employmentHistory.create({
     data: {
       employeeId: id,
       eventType: "termination",
-      eventDate: new Date(eventDateRaw),
+      eventDate: terminationDate,
       fromDepartmentId: before.departmentId,
       comment,
     },
