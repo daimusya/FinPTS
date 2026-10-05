@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { requestIsHttps } from "./request-security";
 
 /**
  * Одноразовое серверное сообщение между Server Action и следующей
@@ -18,7 +19,8 @@ export async function setFlash(name: FlashName, value: string): Promise<void> {
   const store = await cookies();
   store.set(`flash_${name}`, value, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    // By the actual protocol: over plain http (a LAN server) a Secure cookie would be silently dropped.
+    secure: await requestIsHttps(),
     sameSite: "lax",
     path: "/",
     maxAge: 60,

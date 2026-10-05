@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { requestIsHttps } from "./request-security";
 import { PERMISSIONS, type PermissionCode } from "./permissions";
 import { prisma } from "./db";
 import { getUserPermissions } from "./auth";
@@ -36,7 +37,8 @@ export async function createSession(payload: SessionPayload) {
   const store = await cookies();
   store.set(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    // By the actual protocol: over plain http (a LAN server) a Secure cookie would be silently dropped.
+    secure: await requestIsHttps(),
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_TTL_SECONDS,
