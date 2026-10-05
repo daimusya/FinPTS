@@ -6,6 +6,7 @@ import { decryptSecret, maskSecret } from "@/lib/crypto/secret-box";
 import { loadChannelSettings } from "@/lib/notify-channels/deliver";
 import { retryDeliveryAction, saveChannelSettingsAction, sendTestEmailAction, sendTestTelegramAction } from "./actions";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const dateTime = (d: Date) => d.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", dateStyle: "short", timeStyle: "short" });
 
@@ -112,9 +113,9 @@ export default async function NotificationChannelsPage({ searchParams }: { searc
         </p>
 
         <div className="form-actions">
-          <button type="submit" className="btn btn-primary">
+          <SubmitButton className="btn btn-primary">
             Сохранить
-          </button>
+          </SubmitButton>
         </div>
       </form>
 
@@ -122,19 +123,19 @@ export default async function NotificationChannelsPage({ searchParams }: { searc
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Проверка и очередь</h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
           <form action={sendTestEmailAction}>
-            <button type="submit" className="btn btn-secondary" disabled={!settings.smtp.host}>
+            <SubmitButton className="btn btn-secondary" disabled={!settings.smtp.host}>
               Тестовое письмо себе
-            </button>
+            </SubmitButton>
           </form>
           <form action={sendTestTelegramAction}>
-            <button type="submit" className="btn btn-secondary" disabled={!settings.telegram.tokenEnc}>
+            <SubmitButton className="btn btn-secondary" disabled={!settings.telegram.tokenEnc}>
               Тестовое сообщение в Telegram
-            </button>
+            </SubmitButton>
           </form>
           <form action={retryDeliveryAction}>
-            <button type="submit" className="btn btn-ghost" disabled={pending + failed === 0}>
+            <SubmitButton className="btn btn-ghost" disabled={pending + failed === 0}>
               Повторить неотправленные
-            </button>
+            </SubmitButton>
           </form>
         </div>
         <p style={{ fontSize: 13 }}>

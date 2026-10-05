@@ -22,6 +22,7 @@ import {
   type TaxRateRecord,
 } from "@/lib/organizations/taxes";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { SubmitButton } from "@/components/submit-button";
 
 export interface OrganizationTaxesState {
   editTaxRateId?: string;
@@ -145,9 +146,9 @@ export async function OrganizationTaxes({ organizationId, state = {} }: { organi
                         <input type="text" name="comment" id={`tax-comment-${r.id}`} defaultValue={r.comment ?? ""} />
                       </label>
                       <div className="form-actions">
-                        <button type="submit" className="btn btn-primary btn-sm">
+                        <SubmitButton className="btn btn-primary btn-sm">
                           Сохранить
-                        </button>
+                        </SubmitButton>
                         <Link href={`${base}#taxes`} className="btn btn-ghost btn-sm">
                           Отмена
                         </Link>
@@ -224,9 +225,9 @@ export async function OrganizationTaxes({ organizationId, state = {} }: { organi
           <span>Комментарий</span>
           <input type="text" name="comment" id="tax-comment-new" placeholder="например, льгота по региону" />
         </label>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Добавить ставку
-        </button>
+        </SubmitButton>
       </form>
       {missing.length > 0 ? (
         <form action={fillStandardTaxRatesAction.bind(null, organizationId)} className="form-grid" style={{ alignItems: "flex-end" }}>
@@ -234,13 +235,13 @@ export async function OrganizationTaxes({ organizationId, state = {} }: { organi
             <span>Стандартные ставки с даты{isSoleProprietor ? " (взносы ИП — суммы этого года)" : ""}</span>
             <input type="date" name="validFrom" id="tax-standard-from" required defaultValue={yearStart} />
           </label>
-          <button type="submit" className="btn btn-ghost">
+          <SubmitButton className="btn btn-ghost">
             Заполнить стандартными:{" "}
             {missing
               // Contribution amounts depend on the year of the chosen date, so they are not shown here.
               .map((m) => (SOLE_PROPRIETOR_KINDS.has(m.kind) ? TAX_KIND_LABELS[m.kind] : `${TAX_KIND_LABELS[m.kind]} — ${describe({ taxKind: m.kind, ratePct: m.ratePct, validFrom: today })}`))
               .join("; ")}
-          </button>
+          </SubmitButton>
         </form>
       ) : null}
     </div>

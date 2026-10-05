@@ -11,6 +11,7 @@ import {
   updateContactAction,
 } from "@/app/(app)/master-data/counterparty-actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { SubmitButton } from "@/components/submit-button";
 
 export interface CounterpartyDetailsState {
   /** Строка, открытая для правки (из адреса ?editBank= / ?editContact=). */
@@ -74,9 +75,9 @@ export async function CounterpartyDetails({ counterpartyId, state = {} }: { coun
                           <input type="text" name="corrAccount" id={`bank-corr-${d.id}`} inputMode="numeric" defaultValue={d.corrAccount ?? ""} />
                         </label>
                         <div className="form-actions">
-                          <button type="submit" className="btn btn-primary btn-sm">
+                          <SubmitButton className="btn btn-primary btn-sm">
                             Сохранить
-                          </button>
+                          </SubmitButton>
                           <Link href={`${base}#bank-details`} className="btn btn-ghost btn-sm">
                             Отмена
                           </Link>
@@ -101,9 +102,9 @@ export async function CounterpartyDetails({ counterpartyId, state = {} }: { coun
                       <div className="row-actions">
                         {!d.isPrimary ? (
                           <form action={setPrimaryBankDetailAction.bind(null, counterpartyId, d.id)}>
-                            <button type="submit" className="btn btn-ghost btn-sm">
+                            <SubmitButton className="btn btn-ghost btn-sm">
                               Сделать основным
-                            </button>
+                            </SubmitButton>
                           </form>
                         ) : null}
                         <Link href={`${base}?editBank=${d.id}#bank-details`} className="btn btn-ghost btn-sm">
@@ -152,9 +153,9 @@ export async function CounterpartyDetails({ counterpartyId, state = {} }: { coun
               Сделать основным
             </label>
           ) : null}
-          <button type="submit" className="btn btn-secondary">
+          <SubmitButton className="btn btn-secondary">
             Добавить реквизиты
-          </button>
+          </SubmitButton>
         </form>
         <p className="text-muted" style={{ marginTop: 8, fontSize: 12 }}>
           Основной счёт — тот, на который платим по умолчанию; он показывается в заявках на оплату этому контрагенту. Первый
@@ -200,9 +201,9 @@ export async function CounterpartyDetails({ counterpartyId, state = {} }: { coun
                           <input type="email" name="email" id={`contact-email-${c.id}`} defaultValue={c.email ?? ""} />
                         </label>
                         <div className="form-actions">
-                          <button type="submit" className="btn btn-primary btn-sm">
+                          <SubmitButton className="btn btn-primary btn-sm">
                             Сохранить
-                          </button>
+                          </SubmitButton>
                           <Link href={`${base}#contacts`} className="btn btn-ghost btn-sm">
                             Отмена
                           </Link>
@@ -227,9 +228,9 @@ export async function CounterpartyDetails({ counterpartyId, state = {} }: { coun
                       <div className="row-actions">
                         {!c.isPrimary ? (
                           <form action={setPrimaryContactAction.bind(null, counterpartyId, c.id)}>
-                            <button type="submit" className="btn btn-ghost btn-sm">
+                            <SubmitButton className="btn btn-ghost btn-sm">
                               Сделать основным
-                            </button>
+                            </SubmitButton>
                           </form>
                         ) : null}
                         <Link href={`${base}?editContact=${c.id}#contacts`} className="btn btn-ghost btn-sm">
@@ -278,9 +279,9 @@ export async function CounterpartyDetails({ counterpartyId, state = {} }: { coun
               Сделать основным
             </label>
           ) : null}
-          <button type="submit" className="btn btn-secondary">
+          <SubmitButton className="btn btn-secondary">
             Добавить контакт
-          </button>
+          </SubmitButton>
         </form>
         <p className="text-muted" style={{ marginTop: 8, fontSize: 12 }}>
           Основной контакт — к кому обращаться в первую очередь; он показывается в заявках на оплату и документах начисления этого

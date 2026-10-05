@@ -7,6 +7,7 @@ import { deleteRoleAction, renameRoleAction, updateRolePermissionsAction } from 
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { roleDeleteProblem } from "@/lib/roles";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function EditRolePage({
   params,
@@ -65,9 +66,9 @@ export default async function EditRolePage({
               <span>Название роли</span>
               <input type="text" name="name" id="role-name" defaultValue={role.name} required maxLength={100} />
             </label>
-            <button type="submit" className="btn btn-secondary">
+            <SubmitButton className="btn btn-secondary">
               Переименовать
-            </button>
+            </SubmitButton>
           </form>
         </div>
       ) : null}
@@ -100,9 +101,9 @@ export default async function EditRolePage({
           </div>
 
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Сохранить права
-            </button>
+            </SubmitButton>
             <Link href="/admin/roles" className="btn btn-secondary">
               Отмена
             </Link>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Decimal from "decimal.js";
 import { suggestSplit, MAX_PAYMENT_PARTS, type ScheduleRowInput } from "@/lib/payment-requests/parts";
+import { SubmitButton } from "@/components/submit-button";
 
 const money = (value: Decimal, currency: string) =>
   new Intl.NumberFormat("ru-RU", { style: "currency", currency: /^[A-Z]{3}$/.test(currency) ? currency : "RUB" }).format(value.toNumber());
@@ -103,9 +104,9 @@ export function PaymentScheduleEditor({
               Поровну
             </button>
           ) : null}
-          <button type="submit" className="btn btn-primary btn-sm">
+          <SubmitButton className="btn btn-primary btn-sm">
             {submitLabel}
-          </button>
+          </SubmitButton>
         </div>
       </div>
     </form>

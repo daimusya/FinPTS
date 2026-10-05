@@ -4,6 +4,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { createUserAction } from "../actions";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function NewUserPage({
   searchParams,
@@ -58,9 +59,9 @@ export default async function NewUserPage({
           </div>
 
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Создать (временный пароль будет сгенерирован)
-            </button>
+            </SubmitButton>
             <Link href="/admin/users" className="btn btn-secondary">
               Отмена
             </Link>

@@ -4,6 +4,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { createRuleAction } from "../actions";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function NewClassificationRulePage({
   searchParams,
@@ -137,9 +138,9 @@ export default async function NewClassificationRulePage({
           </div>
 
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Создать
-            </button>
+            </SubmitButton>
             <Link href="/cash/classification-rules" className="btn btn-secondary">
               Отмена
             </Link>

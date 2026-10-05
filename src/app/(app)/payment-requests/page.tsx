@@ -14,6 +14,7 @@ import { Pager } from "@/components/pager";
 import { textSearchWhere } from "@/lib/text-search";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 /** «В работе» — всё, с чем ещё что-то делают (отклонённую автор может доработать); «Завершённые» — оплаченные и отменённые. */
 const IN_WORK: PaymentRequestStatus[] = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "RETURNED", "REJECTED"];
@@ -134,9 +135,9 @@ export default async function PaymentRequestsPage({
         <form style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {showDone ? <input type="hidden" name="view" value="done" /> : null}
           <input type="search" name="q" id="requests-search" defaultValue={q ?? ""} placeholder="Контрагент, ИНН, комментарий" style={{ minWidth: 240 }} />
-          <button type="submit" className="btn btn-secondary btn-sm">
+          <SubmitButton className="btn btn-secondary btn-sm">
             Найти
-          </button>
+          </SubmitButton>
           {q ? (
             <Link href={showDone ? "/payment-requests?view=done" : "/payment-requests"} className="btn btn-ghost btn-sm">
               Сбросить
@@ -230,9 +231,9 @@ export default async function PaymentRequestsPage({
                         <>
                           <form action={approvePaymentRequestAction.bind(null, req.id)}>
                             <input type="hidden" name="expectedStep" value={req.currentStep} />
-                            <button type="submit" className="btn btn-primary btn-sm">
+                            <SubmitButton className="btn btn-primary btn-sm">
                               Согласовать
-                            </button>
+                            </SubmitButton>
                           </form>
                           {/* Rejection and return for rework need a reason, so they are done on the request page. */}
                           <Link href={`/payment-requests/${req.id}#decision`} className="btn btn-danger btn-sm">
@@ -242,9 +243,9 @@ export default async function PaymentRequestsPage({
                       ) : null}
                       {canPay && req.status === "APPROVED" ? (
                         <form action={markPaymentRequestPaidAction.bind(null, req.id)}>
-                          <button type="submit" className="btn btn-secondary btn-sm">
+                          <SubmitButton className="btn btn-secondary btn-sm">
                             Отметить оплаченной
-                          </button>
+                          </SubmitButton>
                         </form>
                       ) : null}
                       {canApprove && (req.status === "PENDING_APPROVAL" || req.status === "APPROVED" || req.status === "RETURNED") ? (

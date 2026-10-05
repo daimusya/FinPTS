@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/sidebar";
 import { unreadNotificationCount } from "@/lib/notifications";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { logoutAction } from "./actions";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
@@ -35,9 +36,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               </div>
             </div>
             <form action={logoutAction}>
-              <button type="submit" className="btn btn-secondary btn-sm">
+              <SubmitButton className="btn btn-secondary btn-sm">
                 Выйти
-              </button>
+              </SubmitButton>
             </form>
           </div>
         </header>

@@ -7,6 +7,7 @@ import Link from "next/link";
 import { formatMoney } from "@/lib/money";
 import { loadProjectResult } from "@/lib/integrations/project-results";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const EVENT_LABELS: Record<string, string> = {
   payment_status_changed: "Статус оплаты документа",
@@ -99,9 +100,9 @@ export default async function Bitrix24IntegrationPage({
             Интеграция включена (без адреса вебхука включить нельзя)
           </label>
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Сохранить
-            </button>
+            </SubmitButton>
           </div>
         </form>
         {!profile?.isEnabled ? (
@@ -182,9 +183,9 @@ export default async function Bitrix24IntegrationPage({
           </table>
         </div>
         <form action={enqueueAllProjectResultsAction}>
-          <button type="submit" className="btn btn-secondary" disabled={projectResults.length === 0}>
+          <SubmitButton className="btn btn-secondary" disabled={projectResults.length === 0}>
             Пересчитать и поставить в очередь изменившиеся результаты
-          </button>
+          </SubmitButton>
         </form>
       </div>
 
@@ -231,9 +232,9 @@ export default async function Bitrix24IntegrationPage({
                     <td>
                       {event.status !== "sent" ? (
                         <form action={sendOutboxEventAction.bind(null, event.id)}>
-                          <button type="submit" className="btn btn-ghost btn-sm">
+                          <SubmitButton className="btn btn-ghost btn-sm">
                             Отправить
-                          </button>
+                          </SubmitButton>
                         </form>
                       ) : null}
                     </td>

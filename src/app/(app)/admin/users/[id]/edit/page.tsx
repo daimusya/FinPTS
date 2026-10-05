@@ -5,6 +5,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { updateUserAction, updateUserAccessScopeAction } from "../../actions";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function EditUserPage({
   params,
@@ -91,9 +92,9 @@ export default async function EditUserPage({
           </div>
 
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Сохранить
-            </button>
+            </SubmitButton>
             <Link href="/admin/users" className="btn btn-secondary">
               Отмена
             </Link>
@@ -147,9 +148,9 @@ export default async function EditUserPage({
             </div>
           </div>
           <div className="form-actions">
-            <button type="submit" className="btn btn-secondary">
+            <SubmitButton className="btn btn-secondary">
               Сохранить ограничение видимости
-            </button>
+            </SubmitButton>
           </div>
         </form>
       </div>

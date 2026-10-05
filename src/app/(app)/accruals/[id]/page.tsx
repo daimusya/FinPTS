@@ -22,6 +22,7 @@ import { isVisible } from "@/lib/access-guard";
 import { canPlanDocuments } from "@/lib/payment-plan/service";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function AccrualDocumentPage({
   params,
@@ -102,9 +103,9 @@ export default async function AccrualDocumentPage({
                 Изменить
               </Link>
               <form action={postAccrualDocumentAction.bind(null, doc.id)}>
-                <button type="submit" className="btn btn-primary">
+                <SubmitButton className="btn btn-primary">
                   Провести
-                </button>
+                </SubmitButton>
               </form>
             </>
           ) : null}
@@ -186,9 +187,9 @@ export default async function AccrualDocumentPage({
                   <span>Причина (необязательно)</span>
                   <input type="text" name="reason" maxLength={500} placeholder="Например: заказчик просит отсрочку до конца месяца" />
                 </label>
-                <button type="submit" className="btn btn-secondary">
+                <SubmitButton className="btn btn-secondary">
                   Перенести срок
-                </button>
+                </SubmitButton>
               </form>
               <form action={assignDocumentAccountAction.bind(null, doc.id)} className="form-grid" style={{ alignItems: "flex-end", marginTop: 10 }}>
                 <label className="field" style={{ gridColumn: "span 2" }}>
@@ -197,9 +198,9 @@ export default async function AccrualDocumentPage({
                     <PaymentAccountOptions bankAccounts={orgBankAccounts} cashAccounts={orgCashAccounts} />
                   </select>
                 </label>
-                <button type="submit" className="btn btn-secondary">
+                <SubmitButton className="btn btn-secondary">
                   Сохранить счёт
-                </button>
+                </SubmitButton>
               </form>
               <p className="text-muted" style={{ marginTop: 8, fontSize: 12 }}>
                 Меняется только срок оплаты — суммы и проводки документа остаются прежними, поэтому срок можно перенести и у

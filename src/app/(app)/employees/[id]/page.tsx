@@ -8,6 +8,7 @@ import { formatMoney } from "@/lib/money";
 import { isVisible } from "@/lib/access-guard";
 import { setProjectAllocationAction, removeProjectAllocationAction } from "../actions";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   hire: "Приём",
@@ -131,9 +132,9 @@ export default async function EmployeeDetailPage({
                   <td>
                     {canManage ? (
                       <form action={removeProjectAllocationAction.bind(null, id, a.id)}>
-                        <button type="submit" className="btn btn-ghost btn-sm">
+                        <SubmitButton className="btn btn-ghost btn-sm">
                           Снять
-                        </button>
+                        </SubmitButton>
                       </form>
                     ) : null}
                   </td>
@@ -166,9 +167,9 @@ export default async function EmployeeDetailPage({
               <span>Доля занятости, %</span>
               <input type="number" step="1" min="1" max="100" name="sharePct" required />
             </label>
-            <button type="submit" className="btn btn-secondary">
+            <SubmitButton className="btn btn-secondary">
               Добавить
-            </button>
+            </SubmitButton>
           </form>
         ) : null}
       </div>

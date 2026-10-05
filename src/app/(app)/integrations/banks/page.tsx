@@ -13,6 +13,7 @@ import {
 } from "./actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const dateTime = (d: Date | null) => (d ? d.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", dateStyle: "short", timeStyle: "short" }) : "—");
 
@@ -48,9 +49,9 @@ export default async function BankApiPage({ searchParams }: { searchParams: Prom
         </div>
         {connections.length > 0 ? (
           <form action={syncAllBankConnectionsAction}>
-            <button type="submit" className="btn btn-secondary">
+            <SubmitButton className="btn btn-secondary">
               Загрузить все счета сейчас
-            </button>
+            </SubmitButton>
           </form>
         ) : null}
       </div>
@@ -111,14 +112,14 @@ export default async function BankApiPage({ searchParams }: { searchParams: Prom
                     <td>
                       <div className="row-actions">
                         <form action={syncBankConnectionAction.bind(null, c.id)}>
-                          <button type="submit" className="btn btn-secondary btn-sm">
+                          <SubmitButton className="btn btn-secondary btn-sm">
                             Загрузить сейчас
-                          </button>
+                          </SubmitButton>
                         </form>
                         <form action={toggleBankConnectionAction.bind(null, c.id)}>
-                          <button type="submit" className="btn btn-ghost btn-sm">
+                          <SubmitButton className="btn btn-ghost btn-sm">
                             {c.isActive ? "Выключить" : "Включить"}
-                          </button>
+                          </SubmitButton>
                         </form>
                         <Link href={`/integrations/banks?replace=${c.id}#replace`} className="btn btn-ghost btn-sm">
                           Заменить реквизиты
@@ -151,9 +152,9 @@ export default async function BankApiPage({ searchParams }: { searchParams: Prom
           <form action={replaceBankCredentialsAction.bind(null, sp.replace)} className="form-grid" style={{ alignItems: "flex-end" }}>
             <CredentialFields provider={connections.find((c) => c.id === sp.replace)!.provider} />
             <div className="form-actions">
-              <button type="submit" className="btn btn-primary">
+              <SubmitButton className="btn btn-primary">
                 Проверить и сохранить
-              </button>
+              </SubmitButton>
               <Link href="/integrations/banks" className="btn btn-ghost">
                 Отмена
               </Link>
@@ -198,9 +199,9 @@ export default async function BankApiPage({ searchParams }: { searchParams: Prom
               <input type="date" name="syncFrom" id="bank-api-from" required defaultValue={defaultFrom} />
             </label>
             <CredentialFields provider={null} />
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Проверить и подключить
-            </button>
+            </SubmitButton>
           </form>
         )}
         <p className="text-muted" style={{ marginTop: 10 }}>

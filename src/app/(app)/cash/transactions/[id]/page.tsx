@@ -17,6 +17,7 @@ import {
 import { departmentScopeWhere, getAccessScope, organizationIdScopeWhere, projectScopeWhere } from "@/lib/access-scope";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function CashTransactionDetailPage({
   params,
@@ -222,9 +223,9 @@ export default async function CashTransactionDetailPage({
           ) : null}
           {canManage ? (
             <div className="form-actions">
-              <button type="submit" className="btn btn-primary">
+              <SubmitButton className="btn btn-primary">
                 Сохранить классификацию
-              </button>
+              </SubmitButton>
             </div>
           ) : null}
         </form>
@@ -306,9 +307,9 @@ export default async function CashTransactionDetailPage({
                 операции; разница с курсом документа попадёт в курсовые разницы.
               </p>
             ) : null}
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Сопоставить
-            </button>
+            </SubmitButton>
           </form>
         ) : null}
         {candidateDocuments.length === 0 && remaining > 0 ? (
@@ -380,9 +381,9 @@ export default async function CashTransactionDetailPage({
               Если операция сопоставлена с начислениями, сумму нельзя сделать меньше сопоставленной, а направление — поменять.
             </p>
             <div className="form-actions">
-              <button type="submit" className="btn btn-primary">
+              <SubmitButton className="btn btn-primary">
                 Сохранить исправление
-              </button>
+              </SubmitButton>
             </div>
           </form>
         </details>
@@ -406,9 +407,9 @@ export default async function CashTransactionDetailPage({
               Да, удалить {linkedTransfer ? "обе операции перевода" : "операцию"}
             </label>
             <div className="form-actions">
-              <button type="submit" className="btn btn-danger" disabled={tx.allocations.length > 0}>
+              <SubmitButton className="btn btn-danger" disabled={tx.allocations.length > 0}>
                 Удалить
-              </button>
+              </SubmitButton>
             </div>
           </form>
         </details>

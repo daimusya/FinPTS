@@ -5,6 +5,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { hireEmployeeAction } from "../actions";
 import { departmentScopeWhere, getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function NewEmployeePage({
   searchParams,
@@ -120,9 +121,9 @@ export default async function NewEmployeePage({
           </div>
 
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Принять
-            </button>
+            </SubmitButton>
             <Link href="/employees" className="btn btn-secondary">
               Отмена
             </Link>

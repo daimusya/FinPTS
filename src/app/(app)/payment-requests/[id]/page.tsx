@@ -37,6 +37,7 @@ import { isVisible } from "@/lib/access-guard";
 import { currentDeciders, hasDecidersIgnoringAccess, noDecidersReason } from "@/lib/payment-requests/notify";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const STATE_LABELS: Record<TimelineState, string> = {
   approved: "Согласовано",
@@ -315,9 +316,9 @@ export default async function PaymentRequestPage({
                     <td>
                       {!part.paidAt && canPay && request.status === "APPROVED" ? (
                         <form action={markPaymentPartPaidAction.bind(null, request.id, part.id)}>
-                          <button type="submit" className="btn btn-secondary btn-sm">
+                          <SubmitButton className="btn btn-secondary btn-sm">
                             Оплачено
-                          </button>
+                          </SubmitButton>
                         </form>
                       ) : null}
                     </td>
@@ -342,9 +343,9 @@ export default async function PaymentRequestPage({
               <span>Причина переноса (необязательно)</span>
               <input type="text" name="reason" maxLength={500} placeholder="Например: ждём поступления от заказчика" />
             </label>
-            <button type="submit" className="btn btn-secondary">
+            <SubmitButton className="btn btn-secondary">
               Перенести срок
-            </button>
+            </SubmitButton>
           </form>
         ) : null}
 
@@ -370,9 +371,9 @@ export default async function PaymentRequestPage({
             />
             {hasParts && summary.paidCount === 0 ? (
               <form action={removePaymentScheduleAction.bind(null, request.id)} style={{ marginTop: 8 }}>
-                <button type="submit" className="btn btn-ghost btn-sm">
+                <SubmitButton className="btn btn-ghost btn-sm">
                   Объединить в один платёж
-                </button>
+                </SubmitButton>
               </form>
             ) : null}
           </details>
@@ -386,9 +387,9 @@ export default async function PaymentRequestPage({
                 <PaymentAccountOptions bankAccounts={orgBankAccounts} cashAccounts={orgCashAccounts} />
               </select>
             </label>
-            <button type="submit" className="btn btn-secondary">
+            <SubmitButton className="btn btn-secondary">
               Сохранить счёт
-            </button>
+            </SubmitButton>
           </form>
         ) : null}
 
@@ -533,9 +534,9 @@ export default async function PaymentRequestPage({
               <span>Что исправлено (увидят согласующие)</span>
               <textarea name="resubmitNote" id="rework-note" rows={2} maxLength={1000} />
             </label>
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Отправить на согласование заново
-            </button>
+            </SubmitButton>
           </form>
           <p className="text-muted" style={{ fontSize: 12, marginTop: 8 }}>
             Согласование начнётся с первого шага, маршрут подберётся под новую сумму. Если сумма изменится, график оплаты
@@ -558,15 +559,15 @@ export default async function PaymentRequestPage({
               <textarea name="comment" rows={3} maxLength={DECISION_COMMENT_MAX_LENGTH} />
             </label>
             <div className="form-actions">
-              <button type="submit" className="btn btn-primary">
+              <SubmitButton className="btn btn-primary">
                 Согласовать
-              </button>
-              <button type="submit" className="btn btn-secondary" formAction={returnPaymentRequestAction.bind(null, request.id)}>
+              </SubmitButton>
+              <SubmitButton className="btn btn-secondary" formAction={returnPaymentRequestAction.bind(null, request.id)}>
                 Вернуть на доработку
-              </button>
-              <button type="submit" className="btn btn-danger" formAction={rejectPaymentRequestAction.bind(null, request.id)}>
+              </SubmitButton>
+              <SubmitButton className="btn btn-danger" formAction={rejectPaymentRequestAction.bind(null, request.id)}>
                 Отклонить
-              </button>
+              </SubmitButton>
             </div>
           </form>
         </div>
@@ -577,9 +578,9 @@ export default async function PaymentRequestPage({
           {canPay && request.status === "APPROVED" ? (
             <form action={markPaymentRequestPaidAction.bind(null, request.id)}>
               <input type="hidden" name="returnTo" value="detail" />
-              <button type="submit" className="btn btn-secondary">
+              <SubmitButton className="btn btn-secondary">
                 Отметить оплаченной
-              </button>
+              </SubmitButton>
             </form>
           ) : null}
           {canApprove && (pending || request.status === "APPROVED" || request.status === "RETURNED") ? (

@@ -27,6 +27,7 @@ import { LOAN_REPAYMENT_LABELS, type LoanRepayment } from "@/lib/financial-model
 import { loadNewServices, MAX_PAYMENT_DAYS, MAX_RAMP_UP_MONTHS } from "@/lib/financial-model/new-services";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const HORIZON_MONTHS = 12;
 
@@ -168,9 +169,9 @@ export default async function ScenarioDetailPage({
           <span>Месяц начала</span>
           <input type="number" name="startMonth" min="1" max="12" defaultValue={startMonth} style={{ width: 70 }} />
         </label>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Показать
-        </button>
+        </SubmitButton>
       </form>
 
       <div className="stat-grid">
@@ -259,9 +260,9 @@ export default async function ScenarioDetailPage({
             </table>
           </div>
           {canManage ? (
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Сохранить драйверы
-            </button>
+            </SubmitButton>
           ) : null}
         </form>
       </div>
@@ -284,9 +285,9 @@ export default async function ScenarioDetailPage({
               {canManage ? (
                 <form action={removeScenarioDepartmentAction.bind(null, id, dept.id)}>
                   {keepStart}
-                  <button type="submit" className="btn btn-ghost btn-sm" aria-label={`Убрать ${dept.name}`}>
+                  <SubmitButton className="btn btn-ghost btn-sm" aria-label={`Убрать ${dept.name}`}>
                     Убрать
-                  </button>
+                  </SubmitButton>
                 </form>
               ) : null}
             </span>
@@ -307,9 +308,9 @@ export default async function ScenarioDetailPage({
                 ))}
               </select>
             </label>
-            <button type="submit" className="btn btn-secondary">
+            <SubmitButton className="btn btn-secondary">
               Добавить подразделение
-            </button>
+            </SubmitButton>
           </form>
         ) : null}
       </div>
@@ -409,9 +410,9 @@ export default async function ScenarioDetailPage({
                           <input type="number" name="customerPaymentDays" min={0} max={MAX_PAYMENT_DAYS} step={1} defaultValue={service?.customerPaymentDays ?? ""} placeholder="как у сценария" style={{ width: 130 }} />
                         </label>
                         <div className="form-actions">
-                          <button type="submit" className="btn btn-primary btn-sm">
+                          <SubmitButton className="btn btn-primary btn-sm">
                             Сохранить
-                          </button>
+                          </SubmitButton>
                           <Link href={`/financial-model/${id}?startYear=${startYear}&startMonth=${startMonth}`} className="btn btn-ghost btn-sm">
                             Отмена
                           </Link>
@@ -533,9 +534,9 @@ export default async function ScenarioDetailPage({
               <span>Отсрочка оплаты клиентов, дней</span>
               <input type="number" name="customerPaymentDays" min={0} max={MAX_PAYMENT_DAYS} step={1} defaultValue={noService?.customerPaymentDays ?? ""} placeholder="как у сценария" style={{ width: 130 }} />
             </label>
-            <button type="submit" className="btn btn-secondary">
+            <SubmitButton className="btn btn-secondary">
               Добавить услугу
-            </button>
+            </SubmitButton>
           </form>
         ) : null}
       </div>
@@ -649,9 +650,9 @@ export default async function ScenarioDetailPage({
               <span>Досрочно, ₽</span>
               <input type="text" inputMode="decimal" name="prepaymentAmount" placeholder="необязательно" style={{ width: 130 }} />
             </label>
-            <button type="submit" className="btn btn-secondary">
+            <SubmitButton className="btn btn-secondary">
               Добавить кредит
-            </button>
+            </SubmitButton>
           </form>
         ) : null}
       </div>
@@ -730,9 +731,9 @@ export default async function ScenarioDetailPage({
             />
           </label>
           {canManage ? (
-            <button type="submit" className="btn btn-secondary">
+            <SubmitButton className="btn btn-secondary">
               Сохранить налог
-            </button>
+            </SubmitButton>
           ) : null}
           <span className="text-muted">Сейчас: {tax.label}</span>
         </form>

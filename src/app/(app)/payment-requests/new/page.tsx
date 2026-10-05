@@ -7,6 +7,7 @@ import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createPaymentRequestAction } from "../actions";
 import { getAccessScope, organizationIdScopeWhere, organizationScopeWhere } from "@/lib/access-scope";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function NewPaymentRequestPage({
   searchParams,
@@ -125,9 +126,9 @@ export default async function NewPaymentRequestPage({
             <input type="text" name="comment" />
           </label>
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Отправить на согласование
-            </button>
+            </SubmitButton>
             <Link href="/payment-requests" className="btn btn-secondary">
               Отмена
             </Link>

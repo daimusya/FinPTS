@@ -13,6 +13,7 @@ import type Decimal from "decimal.js";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { parseDateParam } from "@/lib/date-param";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const CATEGORY_LABELS: Record<string, string> = { ASSET: "актив", LIABILITY: "обязательство", EQUITY: "капитал" };
 
@@ -97,9 +98,9 @@ export default async function BalanceReportPage({
             ))}
           </select>
         </label>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Применить
-        </button>
+        </SubmitButton>
       </form>
 
       {sp.error ? (
@@ -266,9 +267,9 @@ export default async function BalanceReportPage({
               <span>Комментарий</span>
               <input type="text" name="comment" placeholder="например, остаток на начало учёта" />
             </label>
-            <button type="submit" className="btn btn-secondary">
+            <SubmitButton className="btn btn-secondary">
               Добавить операцию
-            </button>
+            </SubmitButton>
           </form>
         ) : null}
         <p className="text-muted" style={{ marginTop: 12 }}>

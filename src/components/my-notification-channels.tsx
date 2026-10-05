@@ -7,6 +7,7 @@ import {
   unlinkTelegramAction,
 } from "@/app/(app)/notifications/actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { SubmitButton } from "@/components/submit-button";
 
 /** Страница «Уведомления»: куда ещё дублировать уведомления этому пользователю. */
 export async function MyNotificationChannels({ userId, error, notice }: { userId: string; error?: string; notice?: string }) {
@@ -47,9 +48,9 @@ export async function MyNotificationChannels({ userId, error, notice }: { userId
           В Telegram {user.telegramChatId ? "(привязан)" : <span className="text-muted">— сначала привяжите ниже</span>}
         </label>
         <div>
-          <button type="submit" className="btn btn-secondary btn-sm">
+          <SubmitButton className="btn btn-secondary btn-sm">
             Сохранить
-          </button>
+          </SubmitButton>
         </div>
       </form>
 
@@ -69,22 +70,22 @@ export async function MyNotificationChannels({ userId, error, notice }: { userId
               </p>
               <div style={{ display: "flex", gap: 8 }}>
                 <form action={checkTelegramLinkAction}>
-                  <button type="submit" className="btn btn-primary btn-sm">
+                  <SubmitButton className="btn btn-primary btn-sm">
                     Проверить
-                  </button>
+                  </SubmitButton>
                 </form>
                 <form action={startTelegramLinkAction}>
-                  <button type="submit" className="btn btn-ghost btn-sm">
+                  <SubmitButton className="btn btn-ghost btn-sm">
                     Новый код
-                  </button>
+                  </SubmitButton>
                 </form>
               </div>
             </div>
           ) : (
             <form action={startTelegramLinkAction}>
-              <button type="submit" className="btn btn-secondary btn-sm">
+              <SubmitButton className="btn btn-secondary btn-sm">
                 Привязать Telegram
-              </button>
+              </SubmitButton>
             </form>
           )}
         </div>

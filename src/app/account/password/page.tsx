@@ -5,6 +5,7 @@ import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import { changeOwnPasswordAction, endOtherSessionsAction } from "./actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 /** Смена собственного пароля; при пароле, выданном администратором, — обязательна. */
 export default async function ChangePasswordPage({ searchParams }: { searchParams: Promise<{ error?: string; done?: string; sessions?: string }> }) {
@@ -61,9 +62,9 @@ export default async function ChangePasswordPage({ searchParams }: { searchParam
             Не короче {MIN_PASSWORD_LENGTH} символов, буквы и цифры, без вашей почты. После смены на других устройствах нужно будет
             войти заново.
           </p>
-          <button type="submit" className="btn btn-primary">
+          <SubmitButton className="btn btn-primary">
             Сменить пароль
-          </button>
+          </SubmitButton>
         </form>
 
         {!session.mustChangePassword ? (

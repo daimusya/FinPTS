@@ -3,6 +3,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { createScenarioAction } from "../actions";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function NewScenarioPage({
   searchParams,
@@ -47,9 +48,9 @@ export default async function NewScenarioPage({
             </label>
           </div>
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Создать
-            </button>
+            </SubmitButton>
             <Link href="/financial-model" className="btn btn-secondary">
               Отмена
             </Link>

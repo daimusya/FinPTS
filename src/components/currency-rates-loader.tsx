@@ -2,6 +2,7 @@ import { loadCbrRatesAction } from "@/app/(app)/master-data/currency-rate-action
 import { accountCurrencies } from "@/lib/currency-rates";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
 import { localDateKey } from "@/lib/payment-calendar";
+import { SubmitButton } from "@/components/submit-button";
 
 /**
  * Загрузка официальных курсов ЦБ РФ за период. Валюты счетов и касс
@@ -40,9 +41,9 @@ export async function CurrencyRatesLoader({ error }: { error?: string }) {
             ))}
           </div>
         </fieldset>
-        <button type="submit" className="btn btn-primary">
+        <SubmitButton className="btn btn-primary">
           Загрузить с сайта ЦБ
-        </button>
+        </SubmitButton>
       </form>
     </div>
   );

@@ -6,6 +6,7 @@ import { decryptSecret, maskSecret } from "@/lib/crypto/secret-box";
 import { INN_PROFILE_SYSTEM, lookupRequisitesByInn } from "@/lib/integrations/inn-service";
 import { saveInnLookupSettingsAction } from "./actions";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const FIELD_LABELS: Array<[keyof import("@/lib/integrations/inn").PartyRequisites, string]> = [
   ["fullName", "Полное наименование"],
@@ -96,9 +97,9 @@ export default async function InnLookupSettingsPage({
             </span>
           </label>
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Сохранить
-            </button>
+            </SubmitButton>
           </div>
         </form>
       </div>
@@ -110,9 +111,9 @@ export default async function InnLookupSettingsPage({
             <span>ИНН</span>
             <input type="text" name="testInn" inputMode="numeric" defaultValue={sp.testInn ?? ""} required style={{ width: 160 }} />
           </label>
-          <button type="submit" className="btn btn-secondary">
+          <SubmitButton className="btn btn-secondary">
             Найти (ничего не сохраняется)
-          </button>
+          </SubmitButton>
         </form>
         {test ? (
           test.found ? (

@@ -8,6 +8,7 @@ import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createAccrualDocumentAction } from "../actions";
 import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function NewAccrualDocumentPage({
   searchParams,
@@ -148,9 +149,9 @@ export default async function NewAccrualDocumentPage({
           />
 
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Сохранить как черновик
-            </button>
+            </SubmitButton>
             <Link href="/accruals" className="btn btn-secondary">
               Отмена
             </Link>

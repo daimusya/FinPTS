@@ -4,6 +4,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { SCENARIO_TYPE_LABELS } from "@/lib/financial-model/drivers";
 import { archiveScenarioAction } from "./actions";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function FinancialModelPage() {
   const session = await getSession();
@@ -71,9 +72,9 @@ export default async function FinancialModelPage() {
                   <td>
                     {canManage && !s.isArchived ? (
                       <form action={archiveScenarioAction.bind(null, s.id)}>
-                        <button type="submit" className="btn btn-ghost btn-sm">
+                        <SubmitButton className="btn btn-ghost btn-sm">
                           В архив
-                        </button>
+                        </SubmitButton>
                       </form>
                     ) : null}
                   </td>

@@ -5,6 +5,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney } from "@/lib/money";
 import { createPeriodAction, reopenPeriodAction } from "./actions";
 import type { ClosingSnapshot } from "@/lib/period-close/snapshot";
+import { SubmitButton } from "@/components/submit-button";
 
 const MONTH_NAMES = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -58,9 +59,9 @@ export default async function PeriodsPage() {
               ))}
             </select>
           </label>
-          <button type="submit" className="btn btn-primary">
+          <SubmitButton className="btn btn-primary">
             Создать период
-          </button>
+          </SubmitButton>
         </form>
       </div>
 
@@ -128,9 +129,9 @@ export default async function PeriodsPage() {
                       </Link>
                     ) : canReopen ? (
                       <form action={reopenPeriodAction.bind(null, period.id)}>
-                        <button type="submit" className="btn btn-secondary btn-sm">
+                        <SubmitButton className="btn btn-secondary btn-sm">
                           Открыть заново
-                        </button>
+                        </SubmitButton>
                       </form>
                     ) : null}
                   </td>

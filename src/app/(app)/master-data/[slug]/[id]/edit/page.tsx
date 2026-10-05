@@ -12,6 +12,7 @@ import { OrganizationTaxes } from "@/components/organization-taxes";
 import { getAccessScope } from "@/lib/access-scope";
 import { dictionaryRecordAllowed } from "@/lib/dictionaries/scope";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function EditDictionaryItemPage({
   params,
@@ -79,9 +80,9 @@ export default async function EditDictionaryItemPage({
         <form action={updateDictionaryItem.bind(null, slug, id)}>
           <DictionaryFormFields fields={resolvedFields} />
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Сохранить
-            </button>
+            </SubmitButton>
             <Link href={`/master-data/${slug}`} className="btn btn-secondary">
               Отмена
             </Link>

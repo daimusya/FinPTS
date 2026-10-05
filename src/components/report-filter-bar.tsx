@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import type { ReactNode } from "react";
 import { getSession } from "@/lib/session";
 import { UNRESTRICTED_SCOPE, departmentScopeWhere, getAccessScope, organizationScopeWhere, projectScopeWhere } from "@/lib/access-scope";
+import { SubmitButton } from "@/components/submit-button";
 
 const MONTH_NAMES = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -142,9 +143,9 @@ export async function ReportFilterBar({
         </select>
       </label>
       {children}
-      <button type="submit" className="btn btn-secondary">
+      <SubmitButton className="btn btn-secondary">
         Применить
-      </button>
+      </SubmitButton>
     </form>
   );
 }

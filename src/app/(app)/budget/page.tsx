@@ -11,6 +11,7 @@ import { dimKey, parseDimKey, planLevelWarning, type BudgetSlice } from "@/lib/b
 import { copyBudgetFromPreviousYearAction, importBudgetAction, saveBudgetAction, type BudgetKindSlug } from "./actions";
 import type Decimal from "decimal.js";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 // Digits with optional thousands spaces and up to two decimals after a dot or comma; checked again on the server.
@@ -181,9 +182,9 @@ export default async function BudgetPage({
             ) : null}
           </select>
         </label>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Показать
-        </button>
+        </SubmitButton>
       </form>
 
       {sp.saved ? (
@@ -287,9 +288,9 @@ export default async function BudgetPage({
               </table>
             </div>
             {canManage ? (
-              <button type="submit" className="btn btn-primary">
+              <SubmitButton className="btn btn-primary">
                 Сохранить план на {year} год
-              </button>
+              </SubmitButton>
             ) : null}
           </form>
         )}
@@ -310,9 +311,9 @@ export default async function BudgetPage({
                 <input type="file" name="file" id="budget-file" accept=".xlsx,.xls,.csv" required />
               </label>
               <div className="form-actions" style={{ marginTop: 10 }}>
-                <button type="submit" className="btn btn-secondary">
+                <SubmitButton className="btn btn-secondary">
                   Загрузить в «{sliceLabel}»
-                </button>
+                </SubmitButton>
               </div>
             </form>
             <p className="text-muted" style={{ marginTop: 8, fontSize: 12 }}>
@@ -333,9 +334,9 @@ export default async function BudgetPage({
                 Заменить текущий план на {year} год, если он уже есть
               </label>
               <div className="form-actions" style={{ marginTop: 10 }}>
-                <button type="submit" className="btn btn-secondary">
+                <SubmitButton className="btn btn-secondary">
                   Скопировать
-                </button>
+                </SubmitButton>
               </div>
             </form>
             <p className="text-muted" style={{ marginTop: 8, fontSize: 12 }}>

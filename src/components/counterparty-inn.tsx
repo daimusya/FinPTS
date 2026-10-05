@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { createCounterpartyByInnAction, refreshCounterpartyByInnAction } from "@/app/(app)/integrations/inn/actions";
 import { getDadataApiKey } from "@/lib/integrations/inn-service";
 import Link from "next/link";
+import { SubmitButton } from "@/components/submit-button";
 
 const SOURCE_LABELS: Record<string, string> = { DADATA: "ЕГРЮЛ/ЕГРИП через DaData", "1C": "импорт из 1С" };
 
@@ -25,9 +26,9 @@ export async function CounterpartyInnCard({ counterpartyId }: { counterpartyId: 
         <p className="text-muted">Укажите ИНН в форме выше, чтобы обновлять реквизиты из ЕГРЮЛ/ЕГРИП.</p>
       ) : serviceReady ? (
         <form action={refreshCounterpartyByInnAction.bind(null, counterpartyId)}>
-          <button type="submit" className="btn btn-secondary">
+          <SubmitButton className="btn btn-secondary">
             Обновить по ИНН {counterparty.inn}
-          </button>
+          </SubmitButton>
           <span className="text-muted" style={{ marginLeft: 10 }}>
             Наименование, КПП, ОГРН, юр. адрес, руководитель и статус будут заменены данными реестра.
           </span>
@@ -51,9 +52,9 @@ export function CounterpartyCreateByInn({ error }: { error?: string }) {
           <span>Добавить контрагента по ИНН</span>
           <input type="text" name="inn" inputMode="numeric" required placeholder="10 или 12 цифр" style={{ width: 180 }} />
         </label>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Заполнить из ЕГРЮЛ/ЕГРИП
-        </button>
+        </SubmitButton>
       </form>
       {error ? (
         <p className="form-error" style={{ marginTop: 10 }}>

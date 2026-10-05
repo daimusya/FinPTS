@@ -15,6 +15,7 @@ import { parseDateParam } from "@/lib/date-param";
 import { singleParams } from "@/lib/query-params";
 import { enumParam } from "@/lib/query-params";
 import { BankTransactionDirection, BankTransactionMatchStatus } from "@prisma/client";
+import { SubmitButton } from "@/components/submit-button";
 
 const BULK_FORM = "bulk-delete";
 
@@ -162,9 +163,9 @@ export default async function CashTransactionsPage({
           </select>
         </label>
         {batchId ? <input type="hidden" name="batchId" value={batchId} /> : null}
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Применить
-        </button>
+        </SubmitButton>
       </form>
 
       {canManage && transactions.length > 0 ? (
@@ -177,9 +178,9 @@ export default async function CashTransactionsPage({
           <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
             <input type="checkbox" name="confirm" /> Да, удалить
           </label>
-          <button type="submit" className="btn btn-secondary">
+          <SubmitButton className="btn btn-secondary">
             Удалить отмеченные
-          </button>
+          </SubmitButton>
         </form>
       ) : null}
 

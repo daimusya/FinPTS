@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import { markAllNotificationsReadAction, openNotificationAction } from "./actions";
 import { MyNotificationChannels } from "@/components/my-notification-channels";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const PAGE_SIZE = 50;
 const dateTime = (d: Date) => d.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", dateStyle: "short", timeStyle: "short" });
@@ -39,9 +40,9 @@ export default async function NotificationsPage({ searchParams }: { searchParams
         </div>
         {unread > 0 ? (
           <form action={markAllNotificationsReadAction}>
-            <button type="submit" className="btn btn-secondary">
+            <SubmitButton className="btn btn-secondary">
               Отметить все прочитанными ({unread})
-            </button>
+            </SubmitButton>
           </form>
         ) : null}
       </div>
@@ -54,14 +55,14 @@ export default async function NotificationsPage({ searchParams }: { searchParams
             {notifications.map((n) => (
               <li key={n.id} className={n.readAt ? "notification notification--read" : "notification"}>
                 <form action={openNotificationAction.bind(null, n.id)}>
-                  <button type="submit" className="notification__open">
+                  <SubmitButton className="notification__open">
                     <span className="notification__title">
                       {n.readAt ? null : <span className="badge badge-warning" style={{ marginRight: 6 }}>новое</span>}
                       {n.title}
                     </span>
                     {n.body ? <span className="notification__body">{n.body}</span> : null}
                     <span className="notification__time">{dateTime(n.createdAt)}</span>
-                  </button>
+                  </SubmitButton>
                 </form>
               </li>
             ))}

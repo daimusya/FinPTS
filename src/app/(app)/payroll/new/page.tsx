@@ -5,6 +5,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { createPayrollRunAction } from "../actions";
 import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function NewPayrollRunPage({
   searchParams,
@@ -61,9 +62,9 @@ export default async function NewPayrollRunPage({
             </label>
           </div>
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Создать
-            </button>
+            </SubmitButton>
             <Link href="/payroll" className="btn btn-secondary">
               Отмена
             </Link>

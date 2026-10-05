@@ -5,6 +5,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { updateRouteAction } from "../../actions";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const MAX_STEPS = 5;
 
@@ -110,9 +111,9 @@ export default async function EditPaymentApprovalRoutePage({
           </div>
 
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Сохранить
-            </button>
+            </SubmitButton>
             <Link href="/admin/payment-approval-routes" className="btn btn-secondary">
               Отмена
             </Link>

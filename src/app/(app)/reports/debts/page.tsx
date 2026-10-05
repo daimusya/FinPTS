@@ -9,6 +9,7 @@ import { prisma } from "@/lib/db";
 import { formatMoneyIn } from "@/lib/currency";
 import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function DebtsReportPage({
   searchParams,
@@ -72,9 +73,9 @@ export default async function DebtsReportPage({
             ))}
           </select>
         </label>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Применить
-        </button>
+        </SubmitButton>
       </form>
 
       <div className="stat-grid">

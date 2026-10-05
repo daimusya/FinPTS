@@ -6,6 +6,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { updateEmployeeAction } from "../../actions";
 import { isVisible } from "@/lib/access-guard";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function EditEmployeePage({
   params,
@@ -88,9 +89,9 @@ export default async function EditEmployeePage({
             Подразделение и должность меняются через «Перевести» — так сохраняется кадровая история.
           </p>
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Сохранить
-            </button>
+            </SubmitButton>
             <Link href={`/employees/${id}`} className="btn btn-secondary">
               Отмена
             </Link>

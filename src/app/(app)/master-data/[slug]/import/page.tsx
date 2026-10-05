@@ -7,6 +7,7 @@ import { ARCHIVE_COLUMN_LABEL, ID_COLUMN_LABEL } from "@/lib/dictionaries/spread
 import { BANK_SHEET, CONTACT_SHEET } from "@/lib/counterparties/details-sheets";
 import { importDictionaryAction, type ImportPreview } from "../../import-actions";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 function parseJson<T>(raw: string | undefined): T | null {
   if (!raw) return null;
@@ -127,12 +128,12 @@ export default async function ImportDictionaryPage({
             </span>
           </label>
           <div className="form-actions">
-            <button type="submit" name="intent" value="check" className="btn btn-secondary">
+            <SubmitButton name="intent" value="check" className="btn btn-secondary">
               Проверить без сохранения
-            </button>
-            <button type="submit" name="intent" value="apply" className="btn btn-primary">
+            </SubmitButton>
+            <SubmitButton name="intent" value="apply" className="btn btn-primary">
               Загрузить
-            </button>
+            </SubmitButton>
             <a href={`/api/master-data/export?slug=${slug}`} className="btn btn-ghost">
               Скачать шаблон (текущие записи)
             </a>

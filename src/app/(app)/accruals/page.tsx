@@ -21,6 +21,7 @@ import { parseDateParam } from "@/lib/date-param";
 import { singleParams } from "@/lib/query-params";
 import { enumParam } from "@/lib/query-params";
 import { AccrualDirection, AccrualDocumentStatus, PaymentStatus } from "@prisma/client";
+import { SubmitButton } from "@/components/submit-button";
 
 const PAGE_SIZE = 200;
 
@@ -133,9 +134,9 @@ export default async function AccrualsPage({
             <option value="OVERPAID">Переплата</option>
           </select>
         </label>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Применить
-        </button>
+        </SubmitButton>
       </form>
 
       <p className="text-muted" style={{ fontSize: 12, margin: "8px 0" }}>

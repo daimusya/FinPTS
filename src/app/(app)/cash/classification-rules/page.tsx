@@ -5,6 +5,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney } from "@/lib/money";
 import { applyRulesToUnclassifiedAction } from "./actions";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const DIRECTION_LABELS: Record<string, string> = { INFLOW: "Поступление", OUTFLOW: "Списание" };
 
@@ -62,9 +63,9 @@ export default async function ClassificationRulesPage({
             Операций без статьи ДДС: <strong>{unclassifiedCount}</strong>.
           </p>
           <form action={applyRulesToUnclassifiedAction}>
-            <button type="submit" className="btn btn-secondary" disabled={unclassifiedCount === 0}>
+            <SubmitButton className="btn btn-secondary" disabled={unclassifiedCount === 0}>
               Применить правила к несопоставленным операциям
-            </button>
+            </SubmitButton>
           </form>
         </div>
       ) : null}

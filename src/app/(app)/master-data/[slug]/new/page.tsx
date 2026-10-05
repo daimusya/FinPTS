@@ -6,6 +6,7 @@ import { DictionaryFormFields, resolveFieldDefault, type ResolvedField } from "@
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createDictionaryItem } from "../../actions";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function NewDictionaryItemPage({
   params,
@@ -57,9 +58,9 @@ export default async function NewDictionaryItemPage({
         <form action={createDictionaryItem.bind(null, slug)}>
           <DictionaryFormFields fields={resolvedFields} />
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Сохранить
-            </button>
+            </SubmitButton>
             <Link href={`/master-data/${slug}`} className="btn btn-secondary">
               Отмена
             </Link>

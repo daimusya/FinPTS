@@ -35,6 +35,7 @@ import {
 } from "@/lib/access-scope";
 import { MissingRatesWarning } from "@/components/missing-rates-warning";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const MONTH_NAMES = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const WEEKDAY_NAMES = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
@@ -402,9 +403,9 @@ export default async function PaymentCalendarPage({
               ))}
           </select>
         </label>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Показать
-        </button>
+        </SubmitButton>
         {chosenOrg || chosenAccount ? (
           <Link href={href({ org: null, account: null })} className="btn btn-ghost">
             Сбросить

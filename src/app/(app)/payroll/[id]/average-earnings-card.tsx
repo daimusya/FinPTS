@@ -9,6 +9,7 @@ import {
 } from "@/lib/payroll/average-earnings-db";
 import { AVG_DAYS_PER_MONTH, EMPLOYER_PAID_SICK_DAYS, SICK_LEAVE_DIVISOR } from "@/lib/payroll/average-earnings";
 import { addAverageEarningsLineAction } from "../actions";
+import { SubmitButton } from "@/components/submit-button";
 
 /**
  * Расчёт отпускных и больничных по среднему заработку: форма параметров
@@ -120,9 +121,9 @@ export async function AverageEarningsCard({
             <input type="text" inputMode="decimal" name="avgOtherR2" id="avg-other-r2" defaultValue={params.avgOtherR2 ?? ""} placeholder="2-й год" style={{ width: 120 }} />
           </span>
         </label>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Рассчитать
-        </button>
+        </SubmitButton>
       </form>
 
       {error ? (
@@ -140,10 +141,10 @@ export async function AverageEarningsCard({
             {AVERAGE_FIELDS.map((f) => (
               <input key={f} type="hidden" name={f} value={params[f] ?? ""} />
             ))}
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Добавить строку «{preview.kind === "vacation" ? "Отпускные" : "Больничные"}» на {formatMoney(preview.lineAmount)} —{" "}
               {preview.employee.fullName}
-            </button>
+            </SubmitButton>
           </form>
         </div>
       ) : null}

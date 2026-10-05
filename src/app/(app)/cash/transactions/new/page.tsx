@@ -6,6 +6,7 @@ import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createBankTransactionAction } from "../../actions";
 import { departmentScopeWhere, getAccessScope, organizationIdScopeWhere, projectScopeWhere } from "@/lib/access-scope";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function NewCashTransactionPage({
   searchParams,
@@ -202,9 +203,9 @@ export default async function NewCashTransactionPage({
           </div>
 
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Сохранить
-            </button>
+            </SubmitButton>
             <Link href="/cash/transactions" className="btn btn-secondary">
               Отмена
             </Link>

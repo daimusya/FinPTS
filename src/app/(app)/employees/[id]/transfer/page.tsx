@@ -7,6 +7,7 @@ import { transferEmployeeAction } from "../../actions";
 import { departmentScopeWhere, getAccessScope } from "@/lib/access-scope";
 import { isVisible } from "@/lib/access-guard";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function TransferEmployeePage({
   params,
@@ -78,9 +79,9 @@ export default async function TransferEmployeePage({
             <input type="text" name="comment" />
           </label>
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Перевести
-            </button>
+            </SubmitButton>
             <Link href={`/employees/${id}`} className="btn btn-secondary">
               Отмена
             </Link>

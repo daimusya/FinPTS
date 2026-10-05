@@ -14,6 +14,7 @@ import { dictionarySearchWhere } from "@/lib/dictionaries/search";
 import { pageWindow } from "@/lib/paging";
 import { Pager } from "@/components/pager";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const PAGE_SIZE = 100;
 
@@ -145,9 +146,9 @@ export default async function DictionaryListPage({
           </label>
         ) : null}
         {textColumns.length > 0 ? (
-          <button type="submit" className="btn btn-secondary">
+          <SubmitButton className="btn btn-secondary">
             Найти
-          </button>
+          </SubmitButton>
         ) : null}
         {q ? (
           <Link href={`/master-data/${slug}`} className="btn btn-ghost">
@@ -207,9 +208,9 @@ export default async function DictionaryListPage({
                             : archiveDictionaryItem.bind(null, slug, String(item.id))
                         }
                       >
-                        <button type="submit" className="btn btn-ghost btn-sm">
+                        <SubmitButton className="btn btn-ghost btn-sm">
                           {item.isArchived ? "Восстановить" : "В архив"}
-                        </button>
+                        </SubmitButton>
                       </form>
                     ) : null}
                   </div>

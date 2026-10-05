@@ -10,6 +10,7 @@ import { isVisible } from "@/lib/access-guard";
 import { updateAccrualDocumentAction } from "../../actions";
 import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 function toDateInput(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -181,9 +182,9 @@ export default async function EditAccrualDocumentPage({
           />
 
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Сохранить
-            </button>
+            </SubmitButton>
             <Link href={`/accruals/${doc.id}`} className="btn btn-secondary">
               Отмена
             </Link>

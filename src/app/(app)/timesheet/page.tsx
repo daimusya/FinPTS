@@ -6,6 +6,7 @@ import { bulkFillTimesheetAction, deleteTimesheetEntryAction } from "./actions";
 import { employeeScopeWhere, getAccessScope, projectScopeWhere } from "@/lib/access-scope";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function TimesheetPage({
   searchParams,
@@ -114,9 +115,9 @@ export default async function TimesheetPage({
               </div>
             </div>
             <div className="form-actions">
-              <button type="submit" className="btn btn-primary">
+              <SubmitButton className="btn btn-primary">
                 Заполнить
-              </button>
+              </SubmitButton>
             </div>
           </form>
         </div>
@@ -144,9 +145,9 @@ export default async function TimesheetPage({
             <span>Месяц</span>
             <input type="number" name="month" min="1" max="12" defaultValue={month} style={{ width: 70 }} />
           </label>
-          <button type="submit" className="btn btn-secondary">
+          <SubmitButton className="btn btn-secondary">
             Показать
-          </button>
+          </SubmitButton>
         </form>
 
         {shown ? (

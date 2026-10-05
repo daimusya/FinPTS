@@ -4,6 +4,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS, PERMISSION_LABELS } from "@/lib/permissions";
 import { createRoleAction } from "../actions";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function NewRolePage({
   searchParams,
@@ -52,9 +53,9 @@ export default async function NewRolePage({
           </div>
 
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
+            <SubmitButton className="btn btn-primary">
               Создать роль
-            </button>
+            </SubmitButton>
             <Link href="/admin/roles" className="btn btn-secondary">
               Отмена
             </Link>

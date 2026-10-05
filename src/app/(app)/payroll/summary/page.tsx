@@ -7,6 +7,7 @@ import { getAccessScope, payrollRunScopeWhere } from "@/lib/access-scope";
 import type Decimal from "decimal.js";
 import { parseDateParam } from "@/lib/date-param";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function PayrollSummaryPage({
   searchParams,
@@ -75,9 +76,9 @@ export default async function PayrollSummaryPage({
           <span>Дата выплаты</span>
           <input type="date" name="date" defaultValue={from.toISOString().slice(0, 10)} />
         </label>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Показать
-        </button>
+        </SubmitButton>
       </form>
 
       <div className="stat-grid">

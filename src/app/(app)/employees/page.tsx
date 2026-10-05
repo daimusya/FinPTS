@@ -8,6 +8,7 @@ import { textSearchWhere } from "@/lib/text-search";
 import { pageWindow } from "@/lib/paging";
 import { Pager } from "@/components/pager";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const PAGE_SIZE = 100;
 
@@ -53,9 +54,9 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
           <span>Поиск</span>
           <input type="search" name="q" id="employees-search" defaultValue={q ?? ""} placeholder="ФИО, табельный номер, подразделение" />
         </label>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Найти
-        </button>
+        </SubmitButton>
         {q ? (
           <Link href="/employees" className="btn btn-ghost">
             Сбросить

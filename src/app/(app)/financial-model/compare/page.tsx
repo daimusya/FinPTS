@@ -9,6 +9,7 @@ import { loadNewServices } from "@/lib/financial-model/new-services";
 import { loadLoans, loadOpeningBalances, loadScenarioTax, loadScenarioTaxContext } from "@/lib/financial-model/loans";
 import { getAccessScope } from "@/lib/access-scope";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const HORIZON_MONTHS = 12;
 
@@ -101,9 +102,9 @@ export default async function CompareScenariosPage({
             </label>
           ))}
         </div>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Сравнить
-        </button>
+        </SubmitButton>
       </form>
 
       <div className="table-wrap">

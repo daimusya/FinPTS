@@ -6,6 +6,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { runPeriodCloseChecklist } from "@/lib/period-close/checklist";
 import { closePeriodAction } from "../../actions";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const MONTH_NAMES = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -111,9 +112,9 @@ export default async function ClosePeriodPage({
                 Все проверки пройдены без замечаний.
               </p>
             )}
-            <button type="submit" className="btn btn-danger">
+            <SubmitButton className="btn btn-danger">
               Закрыть период
-            </button>
+            </SubmitButton>
           </form>
         )}
       </div>

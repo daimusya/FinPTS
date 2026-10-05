@@ -6,6 +6,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { terminateEmployeeAction } from "../../actions";
 import { isVisible } from "@/lib/access-guard";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function TerminateEmployeePage({
   params,
@@ -49,9 +50,9 @@ export default async function TerminateEmployeePage({
             <input type="text" name="comment" />
           </label>
           <div className="form-actions">
-            <button type="submit" className="btn btn-danger">
+            <SubmitButton className="btn btn-danger">
               Уволить
-            </button>
+            </SubmitButton>
             <Link href={`/employees/${id}`} className="btn btn-secondary">
               Отмена
             </Link>

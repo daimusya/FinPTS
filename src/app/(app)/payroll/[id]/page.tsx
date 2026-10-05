@@ -17,6 +17,7 @@ import { isVisible } from "@/lib/access-guard";
 import type { AverageParams } from "@/lib/payroll/average-earnings-db";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function PayrollRunDetailPage({
   params,
@@ -83,23 +84,23 @@ export default async function PayrollRunDetailPage({
           </Link>
           {canManage && (run.status === "DRAFT" || run.status === "CALCULATED") && run.kind !== "ADHOC" ? (
             <form action={calculatePayrollRunAction.bind(null, run.id)}>
-              <button type="submit" className="btn btn-primary">
+              <SubmitButton className="btn btn-primary">
                 {run.status === "DRAFT" ? "Рассчитать" : "Пересчитать"}
-              </button>
+              </SubmitButton>
             </form>
           ) : null}
           {canManage && run.status === "CALCULATED" ? (
             <form action={approvePayrollRunAction.bind(null, run.id)}>
-              <button type="submit" className="btn btn-primary">
+              <SubmitButton className="btn btn-primary">
                 Утвердить
-              </button>
+              </SubmitButton>
             </form>
           ) : null}
           {canPay && run.status === "APPROVED" ? (
             <form action={markPayrollRunPaidAction.bind(null, run.id)}>
-              <button type="submit" className="btn btn-secondary">
+              <SubmitButton className="btn btn-secondary">
                 Отметить выплаченным
-              </button>
+              </SubmitButton>
             </form>
           ) : null}
         </div>
@@ -272,9 +273,9 @@ export default async function PayrollRunDetailPage({
                   ))}
                 </select>
               </label>
-              <button type="submit" className="btn btn-secondary">
+              <SubmitButton className="btn btn-secondary">
                 Добавить
-              </button>
+              </SubmitButton>
             </form>
           </>
         ) : null}

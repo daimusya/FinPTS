@@ -7,6 +7,7 @@ import {
   enrichCounterpartiesAction,
   refreshOrganizationByInnAction,
 } from "@/app/(app)/integrations/inn/registry-actions";
+import { SubmitButton } from "@/components/submit-button";
 
 const notConfigured = (
   <span className="text-muted">
@@ -32,9 +33,9 @@ export async function OperationsWithoutCounterparty({ returnTo }: { returnTo: st
       {ready ? (
         <form action={createCounterpartiesFromOperationsAction} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <input type="hidden" name="returnTo" value={returnTo} />
-          <button type="submit" className="btn btn-secondary">
+          <SubmitButton className="btn btn-secondary">
             Создать контрагентов по ИНН
-          </button>
+          </SubmitButton>
           <span className="text-muted" style={{ fontSize: 12 }}>
             Реквизиты — из ЕГРЮЛ/ЕГРИП, операции с этим ИНН привязываются. Закрытые периоды не меняются, ИНН физлиц
             пропускаются. До 50 ИНН за раз.
@@ -65,9 +66,9 @@ export async function CounterpartyEnrich() {
       </p>
       {ready ? (
         <form action={enrichCounterpartiesAction} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <button type="submit" className="btn btn-secondary">
+          <SubmitButton className="btn btn-secondary">
             Дополнить реквизиты по ИНН
-          </button>
+          </SubmitButton>
           <span className="text-muted" style={{ fontSize: 12 }}>
             Наименование, КПП, ОГРН, юр. адрес, руководитель и статус — из ЕГРЮЛ/ЕГРИП. Контрагенты, у которых КПП, ОГРН или адрес
             уже введены вручную, не трогаются. До 50 за раз.
@@ -89,9 +90,9 @@ export function OrganizationCreateByInn({ error }: { error?: string }) {
           <span>Добавить организацию или ИП по ИНН</span>
           <input type="text" name="inn" id="org-inn" inputMode="numeric" required placeholder="10 или 12 цифр" style={{ width: 180 }} />
         </label>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Заполнить из ЕГРЮЛ/ЕГРИП
-        </button>
+        </SubmitButton>
       </form>
       {error ? (
         <p className="form-error" style={{ marginTop: 10 }}>
@@ -120,9 +121,9 @@ export async function OrganizationInnCard({ organizationId }: { organizationId: 
         <p className="text-muted">Укажите ИНН в форме выше, чтобы заполнять реквизиты из ЕГРЮЛ/ЕГРИП.</p>
       ) : ready ? (
         <form action={refreshOrganizationByInnAction.bind(null, organizationId)} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <button type="submit" className="btn btn-secondary">
+          <SubmitButton className="btn btn-secondary">
             Обновить по ИНН {organization.inn}
-          </button>
+          </SubmitButton>
           <span className="text-muted" style={{ fontSize: 12 }}>
             Наименование, КПП, ОГРН, юр. адрес, тип (организация или ИП), даты регистрации и прекращения деятельности будут заменены
             данными реестра. Система налогообложения и ставки не меняются.

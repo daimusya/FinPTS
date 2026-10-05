@@ -6,6 +6,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { DICTIONARY_REGISTRY } from "@/lib/dictionaries/registry";
 import { ACTION_LABELS, ENTITY_LABELS, auditChanges, entityLink } from "@/lib/audit-view";
 import { singleParams } from "@/lib/query-params";
+import { SubmitButton } from "@/components/submit-button";
 
 const PAGE_SIZE = 100;
 const when = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "medium", timeZone: "Europe/Moscow" });
@@ -125,9 +126,9 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
           <span>ID записи</span>
           <input type="text" name="entityId" id="audit-entity-id" defaultValue={filters.entityId ?? ""} />
         </label>
-        <button type="submit" className="btn btn-secondary">
+        <SubmitButton className="btn btn-secondary">
           Применить
-        </button>
+        </SubmitButton>
         {filtered ? (
           <Link href="/admin/audit-log" className="btn btn-ghost">
             Сбросить
