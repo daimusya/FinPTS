@@ -58,10 +58,14 @@ export default async function EditUserPage({
               <input type="text" name="fullName" defaultValue={user.fullName} required />
             </label>
             <label className="field">
-              <span>Email</span>
-              <input type="email" value={user.email} disabled />
+              <span>Email (логин) *</span>
+              <input type="email" name="email" id="user-email" defaultValue={user.email} required maxLength={254} />
             </label>
           </div>
+
+          <p className="text-muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
+            Email — это логин: после изменения пользователь входит с новым адресом, пароль прежний. На этот адрес приходят уведомления.
+          </p>
 
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, fontSize: 13 }}>
             <input type="checkbox" name="isActive" defaultChecked={user.isActive} />

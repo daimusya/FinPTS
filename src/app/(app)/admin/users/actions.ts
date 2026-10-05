@@ -10,22 +10,28 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { setFlash } from "@/lib/flash";
 import { userChangeProblem } from "@/lib/user-admin-guard";
 import { loadAdminState } from "@/lib/user-admin-state";
+import { normalizeUserEmail } from "@/lib/user-email";
+import { isUniqueViolation } from "@/lib/dictionaries/errors";
+
+const EMAIL_TAKEN = "Пользователь с таким email уже существует";
 import crypto from "node:crypto";
 
 export async function createUserAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.USERS_MANAGE);
 
-  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const parsedEmail = normalizeUserEmail(formData.get("email"));
   const fullName = String(formData.get("fullName") ?? "").trim();
   const roleIds = formData.getAll("roleIds").map(String);
 
-  if (!email || !fullName) {
-    redirect(`/admin/users/new?error=${encodeURIComponent("Email и ФИО обязательны")}`);
+  if ("error" in parsedEmail) redirect(`/admin/users/new?error=${encodeURIComponent(parsedEmail.error)}`);
+  const { email } = parsedEmail as { email: string };
+  if (!fullName) {
+    redirect(`/admin/users/new?error=${encodeURIComponent("ФИО обязательно")}`);
   }
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
-    redirect(`/admin/users/new?error=${encodeURIComponent("Пользователь с таким email уже существует")}`);
+    redirect(`/admin/users/new?error=${encodeURIComponent(EMAIL_TAKEN)}`);
   }
 
   const tempPassword = crypto.randomBytes(9).toString("base64url");
@@ -62,9 +68,16 @@ export async function updateUserAction(userId: string, formData: FormData) {
   const fullName = String(formData.get("fullName") ?? "").trim();
   const isActive = formData.get("isActive") === "on";
   const roleIds = formData.getAll("roleIds").map(String);
+  // The e-mail is the login: an administrator corrects a mistyped or changed address.
+  const parsedEmail = normalizeUserEmail(formData.get("email"));
 
   if (!fullName) {
     redirect(`/admin/users/${userId}/edit?error=${encodeURIComponent("ФИО обязательно")}`);
+  }
+  if ("error" in parsedEmail) redirect(`/admin/users/${userId}/edit?error=${encodeURIComponent(parsedEmail.error)}`);
+  const { email } = parsedEmail as { email: string };
+  if (await prisma.user.findFirst({ where: { email, id: { not: userId } } })) {
+    redirect(`/admin/users/${userId}/edit?error=${encodeURIComponent(EMAIL_TAKEN)}`);
   }
 
   const problem = userChangeProblem({ actorId: session.userId, targetId: userId, change: { isActive, roleIds }, ...(await loadAdminState()) });
@@ -72,11 +85,16 @@ export async function updateUserAction(userId: string, formData: FormData) {
 
   const before = await prisma.user.findUnique({ where: { id: userId }, include: { roles: true } });
 
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: userId }, data: { fullName, isActive } }),
-    prisma.userRole.deleteMany({ where: { userId } }),
-    prisma.userRole.createMany({ data: roleIds.map((roleId) => ({ userId, roleId })) }),
-  ]);
+  try {
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: userId }, data: { fullName, email, isActive } }),
+      prisma.userRole.deleteMany({ where: { userId } }),
+      prisma.userRole.createMany({ data: roleIds.map((roleId) => ({ userId, roleId })) }),
+    ]);
+  } catch (error) {
+    if (isUniqueViolation(error)) redirect(`/admin/users/${userId}/edit?error=${encodeURIComponent(EMAIL_TAKEN)}`);
+    throw error;
+  }
 
   await logAudit({
     userId: session.userId,
@@ -84,7 +102,7 @@ export async function updateUserAction(userId: string, formData: FormData) {
     entityId: userId,
     action: "update",
     before: before as never,
-    after: { fullName, isActive, roleIds } as never,
+    after: { fullName, email, isActive, roleIds } as never,
   });
 
   revalidatePath("/admin/users");
