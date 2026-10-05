@@ -1,5 +1,6 @@
 import { prisma } from "./db";
 import type { Prisma } from "@prisma/client";
+import { redactSecrets } from "./audit-view";
 
 export interface AuditEntry {
   userId?: string | null;
@@ -18,8 +19,9 @@ export async function logAudit(entry: AuditEntry) {
       entityType: entry.entityType,
       entityId: entry.entityId,
       action: entry.action,
-      beforeJson: entry.before ?? undefined,
-      afterJson: entry.after ?? undefined,
+      // Password hashes, link codes, tokens and keys never reach the journal.
+      beforeJson: entry.before ? redactSecrets(entry.before) : undefined,
+      afterJson: entry.after ? redactSecrets(entry.after) : undefined,
       accrualDocumentId: entry.accrualDocumentId,
     },
   });
