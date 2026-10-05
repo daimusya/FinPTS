@@ -7,6 +7,7 @@ import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { accountCurrencies, loadCbrRates } from "@/lib/currency-rates";
 import { normalizeCurrency } from "@/lib/currency";
+import { yearProblem } from "@/lib/form-values";
 
 const DAY = 86_400_000;
 const back = (param: "importResult" | "ratesError", message: string): never =>
@@ -22,6 +23,8 @@ export async function loadCbrRatesAction(formData: FormData) {
   const fromRaw = String(formData.get("from") ?? "");
   const toRaw = String(formData.get("to") ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fromRaw) || !/^\d{4}-\d{2}-\d{2}$/.test(toRaw)) back("ratesError", "Укажите период: с какой и по какую дату");
+  const periodYear = yearProblem(fromRaw) ?? yearProblem(toRaw);
+  if (periodYear) back("ratesError", `Период: ${periodYear}`);
   const from = new Date(`${fromRaw}T00:00:00Z`);
   const to = new Date(`${toRaw}T00:00:00Z`);
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) back("ratesError", "Такой даты нет в календаре");

@@ -17,6 +17,7 @@ import {
 } from "@/lib/bank-api/core";
 import { fetchStatement } from "@/lib/bank-api/providers";
 import { moscowToday, syncAllConnections, syncConnection } from "@/lib/bank-api/sync";
+import { yearProblem } from "@/lib/form-values";
 
 const PAGE = "/integrations/banks";
 
@@ -61,6 +62,8 @@ export async function addBankConnectionAction(formData: FormData) {
   if (await prisma.bankConnection.findUnique({ where: { bankAccountId } })) back("error", "Этот счёт уже подключён — замените реквизиты в его строке");
   const syncFromRaw = String(formData.get("syncFrom") ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(syncFromRaw)) back("error", "Укажите, с какой даты загружать операции");
+  const syncFromYear = yearProblem(syncFromRaw);
+  if (syncFromYear) back("error", `Загружать операции с: ${syncFromYear}`);
   const syncFrom = new Date(`${syncFromRaw}T00:00:00Z`);
 
   const credentials = readCredentials(provider as BankProvider, formData);

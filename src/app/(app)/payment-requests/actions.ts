@@ -34,6 +34,7 @@ import { currencyNotAllowed } from "@/lib/foreign-currency";
 import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
 import { currentDeciders, notifyAuthor, notifyDeciders } from "@/lib/payment-requests/notify";
 import { parseFormAmount, parseFormDate } from "@/lib/form-values";
+import { yearProblem } from "@/lib/form-values";
 
 async function loadActiveRoutes(): Promise<ApprovalRouteCandidate[]> {
   const routes = await prisma.paymentApprovalRoute.findMany({
@@ -337,6 +338,8 @@ export async function resubmitPaymentRequestAction(id: string, formData: FormDat
   const note = String(formData.get("resubmitNote") ?? "").trim().slice(0, 1000) || null;
   if (!/^\d+(\.\d{1,2})?$/.test(amountRaw) || Number(amountRaw) <= 0) fail("Сумма — положительное число");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDateRaw)) fail("Укажите срок оплаты");
+  const dueYear = yearProblem(dueDateRaw);
+  if (dueYear) fail(`Срок оплаты: ${dueYear}`);
   const dueTime = parseDueTime(formData.get("dueTime"));
   if ("error" in dueTime) fail(dueTime.error);
 

@@ -1,4 +1,5 @@
 import { TIME_SHEET_DAY_TYPE_LABELS } from "./labels";
+import { yearProblem } from "../form-values";
 
 /**
  * Проверка формы массового заполнения табеля. Чистая функция — проверяется
@@ -30,6 +31,8 @@ export function parseTimesheetFill(input: {
   const dateFrom = parseDate(input.dateFrom.trim());
   const dateTo = parseDate(input.dateTo.trim());
   if (!dateFrom || !dateTo) return { error: "Укажите даты «с» и «по»" };
+  const year = yearProblem(input.dateFrom.trim()) ?? yearProblem(input.dateTo.trim());
+  if (year) return { error: `Период: ${year}` };
   if (dateTo < dateFrom) return { error: "Дата «по» раньше даты «с»" };
   if ((dateTo.getTime() - dateFrom.getTime()) / 86_400_000 + 1 > MAX_DAYS) return { error: "За один раз — не больше года" };
   if (!(input.dayType in TIME_SHEET_DAY_TYPE_LABELS)) return { error: "Выберите тип дня" };

@@ -13,6 +13,7 @@ import {
   type SickLeaveResult,
   type VacationResult,
 } from "./average-earnings";
+import { yearProblem } from "@/lib/form-values";
 
 /** Страховой стаж для больничного: по данным системы или выбранный вручную. */
 export type TenureMode = "auto" | "100" | "80" | "60" | "short";
@@ -56,6 +57,8 @@ export function parseAverageRequest(params: AverageParams): { request: AverageEa
   if (!kind) return { error: "Выберите, что рассчитать: отпускные или больничные" };
   if (!params.avgEmployeeId) return { error: "Выберите сотрудника" };
   if (!params.avgStart || !/^\d{4}-\d{2}-\d{2}$/.test(params.avgStart)) return { error: "Укажите дату начала" };
+  const startYear = yearProblem(params.avgStart);
+  if (startYear) return { error: `Дата начала: ${startYear}` };
   const days = Number(params.avgDays);
   if (!Number.isInteger(days) || days < 1 || days > 366) return { error: "Число дней — целое от 1 до 366" };
   const tenureMode = (params.avgPct ?? "auto") as TenureMode;

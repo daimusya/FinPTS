@@ -1,4 +1,5 @@
 import type { FieldOption, FieldType } from "./types";
+import { yearProblem } from "@/lib/form-values";
 
 export interface SheetField {
   name: string;
@@ -159,13 +160,15 @@ export function parseImportRows(fields: SheetField[], headers: string[], rows: C
         else errors.push(`Строка ${lineNo}: «${raw}» — нет такого значения для поля «${field.label}»`);
       } else if (field.type === "number") {
         const num = Number(raw.replace(/\s/g, "").replace(",", "."));
-        const invalid = Number.isNaN(num) ? null : field.validate?.(raw);
-        if (Number.isNaN(num)) errors.push(`Строка ${lineNo}: «${raw}» в поле «${field.label}» — не число`);
+        const invalid = !Number.isFinite(num) ? null : field.validate?.(raw);
+        if (!Number.isFinite(num)) errors.push(`Строка ${lineNo}: «${raw}» в поле «${field.label}» — не число`);
         else if (invalid) errors.push(`Строка ${lineNo}: поле «${field.label}»: ${invalid}`);
         else data[field.name] = num;
       } else if (field.type === "date") {
         const date = parseDate(raw);
-        if (date) data[field.name] = date;
+        const year = date ? yearProblem(date.toISOString().slice(0, 10)) : null;
+        if (date && year) errors.push(`Строка ${lineNo}: поле «${field.label}»: ${year}`);
+        else if (date) data[field.name] = date;
         else errors.push(`Строка ${lineNo}: «${raw}» в поле «${field.label}» — дата должна быть в виде ГГГГ-ММ-ДД или ДД.ММ.ГГГГ`);
       } else {
         const invalid = field.validate?.(raw);

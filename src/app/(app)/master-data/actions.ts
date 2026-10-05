@@ -13,6 +13,7 @@ import { NOT_VISIBLE } from "@/lib/access-guard";
 import { ORGANIZATION_RECORD_NOT_ALLOWED, dictionaryCreateProblem, dictionaryRecordAllowed } from "@/lib/dictionaries/scope";
 import type { SessionPayload } from "@/lib/session";
 import type { DictionaryConfig } from "@/lib/dictionaries/types";
+import { parseFormDate } from "@/lib/form-values";
 
 /** Запись чужой организации нельзя ни изменить, ни отправить в архив (как и увидеть в списке). */
 async function visibleRecord(config: DictionaryConfig, session: SessionPayload, id: string) {
@@ -40,18 +41,16 @@ function parseField(field: FieldConfig, formData: FormData, mode: "create" | "up
     if (problem) throw new Error(`Поле «${field.label}»: ${problem}`);
   }
   if (field.type === "number") {
-    const num = Number(value);
-    if (Number.isNaN(num)) {
+    const num = Number(value.replace(/\s/g, "").replace(",", "."));
+    if (!Number.isFinite(num)) {
       throw new Error(`Поле «${field.label}» должно быть числом`);
     }
     return num;
   }
   if (field.type === "date") {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      throw new Error(`Поле «${field.label}» содержит некорректную дату`);
-    }
-    return date;
+    const parsed = parseFormDate(value, `Поле «${field.label}»`);
+    if ("error" in parsed) throw new Error(parsed.error);
+    return parsed.date;
   }
   return value;
 }

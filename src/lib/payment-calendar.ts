@@ -1,5 +1,6 @@
 import { toDecimal } from "./money";
 import Decimal from "decimal.js";
+import { yearProblem } from "@/lib/form-values";
 
 export interface ExpectedMovement {
   date: Date;
@@ -161,6 +162,8 @@ export function parseRescheduleDate(raw: unknown, todayKey: string): { date: Dat
   const date = new Date(`${key}T00:00:00.000Z`);
   if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== key) return { error: "Такой даты нет в календаре" };
   if (key < todayKey) return { error: "Срок оплаты нельзя перенести в прошлое" };
+  const year = yearProblem(key);
+  if (year) return { error: `Новая дата оплаты: ${year}` };
   return { date, key };
 }
 

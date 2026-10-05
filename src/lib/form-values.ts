@@ -32,3 +32,9 @@ export function parseFormAmount(raw: unknown, label = "Сумма"): { value: st
   return { value: text.replace(/^0+(?=\d)/, "") };
 }
 
+
+/** Для даты ГГГГ-ММ-ДД, уже проверенной по формату: «202 год — похоже на опечатку…» или null. */
+export function yearProblem(key: string): string | null {
+  const year = Number(key.slice(0, 4));
+  return year < MIN_YEAR || year > MAX_YEAR ? `${year} год — похоже на опечатку (допустимо ${MIN_YEAR}–${MAX_YEAR})` : null;
+}

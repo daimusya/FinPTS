@@ -1,6 +1,7 @@
 import Decimal from "decimal.js";
 import { formatMoney, toDecimal, type MoneyInput } from "@/lib/money";
 import { compareDueTime, parseDueTime } from "@/lib/payment-calendar";
+import { yearProblem } from "@/lib/form-values";
 
 export const MAX_PAYMENT_PARTS = 24;
 
@@ -59,6 +60,8 @@ export function validateSchedule(input: {
     const dueDate = new Date(`${row.dueDate}T00:00:00.000Z`);
     if (Number.isNaN(dueDate.getTime()) || dueDate.toISOString().slice(0, 10) !== row.dueDate) return { error: `Часть ${n}: такой даты нет` };
     if (row.dueDate < todayKey) return { error: `Часть ${n}: дата оплаты не может быть в прошлом` };
+    const year = yearProblem(row.dueDate);
+    if (year) return { error: `Часть ${n}: ${year}` };
     const time = parseDueTime(row.dueTime);
     if ("error" in time) return { error: `Часть ${n}: ${time.error.charAt(0).toLowerCase()}${time.error.slice(1)}` };
     const amountRaw = row.amount.replace(/\s/g, "").replace(",", ".");

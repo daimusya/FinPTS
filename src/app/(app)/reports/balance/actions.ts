@@ -10,6 +10,7 @@ import { assertPeriodOpenForDate } from "@/lib/period";
 import { getAccessScope } from "@/lib/access-scope";
 import { acceptsManualEntries } from "@/lib/reports/balance-lines";
 import { toDecimal } from "@/lib/money";
+import { yearProblem } from "@/lib/form-values";
 
 function balanceUrl(formData: FormData, error?: string) {
   const params = new URLSearchParams();
@@ -38,6 +39,8 @@ export async function addBalanceEntryAction(formData: FormData) {
   const comment = String(formData.get("comment") ?? "").trim() || null;
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) back("Укажите дату операции");
+  const dateYear = yearProblem(dateRaw);
+  if (dateYear) back(`Дата операции: ${dateYear}`);
   if (!/^-?\d+(\.\d{1,2})?$/.test(amountRaw) || Number(amountRaw) === 0) {
     back("Сумма — ненулевое число, со знаком «−» для уменьшения остатка");
   }

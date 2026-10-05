@@ -10,6 +10,7 @@ import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed }
 import { analyticsProblem, getAccessScope } from "@/lib/access-scope";
 import { EmployeeStatus, Prisma } from "@prisma/client";
 import { parseFormAmount, parseFormDate } from "@/lib/form-values";
+import { yearProblem } from "@/lib/form-values";
 
 /** Страховой стаж до приёма: целое число месяцев 0–720 или пусто. */
 function parsePriorMonths(raw: unknown): { value: number | null } | { error: string } {
@@ -111,6 +112,8 @@ export async function updateEmployeeAction(id: string, formData: FormData) {
   if (salaryChanged && !/^\d{4}-\d{2}-\d{2}$/.test(salaryFromRaw)) {
     redirect(`/employees/${id}/edit?error=${encodeURIComponent("Укажите, с какой даты действует новый оклад")}`);
   }
+  const salaryFromYear = salaryChanged ? yearProblem(salaryFromRaw) : null;
+  if (salaryFromYear) redirect(`/employees/${id}/edit?error=${encodeURIComponent(`Оклад действует с: ${salaryFromYear}`)}`);
 
   const updated = await prisma.$transaction(async (db) => {
     const saved = await db.employee.update({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseFormAmount, parseFormDate } from "./form-values";
+import { parseFormAmount, parseFormDate, yearProblem } from "./form-values";
 
 describe("parseFormDate", () => {
   it("accepts real dates in a sensible range", () => {
@@ -29,5 +29,13 @@ describe("parseFormAmount", () => {
     expect(parseFormAmount("1e9")).toMatchObject({ error: expect.stringMatching(/нужно число/) });
     expect(parseFormAmount("99999999999999999999")).toEqual({ error: "Сумма слишком большая" });
     expect(parseFormAmount("")).toEqual({ error: "Сумма: укажите" });
+  });
+});
+
+describe("yearProblem", () => {
+  it("flags years outside 2000–2100", () => {
+    expect(yearProblem("2026-01-01")).toBeNull();
+    expect(yearProblem("0202-01-01")).toBe("202 год — похоже на опечатку (допустимо 2000–2100)");
+    expect(yearProblem("9999-12-31")).toMatch(/9999 год/);
   });
 });
