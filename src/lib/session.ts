@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { PERMISSIONS, type PermissionCode } from "./permissions";
 import { prisma } from "./db";
 import { getUserPermissions } from "./auth";
-import { sessionIssuedBeforePasswordChange } from "./password-policy";
+import { sessionCutoff, sessionIssuedBeforePasswordChange } from "./password-policy";
 
 const COOKIE_NAME = "pts_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
@@ -66,11 +66,11 @@ export const getSession = cache(async (): Promise<SessionPayload | null> => {
   }
   const user = await prisma.user.findUnique({
     where: { id: payload.userId },
-    select: { id: true, email: true, fullName: true, isActive: true, mustChangePassword: true, passwordChangedAt: true },
+    select: { id: true, email: true, fullName: true, isActive: true, mustChangePassword: true, passwordChangedAt: true, sessionsRevokedAt: true },
   });
   if (!user || !user.isActive) return null;
-  // A password change or reset ends every session issued before it.
-  if (sessionIssuedBeforePasswordChange(payload.iat, user.passwordChangedAt)) return null;
+  // A password change or reset, or an explicit end of sessions, ends every session issued before it.
+  if (sessionIssuedBeforePasswordChange(payload.iat, sessionCutoff(user.passwordChangedAt, user.sessionsRevokedAt))) return null;
   return {
     userId: user.id,
     email: user.email,

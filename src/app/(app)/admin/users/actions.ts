@@ -140,3 +140,14 @@ export async function resetPasswordAction(userId: string) {
   revalidatePath("/admin/users");
   redirect("/admin/users");
 }
+
+/** Завершить все сеансы пользователя (потерянное устройство, подозрение на чужой вход) — пароль не меняется. */
+export async function endUserSessionsAction(userId: string) {
+  const session = await requirePermission(PERMISSIONS.USERS_MANAGE);
+  // One's own sessions are ended on the password page, keeping the current one.
+  if (userId === session.userId) redirect("/account/password");
+  const user = await prisma.user.update({ where: { id: userId }, data: { sessionsRevokedAt: new Date() } });
+  await logAudit({ userId: session.userId, entityType: "user", entityId: userId, action: "end_sessions" });
+  revalidatePath("/admin/users");
+  redirect(`/admin/users?notice=${encodeURIComponent(`Сеансы пользователя ${user.fullName} завершены — ему нужно войти заново`)}`);
+}

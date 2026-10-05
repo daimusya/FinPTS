@@ -5,11 +5,12 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { readFlash } from "@/lib/flash";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { FlashConsumed } from "@/components/flash-consumed";
-import { resetPasswordAction } from "./actions";
+import { endUserSessionsAction, resetPasswordAction } from "./actions";
 
 const loginTime = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Moscow" });
 
-export default async function UsersPage() {
+export default async function UsersPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
+  const { notice } = await searchParams;
   const session = await getSession();
   const flash = await readFlash("tempPassword");
   const [forEmail, tempPassword] = flash ? flash.split("\n") : [null, null];
@@ -41,6 +42,12 @@ export default async function UsersPage() {
           Добавить пользователя
         </Link>
       </div>
+
+      {notice ? (
+        <p className="form-success" style={{ marginBottom: 14 }}>
+          {notice}
+        </p>
+      ) : null}
 
       {tempPassword ? (
         <div className="card" style={{ marginBottom: 16, borderColor: "var(--color-orange)" }}>
@@ -99,6 +106,16 @@ export default async function UsersPage() {
                         Сменить пароль
                       </Link>
                     ) : (
+                      <form action={endUserSessionsAction.bind(null, user.id)}>
+                        <ConfirmSubmitButton
+                          className="btn btn-ghost btn-sm"
+                          message={`Завершить все сеансы пользователя ${user.fullName}? Пароль не изменится, войти нужно будет заново.`}
+                        >
+                          Завершить сеансы
+                        </ConfirmSubmitButton>
+                      </form>
+                    )}
+                    {user.id === session.userId ? null : (
                       <form action={resetPasswordAction.bind(null, user.id)}>
                         <ConfirmSubmitButton
                           className="btn btn-ghost btn-sm"

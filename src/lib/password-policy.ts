@@ -25,3 +25,14 @@ export function sessionIssuedBeforePasswordChange(issuedAtSeconds: number | unde
   if (typeof issuedAtSeconds !== "number") return true;
   return issuedAtSeconds < Math.floor(passwordChangedAt.getTime() / 1000);
 }
+
+/**
+ * С какого момента прежние сеансы недействительны: позднее из смены (сброса)
+ * пароля и явного завершения сеансов («выйти на других устройствах»,
+ * администратор — «завершить сеансы»).
+ */
+export function sessionCutoff(passwordChangedAt: Date | null, sessionsRevokedAt: Date | null): Date | null {
+  if (!passwordChangedAt) return sessionsRevokedAt;
+  if (!sessionsRevokedAt) return passwordChangedAt;
+  return passwordChangedAt > sessionsRevokedAt ? passwordChangedAt : sessionsRevokedAt;
+}

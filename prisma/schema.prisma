@@ -24,6 +24,8 @@ model User {
   mustChangePassword Boolean @default(false)
   /// Когда пароль меняли или сбрасывали: сессии, выданные раньше, недействительны.
   passwordChangedAt  DateTime?
+  /// Сеансы завершены («выйти на других устройствах» или администратором): сессии, выданные раньше, недействительны.
+  sessionsRevokedAt  DateTime?
   /// Дублировать уведомления на почту (адрес — email пользователя).
   notifyEmail      Boolean @default(false)
   /// Дублировать уведомления в Telegram (нужен привязанный чат).

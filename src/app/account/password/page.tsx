@@ -2,13 +2,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
-import { changeOwnPasswordAction } from "./actions";
+import { changeOwnPasswordAction, endOtherSessionsAction } from "./actions";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 /** Смена собственного пароля; при пароле, выданном администратором, — обязательна. */
-export default async function ChangePasswordPage({ searchParams }: { searchParams: Promise<{ error?: string; done?: string }> }) {
+export default async function ChangePasswordPage({ searchParams }: { searchParams: Promise<{ error?: string; done?: string; sessions?: string }> }) {
   const session = await getSession();
   if (!session) redirect("/login");
-  const { error, done } = await searchParams;
+  const { error, done, sessions } = await searchParams;
 
   return (
     <div className="login-page">
@@ -29,6 +30,11 @@ export default async function ChangePasswordPage({ searchParams }: { searchParam
         {done ? (
           <p className="form-success" style={{ marginBottom: 12 }}>
             Пароль изменён. На других устройствах нужно будет войти заново.
+          </p>
+        ) : null}
+        {sessions ? (
+          <p className="form-success" style={{ marginBottom: 12 }}>
+            Сеансы на других устройствах завершены. Здесь вы остаётесь в системе.
           </p>
         ) : null}
         {error ? (
@@ -58,6 +64,17 @@ export default async function ChangePasswordPage({ searchParams }: { searchParam
             Сменить пароль
           </button>
         </form>
+
+        {!session.mustChangePassword ? (
+          <form action={endOtherSessionsAction} style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--color-graphite-150)" }}>
+            <p className="text-muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
+              Входили с чужого компьютера или потеряли устройство? Завершите сеансы — там придётся войти заново.
+            </p>
+            <ConfirmSubmitButton className="btn btn-secondary" message="Завершить сеансы на всех других устройствах? Здесь вы останетесь в системе.">
+              Завершить сеансы на других устройствах
+            </ConfirmSubmitButton>
+          </form>
+        ) : null}
 
         {!session.mustChangePassword ? (
           <p style={{ marginTop: 14, fontSize: 13 }}>

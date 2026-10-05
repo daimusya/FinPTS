@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sessionIssuedBeforePasswordChange, validateNewPassword } from "./password-policy";
+import { sessionCutoff, sessionIssuedBeforePasswordChange, validateNewPassword } from "./password-policy";
 
 describe("validateNewPassword", () => {
   const base = { password: "Krokus2026x", repeat: "Krokus2026x", email: "anna.petrova@example.ru", current: "Old-pass-1" };
@@ -27,5 +27,17 @@ describe("sessionIssuedBeforePasswordChange", () => {
   it("never changed — every session is valid; a token without issue time is not", () => {
     expect(sessionIssuedBeforePasswordChange(1, null)).toBe(false);
     expect(sessionIssuedBeforePasswordChange(undefined, changed)).toBe(true);
+  });
+});
+
+describe("sessionCutoff", () => {
+  const a = new Date("2026-10-01T10:00:00Z");
+  const b = new Date("2026-10-05T10:00:00Z");
+  it("takes the later of a password change and an explicit end of sessions", () => {
+    expect(sessionCutoff(a, b)).toBe(b);
+    expect(sessionCutoff(b, a)).toBe(b);
+    expect(sessionCutoff(null, a)).toBe(a);
+    expect(sessionCutoff(a, null)).toBe(a);
+    expect(sessionCutoff(null, null)).toBeNull();
   });
 });

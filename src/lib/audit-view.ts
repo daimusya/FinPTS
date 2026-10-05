@@ -66,6 +66,8 @@ export const ACTION_LABELS: Record<string, string> = {
   edit_transfer: "исправление перевода",
   enable: "включение",
   end: "окончание",
+  end_other_sessions: "завершение других своих сеансов",
+  end_sessions: "завершение сеансов",
   enqueue_project_results: "результаты проектов в очередь",
   fill_standard_tax_rates: "стандартные ставки налогов",
   hire: "приём",
