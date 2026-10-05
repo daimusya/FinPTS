@@ -11,6 +11,7 @@ import { SelectAllCheckbox } from "@/components/select-all-checkbox";
 import { pageWindow } from "@/lib/paging";
 import { Pager } from "@/components/pager";
 import { textSearchWhere } from "@/lib/text-search";
+import { parseDateParam } from "@/lib/date-param";
 
 const BULK_FORM = "bulk-delete";
 
@@ -65,10 +66,13 @@ export default async function CashTransactionsPage({
   if (cashFlowArticleId) where.cashFlowArticleId = cashFlowArticleId;
   if (q?.trim()) where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), textSearchWhere(["purpose", "counterpartyInn", "counterparty.fullName", "counterparty.shortName", "counterparty.inn"], q)];
   if (batchId) where.batchId = batchId;
-  if (from || to) {
+  // A malformed date in the address (an old or edited link) is ignored instead of failing the page.
+  const fromDate = parseDateParam(from);
+  const toDate = parseDateParam(to);
+  if (fromDate || toDate) {
     where.operationDate = {
-      ...(from ? { gte: new Date(from) } : {}),
-      ...(to ? { lte: new Date(to) } : {}),
+      ...(fromDate ? { gte: fromDate } : {}),
+      ...(toDate ? { lte: toDate } : {}),
     };
   }
 

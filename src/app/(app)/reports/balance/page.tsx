@@ -11,6 +11,7 @@ import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 import { addBalanceEntryAction, deleteBalanceEntryAction } from "./actions";
 import type Decimal from "decimal.js";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { parseDateParam } from "@/lib/date-param";
 
 const CATEGORY_LABELS: Record<string, string> = { ASSET: "актив", LIABILITY: "обязательство", EQUITY: "капитал" };
 
@@ -31,7 +32,7 @@ export default async function BalanceReportPage({
 
   const sp = await searchParams;
   const filters = extractFilters(sp);
-  const asOfDate = sp.asOf ? new Date(sp.asOf) : new Date();
+  const asOfDate = parseDateParam(sp.asOf) ?? new Date();
   const scope = await getAccessScope(session);
   const entryWhere = filters.organizationId
     ? { organizationId: filters.organizationId }

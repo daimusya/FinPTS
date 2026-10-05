@@ -34,6 +34,7 @@ import { toDecimal } from "@/lib/money";
 import { computeMarginReport, INDIRECT_DRIVER_LABELS, INDIRECT_DRIVER_OPTIONS, marginPlanTotals, type IndirectDriver, type MarginTotals } from "@/lib/reports/margin";
 import { mergeProjectPlan } from "@/lib/reports/margin-plan";
 import { loadPlanByProject } from "@/lib/budget/load";
+import { parseDateParam } from "@/lib/date-param";
 
 function toNum(d: { toNumber: () => number }) {
   return d.toNumber();
@@ -253,7 +254,7 @@ export async function GET(request: NextRequest) {
     ];
     fileName = "debts.xlsx";
   } else if (type === "balance") {
-    const asOfDate = sp.asOf ? new Date(sp.asOf) : new Date();
+    const asOfDate = parseDateParam(sp.asOf) ?? new Date();
     const balance = await computeManagementBalance(asOfDate, filters, scope);
     const rows: Array<Array<string | number>> = [
       ["Управленческий баланс", "на " + balance.asOfDate.toISOString().slice(0, 10)],
@@ -282,7 +283,7 @@ export async function GET(request: NextRequest) {
     sheets = [{ name: "Баланс", rows }];
     fileName = `balance_${asOfDate.toISOString().slice(0, 10)}.xlsx`;
   } else if (type === "payroll-summary") {
-    const date = sp.date ? new Date(sp.date) : new Date();
+    const date = parseDateParam(sp.date) ?? new Date();
     const from = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
     const to = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59));
     const runs = await prisma.payrollRun.findMany({

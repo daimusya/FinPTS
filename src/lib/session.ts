@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { requestIsHttps } from "./request-security";
 import { PERMISSIONS, type PermissionCode } from "./permissions";
 import { prisma } from "./db";
@@ -82,11 +83,13 @@ export const getSession = cache(async (): Promise<SessionPayload | null> => {
   };
 });
 
+/**
+ * Сессия для действия; если её нет (истекла, завершена, пароль сменили) —
+ * на страницу входа с пояснением, а не на страницу ошибки.
+ */
 export async function requireSession(): Promise<SessionPayload> {
   const session = await getSession();
-  if (!session) {
-    throw new Error("UNAUTHORIZED");
-  }
+  if (!session) redirect("/login?expired=1");
   return session;
 }
 

@@ -17,6 +17,7 @@ import { accrualScopeWhere, getAccessScope } from "@/lib/access-scope";
 import { pageWindow } from "@/lib/paging";
 import { Pager } from "@/components/pager";
 import { textSearchWhere } from "@/lib/text-search";
+import { parseDateParam } from "@/lib/date-param";
 
 const PAGE_SIZE = 200;
 
@@ -54,10 +55,13 @@ export default async function AccrualsPage({
   if (paymentStatus) where.paymentStatus = paymentStatus as never;
   if (pnlArticleId) where.lines = { some: { pnlArticleId } };
   if (q?.trim()) where.AND = [textSearchWhere(["number", "comment", "counterparty.fullName", "counterparty.shortName", "counterparty.inn"], q)];
-  if (from || to) {
+  // A malformed date in the address (an old or edited link) is ignored instead of failing the page.
+  const fromDate = parseDateParam(from);
+  const toDate = parseDateParam(to);
+  if (fromDate || toDate) {
     where.date = {
-      ...(from ? { gte: new Date(from) } : {}),
-      ...(to ? { lte: new Date(to) } : {}),
+      ...(fromDate ? { gte: fromDate } : {}),
+      ...(toDate ? { lte: toDate } : {}),
     };
   }
 
