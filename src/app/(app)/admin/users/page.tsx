@@ -3,7 +3,11 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { readFlash } from "@/lib/flash";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { FlashConsumed } from "@/components/flash-consumed";
 import { resetPasswordAction } from "./actions";
+
+const loginTime = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Moscow" });
 
 export default async function UsersPage() {
   const session = await getSession();
@@ -17,10 +21,14 @@ export default async function UsersPage() {
     );
   }
 
-  const users = await prisma.user.findMany({
-    orderBy: { fullName: "asc" },
-    include: { roles: { include: { role: true } } },
-  });
+  const [users, logins] = await Promise.all([
+    prisma.user.findMany({
+      orderBy: { fullName: "asc" },
+      include: { roles: { include: { role: true } } },
+    }),
+    prisma.auditLog.groupBy({ by: ["userId"], where: { entityType: "session", action: "login" }, _max: { createdAt: true } }),
+  ]);
+  const lastLogin = new Map(logins.map((l) => [l.userId, l._max.createdAt]));
 
   return (
     <div className="page">
@@ -40,6 +48,7 @@ export default async function UsersPage() {
             Временный пароль для {forEmail}: <strong className="mono">{tempPassword}</strong>
           </p>
           <p className="text-muted">Сообщите пароль пользователю лично. Он не будет показан повторно.</p>
+          <FlashConsumed name="tempPassword" />
         </div>
       ) : null}
 
@@ -51,6 +60,7 @@ export default async function UsersPage() {
               <th>Email</th>
               <th>Роли</th>
               <th>Статус</th>
+              <th>Последний вход</th>
               <th />
             </tr>
           </thead>
@@ -72,17 +82,32 @@ export default async function UsersPage() {
                   <span className={`badge ${user.isActive ? "badge-active" : "badge-archived"}`}>
                     {user.isActive ? "Активен" : "Отключён"}
                   </span>
+                  {user.mustChangePassword ? (
+                    <span className="badge badge-orange" style={{ marginLeft: 6 }} title="Пароль выдан администратором; пользователь сменит его при входе">
+                      Временный пароль
+                    </span>
+                  ) : null}
                 </td>
+                <td className="text-muted">{lastLogin.get(user.id) ? loginTime.format(lastLogin.get(user.id)!) : "не входил"}</td>
                 <td>
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                     <Link href={`/admin/users/${user.id}/edit`} className="btn btn-ghost btn-sm">
                       Изменить
                     </Link>
-                    <form action={resetPasswordAction.bind(null, user.id)}>
-                      <button type="submit" className="btn btn-ghost btn-sm">
-                        Сбросить пароль
-                      </button>
-                    </form>
+                    {user.id === session.userId ? (
+                      <Link href="/account/password" className="btn btn-ghost btn-sm">
+                        Сменить пароль
+                      </Link>
+                    ) : (
+                      <form action={resetPasswordAction.bind(null, user.id)}>
+                        <ConfirmSubmitButton
+                          className="btn btn-ghost btn-sm"
+                          message={`Сбросить пароль пользователя ${user.fullName}? Текущий пароль перестанет действовать, а сеансы на всех устройствах завершатся.`}
+                        >
+                          Сбросить пароль
+                        </ConfirmSubmitButton>
+                      </form>
+                    )}
                   </div>
                 </td>
               </tr>

@@ -8,6 +8,8 @@ import { hashPassword } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { setFlash } from "@/lib/flash";
+import { userChangeProblem } from "@/lib/user-admin-guard";
+import { loadAdminState } from "@/lib/user-admin-state";
 import crypto from "node:crypto";
 
 export async function createUserAction(formData: FormData) {
@@ -65,6 +67,9 @@ export async function updateUserAction(userId: string, formData: FormData) {
     redirect(`/admin/users/${userId}/edit?error=${encodeURIComponent("ФИО обязательно")}`);
   }
 
+  const problem = userChangeProblem({ actorId: session.userId, targetId: userId, change: { isActive, roleIds }, ...(await loadAdminState()) });
+  if (problem) redirect(`/admin/users/${userId}/edit?error=${encodeURIComponent(problem)}`);
+
   const before = await prisma.user.findUnique({ where: { id: userId }, include: { roles: true } });
 
   await prisma.$transaction([
@@ -116,6 +121,8 @@ export async function updateUserAccessScopeAction(userId: string, formData: Form
 
 export async function resetPasswordAction(userId: string) {
   const session = await requirePermission(PERMISSIONS.USERS_MANAGE);
+  // An own password is changed knowing the current one, not reset to a temporary one.
+  if (userId === session.userId) redirect("/account/password");
 
   const tempPassword = crypto.randomBytes(9).toString("base64url");
   const passwordHash = await hashPassword(tempPassword);

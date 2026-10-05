@@ -7,10 +7,13 @@ import { updateRolePermissionsAction } from "../../actions";
 
 export default async function EditRolePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
   const { id } = await params;
+  const { error } = await searchParams;
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.USERS_MANAGE)) {
     return (
@@ -44,6 +47,7 @@ export default async function EditRolePage({
       </div>
 
       <div className="card" style={{ maxWidth: 620 }}>
+        {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
         <form action={updateRolePermissionsAction.bind(null, id)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {permissions.map((p) => (

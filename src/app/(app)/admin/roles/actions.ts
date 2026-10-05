@@ -6,6 +6,8 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
+import { roleChangeProblem } from "@/lib/user-admin-guard";
+import { loadAdminState } from "@/lib/user-admin-state";
 
 function slugifyCode(name: string): string {
   return (
@@ -56,6 +58,9 @@ export async function updateRolePermissionsAction(roleId: string, formData: Form
 
   const permissionCodes = formData.getAll("permissionCodes").map(String);
   const permissions = await prisma.permission.findMany({ where: { code: { in: permissionCodes } } });
+
+  const problem = roleChangeProblem({ roleId, codes: permissions.map((p) => p.code), ...(await loadAdminState()) });
+  if (problem) redirect(`/admin/roles/${roleId}/edit?error=${encodeURIComponent(problem)}`);
 
   const before = await prisma.role.findUnique({
     where: { id: roleId },
