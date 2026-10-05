@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
-import { PERMISSIONS } from "@/lib/permissions";
+import { PERMISSIONS, PERMISSION_LABELS } from "@/lib/permissions";
 
-export default async function RolesPage() {
+export default async function RolesPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
+  const { notice } = await searchParams;
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.USERS_MANAGE)) {
     return (
@@ -30,6 +31,12 @@ export default async function RolesPage() {
         </Link>
       </div>
 
+      {notice ? (
+        <p className="form-success" style={{ marginBottom: 14 }}>
+          {notice}
+        </p>
+      ) : null}
+
       <div className="table-wrap">
         <table>
           <thead>
@@ -50,15 +57,15 @@ export default async function RolesPage() {
                 <td>
                   <div className="tag-list">
                     {role.permissions.map((p) => (
-                      <span className="badge badge-orange" key={p.permissionId}>
-                        {p.permission.code}
+                      <span className="badge badge-orange" key={p.permissionId} title={p.permission.code}>
+                        {PERMISSION_LABELS[p.permission.code as keyof typeof PERMISSION_LABELS] ?? p.permission.code}
                       </span>
                     ))}
                   </div>
                 </td>
                 <td>
                   <Link href={`/admin/roles/${role.id}/edit`} className="btn btn-ghost btn-sm">
-                    Права
+                    Изменить
                   </Link>
                 </td>
               </tr>

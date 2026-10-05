@@ -86,6 +86,7 @@ export const ACTION_LABELS: Record<string, string> = {
   post_to_accrual: "проведение в начисления",
   refresh_by_inn: "обновление по ИНН",
   reject_step: "отклонено",
+  rename: "переименование",
   remove_department: "удалено подразделение",
   remove_loan: "удалён кредит",
   remove_new_service: "удалена новая услуга",
