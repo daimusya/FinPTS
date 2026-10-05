@@ -20,6 +20,10 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  /// Пароль выдан администратором (новый пользователь или сброс) — при входе нужно сменить на свой.
+  mustChangePassword Boolean @default(false)
+  /// Когда пароль меняли или сбрасывали: сессии, выданные раньше, недействительны.
+  passwordChangedAt  DateTime?
   /// Дублировать уведомления на почту (адрес — email пользователя).
   notifyEmail      Boolean @default(false)
   /// Дублировать уведомления в Telegram (нужен привязанный чат).

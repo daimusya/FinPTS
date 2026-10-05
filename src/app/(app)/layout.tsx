@@ -11,6 +11,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!session) {
     redirect("/login");
   }
+  // A temporary password from the administrator: first replace it with an own one.
+  if (session.mustChangePassword) {
+    redirect("/account/password");
+  }
   const [unread, foreignCurrency] = await Promise.all([unreadNotificationCount(session.userId), isForeignCurrencyEnabled()]);
 
   return (
@@ -26,7 +30,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </Link>
             <div>
               <div className="topbar-user-name">{session.fullName}</div>
-              <div className="topbar-user-email">{session.email}</div>
+              <div className="topbar-user-email">
+                {session.email} · <Link href="/account/password">сменить пароль</Link>
+              </div>
             </div>
             <form action={logoutAction}>
               <button type="submit" className="btn btn-secondary btn-sm">

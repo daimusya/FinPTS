@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { PERMISSIONS, type PermissionCode } from "./permissions";
 import { prisma } from "./db";
 import { getUserPermissions } from "./auth";
+import { sessionIssuedBeforePasswordChange } from "./password-policy";
 
 const COOKIE_NAME = "pts_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
@@ -21,6 +22,8 @@ export interface SessionPayload {
   email: string;
   fullName: string;
   permissions: string[];
+  /** Пароль выдан администратором — пользователь должен сменить его на свой. */
+  mustChangePassword?: boolean;
 }
 
 export async function createSession(payload: SessionPayload) {
@@ -55,15 +58,26 @@ export const getSession = cache(async (): Promise<SessionPayload | null> => {
   const store = await cookies();
   const token = store.get(COOKIE_NAME)?.value;
   if (!token) return null;
-  let payload: SessionPayload;
+  let payload: SessionPayload & { iat?: number };
   try {
-    payload = (await jwtVerify(token, getSecret())).payload as unknown as SessionPayload;
+    payload = (await jwtVerify(token, getSecret())).payload as unknown as SessionPayload & { iat?: number };
   } catch {
     return null;
   }
-  const user = await prisma.user.findUnique({ where: { id: payload.userId }, select: { id: true, email: true, fullName: true, isActive: true } });
+  const user = await prisma.user.findUnique({
+    where: { id: payload.userId },
+    select: { id: true, email: true, fullName: true, isActive: true, mustChangePassword: true, passwordChangedAt: true },
+  });
   if (!user || !user.isActive) return null;
-  return { userId: user.id, email: user.email, fullName: user.fullName, permissions: await getUserPermissions(user.id) };
+  // A password change or reset ends every session issued before it.
+  if (sessionIssuedBeforePasswordChange(payload.iat, user.passwordChangedAt)) return null;
+  return {
+    userId: user.id,
+    email: user.email,
+    fullName: user.fullName,
+    permissions: await getUserPermissions(user.id),
+    mustChangePassword: user.mustChangePassword,
+  };
 });
 
 export async function requireSession(): Promise<SessionPayload> {

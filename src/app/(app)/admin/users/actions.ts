@@ -34,6 +34,9 @@ export async function createUserAction(formData: FormData) {
       email,
       fullName,
       passwordHash,
+      // The administrator saw this password: the user replaces it at the first sign-in.
+      mustChangePassword: true,
+      passwordChangedAt: new Date(),
       roles: { create: roleIds.map((roleId) => ({ roleId })) },
     },
   });
@@ -116,7 +119,8 @@ export async function resetPasswordAction(userId: string) {
 
   const tempPassword = crypto.randomBytes(9).toString("base64url");
   const passwordHash = await hashPassword(tempPassword);
-  const user = await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+  // A reset ends the user's current sessions and asks for an own password at the next sign-in.
+  const user = await prisma.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: true, passwordChangedAt: new Date() } });
 
   await logAudit({
     userId: session.userId,
