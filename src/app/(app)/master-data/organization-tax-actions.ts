@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/session";
+import { NOT_VISIBLE, organizationAllowed } from "@/lib/access-guard";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import {
@@ -64,6 +65,7 @@ const DUPLICATE = "У этого налога уже есть ставка с т
 
 export async function addTaxRateAction(organizationId: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.MASTERDATA_MANAGE);
+  if (!(await organizationAllowed(session, organizationId))) throw new Error(NOT_VISIBLE);
   const result = readForm(formData);
   if ("error" in result) back(organizationId, "error", result.error);
   const value = (result as Extract<typeof result, { value: unknown }>).value;
@@ -85,6 +87,7 @@ export async function addTaxRateAction(organizationId: string, formData: FormDat
 
 export async function updateTaxRateAction(organizationId: string, id: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.MASTERDATA_MANAGE);
+  if (!(await organizationAllowed(session, organizationId))) throw new Error(NOT_VISIBLE);
   const before = await prisma.organizationTaxRate.findFirst({ where: { id, organizationId } });
   if (!before) back(organizationId, "error", "Ставка не найдена — возможно, её уже удалили");
   const result = readForm(formData);
@@ -115,6 +118,7 @@ export async function updateTaxRateAction(organizationId: string, id: string, fo
 
 export async function removeTaxRateAction(organizationId: string, id: string) {
   const session = await requirePermission(PERMISSIONS.MASTERDATA_MANAGE);
+  if (!(await organizationAllowed(session, organizationId))) throw new Error(NOT_VISIBLE);
   const rate = await prisma.organizationTaxRate.findFirst({ where: { id, organizationId } });
   if (rate) {
     await prisma.organizationTaxRate.delete({ where: { id } });
@@ -127,6 +131,7 @@ export async function removeTaxRateAction(organizationId: string, id: string) {
 /** Стандартные ставки выбранной системы налогообложения — только по налогам, у которых ещё нет ни одной ставки. */
 export async function fillStandardTaxRatesAction(organizationId: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.MASTERDATA_MANAGE);
+  if (!(await organizationAllowed(session, organizationId))) throw new Error(NOT_VISIBLE);
   const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { taxSystem: true, type: true } });
   if (!organization || !isTaxSystem(organization.taxSystem)) back(organizationId, "error", "Сначала выберите и сохраните систему налогообложения");
 

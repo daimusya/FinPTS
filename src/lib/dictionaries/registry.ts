@@ -7,14 +7,19 @@ import { TAX_SYSTEM_OPTIONS } from "@/lib/organizations/taxes";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
 import { currencyNotAllowed } from "@/lib/foreign-currency";
 import { validateCreditAgreementRecord, validateFixedAssetRecord } from "@/lib/reports/non-cash-guards";
+import { getSession } from "@/lib/session";
+import { getAccessScope } from "@/lib/access-scope";
 
 function delegate(d: unknown): DictionaryDelegate {
   return d as DictionaryDelegate;
 }
 
+// A user limited to some organizations chooses only among them (forms and Excel import).
 async function organizationOptions(): Promise<FieldOption[]> {
+  const session = await getSession();
+  const allowed = session ? (await getAccessScope(session)).organizationIds : null;
   const rows = await prisma.organization.findMany({
-    where: { isArchived: false },
+    where: { isArchived: false, ...(allowed ? { id: { in: allowed } } : {}) },
     orderBy: { name: "asc" },
   });
   return rows.map((r) => ({ value: r.id, label: r.name }));

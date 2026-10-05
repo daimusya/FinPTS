@@ -5,6 +5,9 @@ import { resolveSheetFields } from "@/lib/dictionaries/sheet-fields";
 import { buildExportRows } from "@/lib/dictionaries/spreadsheet";
 import { buildWorkbookBuffer, type ExportSheet } from "@/lib/reports/xlsx-export";
 import { prisma } from "@/lib/db";
+import { getAccessScope } from "@/lib/access-scope";
+import { dictionaryScopeWhere } from "@/lib/dictionaries/scope";
+import type { SessionPayload } from "@/lib/session";
 import { BANK_SHEET, CONTACT_SHEET, buildBankDetailRows, buildContactRows } from "@/lib/counterparties/details-sheets";
 
 export async function GET(request: NextRequest) {
@@ -12,15 +15,16 @@ export async function GET(request: NextRequest) {
   if (!DICTIONARY_REGISTRY[slug]) return new Response("Неизвестный справочник", { status: 400 });
   const config = getDictionaryConfig(slug);
 
+  let session: SessionPayload;
   try {
-    await requirePermission(config.permissionView);
+    session = await requirePermission(config.permissionView);
   } catch {
     return new Response("Недостаточно прав", { status: 403 });
   }
 
   const [fields, items] = await Promise.all([
     resolveSheetFields(config),
-    config.delegate.findMany({ orderBy: config.orderBy ?? { name: "asc" } }),
+    config.delegate.findMany({ where: dictionaryScopeWhere(config, await getAccessScope(session)), orderBy: config.orderBy ?? { name: "asc" } }),
   ]);
 
   const sheets: ExportSheet[] = [{ name: config.title, rows: buildExportRows(fields, items) }];

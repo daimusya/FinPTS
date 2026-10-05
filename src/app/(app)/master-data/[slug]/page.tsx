@@ -6,6 +6,8 @@ import { archiveDictionaryItem, restoreDictionaryItem } from "../actions";
 import { CounterpartyCreateByInn } from "@/components/counterparty-inn";
 import { CurrencyRatesLoader } from "@/components/currency-rates-loader";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
+import { getAccessScope } from "@/lib/access-scope";
+import { dictionaryScopeWhere } from "@/lib/dictionaries/scope";
 import { CounterpartyEnrich, OrganizationCreateByInn } from "@/components/registry-by-inn";
 
 function formatCell(value: unknown): string {
@@ -76,6 +78,7 @@ export default async function DictionaryListPage({
   const canManage = hasPermission(session, config.permissionManage);
 
   const items = await config.delegate.findMany({
+    where: dictionaryScopeWhere(config, await getAccessScope(session)),
     orderBy: config.orderBy ?? { name: "asc" },
     ...(config.listLimit ? { take: config.listLimit } : {}),
   });

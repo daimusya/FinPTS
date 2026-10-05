@@ -9,6 +9,8 @@ import { CounterpartyInnCard } from "@/components/counterparty-inn";
 import { OrganizationInnCard } from "@/components/registry-by-inn";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { OrganizationTaxes } from "@/components/organization-taxes";
+import { getAccessScope } from "@/lib/access-scope";
+import { dictionaryRecordAllowed } from "@/lib/dictionaries/scope";
 
 export default async function EditDictionaryItemPage({
   params,
@@ -44,7 +46,7 @@ export default async function EditDictionaryItemPage({
   }
 
   const record = await config.delegate.findUnique({ where: { id } });
-  if (!record) notFound();
+  if (!record || !dictionaryRecordAllowed(config, await getAccessScope(session), record)) notFound();
 
   // Fields of a switched-off feature (foreign currency) are not shown.
   const foreignCurrency = await isForeignCurrencyEnabled();

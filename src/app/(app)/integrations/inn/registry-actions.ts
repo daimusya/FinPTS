@@ -16,6 +16,9 @@ import {
   organizationDataFromRegistry,
 } from "@/lib/integrations/inn-service";
 import { ORGANIZATION_REGISTRY_LABELS } from "@/lib/integrations/inn-labels";
+import { getAccessScope } from "@/lib/access-scope";
+import { NEW_ORGANIZATION_NOT_ALLOWED } from "@/lib/dictionaries/scope";
+import { NOT_VISIBLE, organizationAllowed } from "@/lib/access-guard";
 
 /** Сколько ИНН или записей обрабатывать за одно нажатие: запросы к реестру идут по одному. */
 const BATCH = 50;
@@ -143,6 +146,7 @@ export async function createOrganizationByInnAction(formData: FormData) {
   const inn = String(formData.get("inn") ?? "").replace(/\s/g, "");
   const invalid = validateInn(inn);
   if (invalid) back(invalid);
+  if ((await getAccessScope(session)).organizationIds) back(NEW_ORGANIZATION_NOT_ALLOWED);
   const existing = await prisma.organization.findFirst({ where: { inn } });
   if (existing) redirect(`/master-data/organizations/${existing.id}/edit?notice=${encodeURIComponent("Организация с этим ИНН уже есть — открыта она")}`);
 
@@ -165,6 +169,7 @@ export async function refreshOrganizationByInnAction(id: string) {
   const session = await requirePermission(PERMISSIONS.MASTERDATA_MANAGE);
   const back = (param: "error" | "notice", message: string): never =>
     redirect(`/master-data/organizations/${id}/edit?${param}=${encodeURIComponent(message)}`);
+  if (!(await organizationAllowed(session, id))) throw new Error(NOT_VISIBLE);
   const before = await prisma.organization.findUniqueOrThrow({ where: { id } });
   if (!before.inn) back("error", "У организации не указан ИНН");
   const result = await lookupRequisitesByInn(before.inn!);

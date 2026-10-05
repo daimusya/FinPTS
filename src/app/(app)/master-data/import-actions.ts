@@ -13,6 +13,8 @@ import { dictionaryColumns, dictionaryModelKey, emptyFieldValue } from "@/lib/di
 import { BANK_SHEET, CONTACT_SHEET, planDetails, type DetailsPlan } from "@/lib/counterparties/details-sheets";
 import { parseWorkbookSheets } from "@/lib/bank-import/parser";
 import { isUniqueViolation, UNIQUE_VIOLATION_MESSAGE } from "@/lib/dictionaries/errors";
+import { getAccessScope } from "@/lib/access-scope";
+import { ORGANIZATION_RECORD_NOT_ALLOWED, dictionaryCreateProblem, dictionaryRecordAllowed, dictionaryScopeWhere } from "@/lib/dictionaries/scope";
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_ROWS = 5000;
@@ -84,7 +86,9 @@ export async function importDictionaryAction(slug: string, formData: FormData) {
   if (parsed.errors.length > 0 && parsed.rows.length === 0) backWithErrors(slug, parsed.errors);
 
   const columns = dictionaryColumns(config);
-  const existingItems = await config.delegate.findMany({});
+  // Records of other organizations are neither matched, nor updated, nor archived as «missing from the file».
+  const scope = await getAccessScope(session);
+  const existingItems = await config.delegate.findMany({ where: dictionaryScopeWhere(config, scope) });
   const plan = planImport({
     fields,
     rows: parsed.rows,
@@ -124,7 +128,16 @@ export async function importDictionaryAction(slug: string, formData: FormData) {
 
   // One list, in file order: cell errors and matching errors of the main sheet, then the other sheets.
   const lineOf = (e: string) => Number(/^Строк[аи] (\d+)/.exec(e)?.[1] ?? Number.MAX_SAFE_INTEGER);
-  const errors = [...[...parsed.errors, ...plan.errors].sort((a, b) => lineOf(a) - lineOf(b)), ...(details?.errors ?? [])];
+  const scopeErrors: string[] = [];
+  const visibleById = new Map(existingItems.map((item) => [String(item.id), item]));
+  for (const c of [...plan.creates, ...plan.pendingCreates]) {
+    const problem = dictionaryCreateProblem(config, scope, c.data);
+    if (problem) scopeErrors.push(`Строка ${c.line}: ${problem}`);
+  }
+  for (const u of plan.updates) {
+    if (!dictionaryRecordAllowed(config, scope, { ...visibleById.get(u.id), ...u.data })) scopeErrors.push(`Строка ${u.line}: ${ORGANIZATION_RECORD_NOT_ALLOWED}`);
+  }
+  const errors = [...[...parsed.errors, ...plan.errors, ...scopeErrors].sort((a, b) => lineOf(a) - lineOf(b)), ...(details?.errors ?? [])];
   // Whole-record checks of the dictionary (for example, closed periods for fixed assets) — row by row.
   if (config.validateRecord && errors.length === 0) {
     const byId = new Map(existingItems.map((item) => [String(item.id), item]));
