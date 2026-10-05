@@ -34,7 +34,7 @@ import { CURRENCY_OPTIONS, formatMoneyIn } from "@/lib/currency";
 import { amountInRub, loadRateLookup } from "@/lib/currency-rates";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { isVisible } from "@/lib/access-guard";
-import { currentDeciders } from "@/lib/payment-requests/notify";
+import { currentDeciders, hasDecidersIgnoringAccess, noDecidersReason } from "@/lib/payment-requests/notify";
 
 const STATE_LABELS: Record<TimelineState, string> = {
   approved: "Согласовано",
@@ -120,6 +120,7 @@ export default async function PaymentRequestPage({
   const deciders = pending ? await currentDeciders(request.id) : [];
   const myAuthority = deciders.find((d) => d.userId === session.userId && d.onBehalfOfId === null) ?? deciders.find((d) => d.userId === session.userId);
   const canDecide = pending && (isAdmin || Boolean(myAuthority) || (!request.route && canApprove));
+  const nobodyDecides = pending && deciders.length === 0 ? noDecidersReason(await hasDecidersIgnoringAccess(request.id), request.organization.name) : null;
   const onBehalfOfName =
     myAuthority?.onBehalfOfId && !isAdmin ? (await prisma.user.findUnique({ where: { id: myAuthority.onBehalfOfId } }))?.fullName ?? null : null;
 
@@ -175,6 +176,13 @@ export default async function PaymentRequestPage({
 
       {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
       {notice ? <p className="form-success" style={{ marginBottom: 14 }}>{notice}</p> : null}
+      {nobodyDecides ? (
+        <div className="card" style={{ borderColor: "var(--color-warning)", marginBottom: 14 }}>
+          <p>
+            <strong>Заявку сейчас некому согласовать.</strong> {nobodyDecides}
+          </p>
+        </div>
+      ) : null}
 
       {reworkable && lastVerdict ? (
         <div className="card" style={{ borderColor: "var(--color-warning)" }}>

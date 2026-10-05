@@ -9,6 +9,7 @@ import {
   organizationScopeWhere,
   payrollRunScopeWhere,
   projectScopeWhere,
+  seesOrganization,
   UNRESTRICTED_SCOPE,
 } from "./access-scope";
 
@@ -96,5 +97,14 @@ describe("scope-where helpers", () => {
     expect(projectScopeWhere(scope)).toEqual({
       AND: [{ organizationId: { in: ["org1"] } }, { id: { in: ["proj1"] } }],
     });
+  });
+});
+
+describe("seesOrganization", () => {
+  it("full admins and users without assigned organizations see every organization, others only theirs", () => {
+    expect(seesOrganization({ fullAdmin: true, organizationIds: ["a"] }, "b")).toBe(true);
+    expect(seesOrganization({ fullAdmin: false, organizationIds: [] }, "b")).toBe(true);
+    expect(seesOrganization({ fullAdmin: false, organizationIds: ["a"] }, "a")).toBe(true);
+    expect(seesOrganization({ fullAdmin: false, organizationIds: ["a"] }, "b")).toBe(false);
   });
 });

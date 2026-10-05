@@ -4,6 +4,9 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { showDueDate } from "@/lib/payment-calendar";
 import { formatMoneyIn } from "@/lib/currency";
 import { isDelegationActive, stepDeciders } from "./delegation";
+import { usersSeeingOrganization } from "@/lib/access-scope";
+
+type Decider = { userId: string; onBehalfOfId: string | null };
 
 type RequestForNotice = {
   id: string;
@@ -24,9 +27,28 @@ export function requestSummary(request: RequestForNotice): string {
 /**
  * Кто может решать текущий шаг заявки: по маршруту — участники роли шага,
  * без маршрута — у кого есть право согласования заявок; и их действующие
- * заместители.
+ * заместители. Только те, кому видна организация заявки: остальные не
+ * смогут её открыть, и уведомление о ней им не положено. Если таких нет,
+ * решает полный администратор (он может решить любой шаг) — он и в списке.
  */
-export async function currentDeciders(requestId: string, date: Date = new Date()): Promise<Array<{ userId: string; onBehalfOfId: string | null }>> {
+export async function currentDeciders(requestId: string, date: Date = new Date()): Promise<Decider[]> {
+  return (await decidersOf(requestId, date)).visible;
+}
+
+async function decidersOf(requestId: string, date: Date): Promise<{ all: Decider[]; visible: Decider[]; byAdmin: boolean }> {
+  const request = await prisma.paymentRequest.findUniqueOrThrow({ where: { id: requestId }, select: { organizationId: true } });
+  const all = await roleDeciders(requestId, date);
+  const seeing = await usersSeeingOrganization(all.map((d) => d.userId), request.organizationId);
+  const visible = all.filter((d) => seeing.has(d.userId));
+  if (visible.length > 0) return { all, visible, byAdmin: false };
+  const admins = await prisma.user.findMany({
+    where: { isActive: true, roles: { some: { role: { permissions: { some: { permission: { code: PERMISSIONS.ADMIN_FULL } } } } } } },
+    select: { id: true },
+  });
+  return { all, visible: admins.map((a) => ({ userId: a.id, onBehalfOfId: null })), byAdmin: true };
+}
+
+async function roleDeciders(requestId: string, date: Date): Promise<Decider[]> {
   const request = await prisma.paymentRequest.findUniqueOrThrow({ where: { id: requestId }, include: { route: { include: { steps: true } } } });
   if (request.route) {
     const step = request.route.steps.find((s) => s.stepOrder === request.currentStep);
@@ -44,16 +66,30 @@ export async function currentDeciders(requestId: string, date: Date = new Date()
   ];
 }
 
-/** Уведомить тех, кто сейчас решает шаг заявки (кроме самого автора события). */
+/**
+ * Уведомить тех, кто сейчас решает шаг заявки (кроме самого автора события).
+ * Если решать некому, об этом узнаёт автор заявки — иначе она молча зависнет.
+ */
 export async function notifyDeciders(requestId: string, exceptUserId?: string) {
-  const request = await prisma.paymentRequest.findUniqueOrThrow({ where: { id: requestId }, include: { counterparty: true, route: { include: { steps: true } } } });
-  const deciders = await currentDeciders(requestId);
+  const request = await prisma.paymentRequest.findUniqueOrThrow({
+    where: { id: requestId },
+    include: { counterparty: true, organization: { select: { name: true } }, route: { include: { steps: true } } },
+  });
+  const { all, visible: deciders, byAdmin } = await decidersOf(requestId, new Date());
   const steps = request.route?.steps.length ?? 0;
+  if (deciders.length === 0) {
+    await notify([request.createdById], {
+      title: "Заявку некому согласовать",
+      body: `Заявка ${requestSummary(request)}. ${noDecidersReason(all.length > 0, request.organization.name)}`,
+      link: `/payment-requests/${request.id}`,
+    });
+    return;
+  }
   await notify(
     deciders.map((d) => d.userId),
     {
       title: `Заявка ждёт вашего решения${steps > 1 ? ` (шаг ${request.currentStep} из ${steps})` : ""}`,
-      body: `Заявка ${requestSummary(request)}.`,
+      body: `Заявка ${requestSummary(request)}.${byAdmin ? " Обычных согласующих с доступом к организации нет — решение за администратором." : ""}`,
       link: `/payment-requests/${request.id}`,
     },
     exceptUserId,
@@ -68,4 +104,16 @@ export async function notifyAuthor(requestId: string, title: string, details: st
     { title, body: `Заявка ${requestSummary(request)}.${details ? ` ${details}` : ""}`, link: `/payment-requests/${request.id}` },
     exceptUserId,
   );
+}
+
+/** Почему шаг некому решать (нет ни согласующих с доступом, ни администратора) — для уведомления автору и карточки заявки. */
+export function noDecidersReason(someoneInRole: boolean, organizationName: string): string {
+  return someoneInRole
+    ? `Ни у кого из согласующих этого шага нет доступа к организации «${organizationName}». Откройте им доступ в разделе «Пользователи».`
+    : "В роли этого шага нет активных пользователей. Назначьте роль сотруднику в разделе «Пользователи».";
+}
+
+/** Кто числится согласующим шага без учёта доступа к организации — чтобы объяснить, почему решать некому. */
+export async function hasDecidersIgnoringAccess(requestId: string): Promise<boolean> {
+  return (await roleDeciders(requestId, new Date())).length > 0;
 }

@@ -113,3 +113,37 @@ export function projectScopeWhere(scope: AccessScope): Prisma.ProjectWhereInput 
 export function paymentRequestScopeWhere(scope: AccessScope): Prisma.PaymentRequestWhereInput {
   return organizationIdScopeWhere(scope);
 }
+
+/**
+ * Видит ли пользователь записи организации: полный администратор и тот, кому
+ * не назначено ни одной организации, — да; иначе — только назначенные.
+ */
+export function seesOrganization(access: { fullAdmin: boolean; organizationIds: string[] }, organizationId: string): boolean {
+  return access.fullAdmin || access.organizationIds.length === 0 || access.organizationIds.includes(organizationId);
+}
+
+/** Кто из этих пользователей видит записи организации (для уведомлений и согласующих заявок). */
+export async function usersSeeingOrganization(userIds: string[], organizationId: string): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set();
+  const users = await prisma.user.findMany({
+    where: { id: { in: [...new Set(userIds)] } },
+    select: {
+      id: true,
+      orgAccess: { select: { organizationId: true } },
+      roles: { select: { role: { select: { permissions: { select: { permission: { select: { code: true } } } } } } } },
+    },
+  });
+  return new Set(
+    users
+      .filter((u) =>
+        seesOrganization(
+          {
+            fullAdmin: u.roles.some((r) => r.role.permissions.some((p) => p.permission.code === PERMISSIONS.ADMIN_FULL)),
+            organizationIds: u.orgAccess.map((a) => a.organizationId),
+          },
+          organizationId,
+        ),
+      )
+      .map((u) => u.id),
+  );
+}
