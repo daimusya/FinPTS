@@ -16,6 +16,7 @@ import { AverageEarningsCard } from "./average-earnings-card";
 import { isVisible } from "@/lib/access-guard";
 import type { AverageParams } from "@/lib/payroll/average-earnings-db";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { singleParams } from "@/lib/query-params";
 
 export default async function PayrollRunDetailPage({
   params,
@@ -25,7 +26,7 @@ export default async function PayrollRunDetailPage({
   searchParams: Promise<{ error?: string } & AverageParams>;
 }) {
   const { id } = await params;
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const { error } = sp;
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.PAYROLL_VIEW)) {

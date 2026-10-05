@@ -18,6 +18,9 @@ import { pageWindow } from "@/lib/paging";
 import { Pager } from "@/components/pager";
 import { textSearchWhere } from "@/lib/text-search";
 import { parseDateParam } from "@/lib/date-param";
+import { singleParams } from "@/lib/query-params";
+import { enumParam } from "@/lib/query-params";
+import { AccrualDirection, AccrualDocumentStatus, PaymentStatus } from "@prisma/client";
 
 const PAGE_SIZE = 200;
 
@@ -44,15 +47,19 @@ export default async function AccrualsPage({
     );
   }
   const canManage = hasPermission(session, PERMISSIONS.ACCRUALS_MANAGE);
-  const filters = await searchParams;
+  const filters = singleParams(await searchParams);
   const { direction, status, paymentStatus, pnlArticleId, from, to, q } = filters;
 
   const scope = await getAccessScope(session);
 
   const where: Prisma.AccrualDocumentWhereInput = { ...accrualScopeWhere(scope) };
-  if (direction) where.direction = direction as never;
-  if (status) where.status = status as never;
-  if (paymentStatus) where.paymentStatus = paymentStatus as never;
+  // Values outside the lists (an edited link) are ignored rather than failing the query.
+  const directionValue = enumParam(direction, AccrualDirection);
+  const statusValue = enumParam(status, AccrualDocumentStatus);
+  const paymentStatusValue = enumParam(paymentStatus, PaymentStatus);
+  if (directionValue) where.direction = directionValue;
+  if (statusValue) where.status = statusValue;
+  if (paymentStatusValue) where.paymentStatus = paymentStatusValue;
   if (pnlArticleId) where.lines = { some: { pnlArticleId } };
   if (q?.trim()) where.AND = [textSearchWhere(["number", "comment", "counterparty.fullName", "counterparty.shortName", "counterparty.inn"], q)];
   // A malformed date in the address (an old or edited link) is ignored instead of failing the page.

@@ -8,6 +8,7 @@ import { getCurrentCashBalance } from "@/lib/financial-model/current-cash";
 import { loadNewServices } from "@/lib/financial-model/new-services";
 import { loadLoans, loadOpeningBalances, loadScenarioTax, loadScenarioTaxContext } from "@/lib/financial-model/loans";
 import { getAccessScope } from "@/lib/access-scope";
+import { singleParams } from "@/lib/query-params";
 
 const HORIZON_MONTHS = 12;
 
@@ -30,7 +31,7 @@ export default async function CompareScenariosPage({
     orderBy: { createdAt: "desc" },
   });
 
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const idsParam = sp.ids ? (Array.isArray(sp.ids) ? sp.ids : [sp.ids]) : [];
   const selectedIds = idsParam.length > 0 ? idsParam : allScenarios.slice(0, 2).map((s) => s.id);
 

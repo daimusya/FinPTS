@@ -7,6 +7,7 @@ import { EMPLOYEE_STATUS_BADGE, EMPLOYEE_STATUS_LABELS, PAYMENT_METHOD_LABELS } 
 import { formatMoney } from "@/lib/money";
 import { isVisible } from "@/lib/access-guard";
 import { setProjectAllocationAction, removeProjectAllocationAction } from "../actions";
+import { singleParams } from "@/lib/query-params";
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   hire: "Приём",
@@ -25,7 +26,7 @@ export default async function EmployeeDetailPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.PAYROLL_VIEW)) {
     return (

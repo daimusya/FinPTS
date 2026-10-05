@@ -6,6 +6,7 @@ import { importKeyFields } from "@/lib/dictionaries/import-plan";
 import { ARCHIVE_COLUMN_LABEL, ID_COLUMN_LABEL } from "@/lib/dictionaries/spreadsheet";
 import { BANK_SHEET, CONTACT_SHEET } from "@/lib/counterparties/details-sheets";
 import { importDictionaryAction, type ImportPreview } from "../../import-actions";
+import { singleParams } from "@/lib/query-params";
 
 function parseJson<T>(raw: string | undefined): T | null {
   if (!raw) return null;
@@ -26,7 +27,7 @@ export default async function ImportDictionaryPage({
   const { slug } = await params;
   if (!DICTIONARY_REGISTRY[slug]) notFound();
   const config = getDictionaryConfig(slug);
-  const query = await searchParams;
+  const query = singleParams(await searchParams);
   const errors = (parseJson<unknown[]>(query.errors) ?? []).map(String);
   const preview = parseJson<ImportPreview>(query.preview);
 

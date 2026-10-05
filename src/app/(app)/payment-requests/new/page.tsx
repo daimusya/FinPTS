@@ -6,6 +6,7 @@ import { CURRENCY_OPTIONS } from "@/lib/currency";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createPaymentRequestAction } from "../actions";
 import { getAccessScope, organizationIdScopeWhere, organizationScopeWhere } from "@/lib/access-scope";
+import { singleParams } from "@/lib/query-params";
 
 export default async function NewPaymentRequestPage({
   searchParams,
@@ -13,7 +14,7 @@ export default async function NewPaymentRequestPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const session = await getSession();
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   if (!session || !hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_CREATE)) {
     return (
       <div className="page">

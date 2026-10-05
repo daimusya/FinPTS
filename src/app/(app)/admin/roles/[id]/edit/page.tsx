@@ -6,6 +6,7 @@ import { PERMISSIONS, PERMISSION_LABELS } from "@/lib/permissions";
 import { deleteRoleAction, renameRoleAction, updateRolePermissionsAction } from "../../actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { roleDeleteProblem } from "@/lib/roles";
+import { singleParams } from "@/lib/query-params";
 
 export default async function EditRolePage({
   params,
@@ -15,7 +16,7 @@ export default async function EditRolePage({
   searchParams: Promise<{ error?: string; notice?: string }>;
 }) {
   const { id } = await params;
-  const { error, notice } = await searchParams;
+  const { error, notice } = singleParams(await searchParams);
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.USERS_MANAGE)) {
     return (

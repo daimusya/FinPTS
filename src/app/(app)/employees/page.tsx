@@ -7,11 +7,12 @@ import { employeeScopeWhere, getAccessScope } from "@/lib/access-scope";
 import { textSearchWhere } from "@/lib/text-search";
 import { pageWindow } from "@/lib/paging";
 import { Pager } from "@/components/pager";
+import { singleParams } from "@/lib/query-params";
 
 const PAGE_SIZE = 100;
 
 export default async function EmployeesPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
-  const { q, page } = await searchParams;
+  const { q, page } = singleParams(await searchParams);
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.PAYROLL_VIEW)) {
     return (

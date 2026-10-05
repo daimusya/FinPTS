@@ -16,6 +16,7 @@ import {
 } from "../../actions";
 import { departmentScopeWhere, getAccessScope, organizationIdScopeWhere, projectScopeWhere } from "@/lib/access-scope";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { singleParams } from "@/lib/query-params";
 
 export default async function CashTransactionDetailPage({
   params,
@@ -25,7 +26,7 @@ export default async function CashTransactionDetailPage({
   searchParams: Promise<{ error?: string; notice?: string }>;
 }) {
   const { id } = await params;
-  const { error, notice } = await searchParams;
+  const { error, notice } = singleParams(await searchParams);
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.CASH_VIEW)) {
     return (

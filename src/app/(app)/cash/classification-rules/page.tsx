@@ -4,6 +4,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney } from "@/lib/money";
 import { applyRulesToUnclassifiedAction } from "./actions";
+import { singleParams } from "@/lib/query-params";
 
 const DIRECTION_LABELS: Record<string, string> = { INFLOW: "Поступление", OUTFLOW: "Списание" };
 
@@ -21,7 +22,7 @@ export default async function ClassificationRulesPage({
     );
   }
   const canManage = hasPermission(session, PERMISSIONS.CASH_MANAGE);
-  const { applied } = await searchParams;
+  const { applied } = singleParams(await searchParams);
 
   const [rules, unclassifiedCount] = await Promise.all([
     prisma.bankClassificationRule.findMany({

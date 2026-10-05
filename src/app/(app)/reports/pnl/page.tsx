@@ -28,6 +28,7 @@ import {
 } from "@/lib/budget/plan-fact";
 import { PLAN_FACT_HEADERS, PlanFactCells } from "@/components/plan-fact-cells";
 import type Decimal from "decimal.js";
+import { singleParams } from "@/lib/query-params";
 
 function drillDownHref(row: PnlArticleRow, from: string, to: string) {
   const params = new URLSearchParams({ from, to });
@@ -49,7 +50,7 @@ export default async function PnlReportPage({
     );
   }
 
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const period = resolveReportPeriod(sp);
   const prior = previousPeriod(period);
   const filters = extractFilters(sp);

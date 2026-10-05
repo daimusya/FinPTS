@@ -12,6 +12,9 @@ import { pageWindow } from "@/lib/paging";
 import { Pager } from "@/components/pager";
 import { textSearchWhere } from "@/lib/text-search";
 import { parseDateParam } from "@/lib/date-param";
+import { singleParams } from "@/lib/query-params";
+import { enumParam } from "@/lib/query-params";
+import { BankTransactionDirection, BankTransactionMatchStatus } from "@prisma/client";
 
 const BULK_FORM = "bulk-delete";
 
@@ -54,15 +57,18 @@ export default async function CashTransactionsPage({
     );
   }
   const canManage = hasPermission(session, PERMISSIONS.CASH_MANAGE);
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const { matchStatus, direction, cashFlowArticleId, from, to, batchId, notice, error, q } = sp;
 
   const scope = await getAccessScope(session);
   const scopeWhere = bankTransactionScopeWhere(scope);
 
   const where: Prisma.BankTransactionWhereInput = { ...scopeWhere };
-  if (matchStatus) where.matchStatus = matchStatus as never;
-  if (direction) where.direction = direction as never;
+  // Values outside the lists (an edited link) are ignored rather than failing the query.
+  const matchStatusValue = enumParam(matchStatus, BankTransactionMatchStatus);
+  const directionValue = enumParam(direction, BankTransactionDirection);
+  if (matchStatusValue) where.matchStatus = matchStatusValue;
+  if (directionValue) where.direction = directionValue;
   if (cashFlowArticleId) where.cashFlowArticleId = cashFlowArticleId;
   if (q?.trim()) where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), textSearchWhere(["purpose", "counterpartyInn", "counterparty.fullName", "counterparty.shortName", "counterparty.inn"], q)];
   if (batchId) where.batchId = batchId;

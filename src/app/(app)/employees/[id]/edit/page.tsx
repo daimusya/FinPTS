@@ -5,6 +5,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { updateEmployeeAction } from "../../actions";
 import { isVisible } from "@/lib/access-guard";
+import { singleParams } from "@/lib/query-params";
 
 export default async function EditEmployeePage({
   params,
@@ -14,7 +15,7 @@ export default async function EditEmployeePage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.PAYROLL_MANAGE)) {
     return (

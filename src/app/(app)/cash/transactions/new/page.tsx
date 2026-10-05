@@ -5,6 +5,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createBankTransactionAction } from "../../actions";
 import { departmentScopeWhere, getAccessScope, organizationIdScopeWhere, projectScopeWhere } from "@/lib/access-scope";
+import { singleParams } from "@/lib/query-params";
 
 export default async function NewCashTransactionPage({
   searchParams,
@@ -12,7 +13,7 @@ export default async function NewCashTransactionPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const session = await getSession();
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   if (!session || !hasPermission(session, PERMISSIONS.CASH_MANAGE)) {
     return (
       <div className="page">

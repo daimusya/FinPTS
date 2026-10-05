@@ -36,6 +36,7 @@ import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { isVisible } from "@/lib/access-guard";
 import { currentDeciders, hasDecidersIgnoringAccess, noDecidersReason } from "@/lib/payment-requests/notify";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { singleParams } from "@/lib/query-params";
 
 const STATE_LABELS: Record<TimelineState, string> = {
   approved: "Согласовано",
@@ -70,7 +71,7 @@ export default async function PaymentRequestPage({
   const session = await getSession();
   if (!session) return null;
   const { id } = await params;
-  const { error, notice } = await searchParams;
+  const { error, notice } = singleParams(await searchParams);
 
   const request = await prisma.paymentRequest.findUnique({
     where: { id },

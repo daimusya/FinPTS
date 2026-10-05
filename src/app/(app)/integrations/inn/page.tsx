@@ -5,6 +5,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { decryptSecret, maskSecret } from "@/lib/crypto/secret-box";
 import { INN_PROFILE_SYSTEM, lookupRequisitesByInn } from "@/lib/integrations/inn-service";
 import { saveInnLookupSettingsAction } from "./actions";
+import { singleParams } from "@/lib/query-params";
 
 const FIELD_LABELS: Array<[keyof import("@/lib/integrations/inn").PartyRequisites, string]> = [
   ["fullName", "Полное наименование"],
@@ -35,7 +36,7 @@ export default async function InnLookupSettingsPage({
       </div>
     );
   }
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const profile = await prisma.integrationProfile.findFirst({ where: { system: INN_PROFILE_SYSTEM } });
   const config = (profile?.config ?? {}) as { apiKeyEnc?: string; autoCreate?: boolean };
   const apiKeyEnc = config.apiKeyEnc;

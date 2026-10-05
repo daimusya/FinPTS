@@ -6,11 +6,12 @@ import { readFlash } from "@/lib/flash";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { FlashConsumed } from "@/components/flash-consumed";
 import { endUserSessionsAction, resetPasswordAction } from "./actions";
+import { singleParams } from "@/lib/query-params";
 
 const loginTime = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Moscow" });
 
 export default async function UsersPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
-  const { notice } = await searchParams;
+  const { notice } = singleParams(await searchParams);
   const session = await getSession();
   const flash = await readFlash("tempPassword");
   const [forEmail, tempPassword] = flash ? flash.split("\n") : [null, null];

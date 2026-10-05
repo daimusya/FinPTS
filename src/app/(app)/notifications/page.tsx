@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { markAllNotificationsReadAction, openNotificationAction } from "./actions";
 import { MyNotificationChannels } from "@/components/my-notification-channels";
+import { singleParams } from "@/lib/query-params";
 
 const PAGE_SIZE = 50;
 const dateTime = (d: Date) => d.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", dateStyle: "short", timeStyle: "short" });
@@ -10,7 +11,7 @@ const dateTime = (d: Date) => d.toLocaleString("ru-RU", { timeZone: "Europe/Mosc
 export default async function NotificationsPage({ searchParams }: { searchParams: Promise<{ channelError?: string; channelNotice?: string; page?: string }> }) {
   const session = await getSession();
   if (!session) return null;
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   // The unread count covers all notifications, not only this page — the same number as in the header.
   const [total, unread] = await Promise.all([
     prisma.notification.count({ where: { userId: session.userId } }),

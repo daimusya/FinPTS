@@ -6,6 +6,7 @@ import { computePayrollSummary, type PayrollSummaryLine } from "@/lib/payroll/su
 import { getAccessScope, payrollRunScopeWhere } from "@/lib/access-scope";
 import type Decimal from "decimal.js";
 import { parseDateParam } from "@/lib/date-param";
+import { singleParams } from "@/lib/query-params";
 
 export default async function PayrollSummaryPage({
   searchParams,
@@ -21,7 +22,7 @@ export default async function PayrollSummaryPage({
     );
   }
 
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const date = parseDateParam(sp.date) ?? new Date();
   const from = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const to = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59));

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS, PERMISSION_LABELS } from "@/lib/permissions";
 import { createRoleAction } from "../actions";
+import { singleParams } from "@/lib/query-params";
 
 export default async function NewRolePage({
   searchParams,
@@ -10,7 +11,7 @@ export default async function NewRolePage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const session = await getSession();
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   if (!session || !hasPermission(session, PERMISSIONS.USERS_MANAGE)) {
     return (
       <div className="page">

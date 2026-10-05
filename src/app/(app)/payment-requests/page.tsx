@@ -13,6 +13,7 @@ import { pageWindow } from "@/lib/paging";
 import { Pager } from "@/components/pager";
 import { textSearchWhere } from "@/lib/text-search";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { singleParams } from "@/lib/query-params";
 
 /** «В работе» — всё, с чем ещё что-то делают (отклонённую автор может доработать); «Завершённые» — оплаченные и отменённые. */
 const IN_WORK: PaymentRequestStatus[] = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "RETURNED", "REJECTED"];
@@ -26,7 +27,7 @@ export default async function PaymentRequestsPage({
 }) {
   const session = await getSession();
   if (!session) return null;
-  const { error, view, page, q } = await searchParams;
+  const { error, view, page, q } = singleParams(await searchParams);
   const showDone = view === "done";
   const canApprove = hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE);
   const canPay = hasPermission(session, PERMISSIONS.CASH_MANAGE);

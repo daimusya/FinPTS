@@ -10,6 +10,7 @@ import { loadBudgetArticles } from "@/lib/budget/articles";
 import { dimKey, parseDimKey, planLevelWarning, type BudgetSlice } from "@/lib/budget/slice";
 import { copyBudgetFromPreviousYearAction, importBudgetAction, saveBudgetAction, type BudgetKindSlug } from "./actions";
 import type Decimal from "decimal.js";
+import { singleParams } from "@/lib/query-params";
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 // Digits with optional thousands spaces and up to two decimals after a dot or comma; checked again on the server.
@@ -36,7 +37,7 @@ export default async function BudgetPage({
   const canManage = hasPermission(session, PERMISSIONS.FINANCIAL_MODEL_MANAGE);
   const scope = await getAccessScope(session);
 
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const kindSlug: BudgetKindSlug = sp.kind === "cash-flow" ? "cash-flow" : "pnl";
   const kind = kindSlug === "cash-flow" ? "CASH_FLOW" : "PNL";
   const year = Number(sp.year) || new Date().getFullYear();

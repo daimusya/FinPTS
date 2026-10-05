@@ -5,6 +5,7 @@ import { DICTIONARY_REGISTRY, getDictionaryConfig } from "@/lib/dictionaries/reg
 import { DictionaryFormFields, resolveFieldDefault, type ResolvedField } from "@/components/dictionary-form-fields";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createDictionaryItem } from "../../actions";
+import { singleParams } from "@/lib/query-params";
 
 export default async function NewDictionaryItemPage({
   params,
@@ -14,7 +15,7 @@ export default async function NewDictionaryItemPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { slug } = await params;
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   if (!DICTIONARY_REGISTRY[slug]) notFound();
   const config = getDictionaryConfig(slug);
 

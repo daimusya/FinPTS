@@ -5,6 +5,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { runPeriodCloseChecklist } from "@/lib/period-close/checklist";
 import { closePeriodAction } from "../../actions";
+import { singleParams } from "@/lib/query-params";
 
 const MONTH_NAMES = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -19,7 +20,7 @@ export default async function ClosePeriodPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.PERIODS_MANAGE)) {
     return (

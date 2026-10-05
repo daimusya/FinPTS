@@ -6,6 +6,7 @@ import { enqueueAllProjectResultsAction, saveBitrix24ProfileAction, sendOutboxEv
 import Link from "next/link";
 import { formatMoney } from "@/lib/money";
 import { loadProjectResult } from "@/lib/integrations/project-results";
+import { singleParams } from "@/lib/query-params";
 
 const EVENT_LABELS: Record<string, string> = {
   payment_status_changed: "Статус оплаты документа",
@@ -29,7 +30,7 @@ export default async function Bitrix24IntegrationPage({
 }: {
   searchParams: Promise<{ checked?: string; queued?: string }>;
 }) {
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.INTEGRATIONS_MANAGE)) {
     return (

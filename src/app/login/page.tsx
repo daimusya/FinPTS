@@ -3,9 +3,10 @@ import { headers } from "next/headers";
 import { insecureRemoteLogin, requestIsHttps } from "@/lib/request-security";
 import { getSession } from "@/lib/session";
 import { LoginForm } from "./login-form";
+import { singleParams } from "@/lib/query-params";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ expired?: string }> }) {
-  const { expired } = await searchParams;
+  const { expired } = singleParams(await searchParams);
   const session = await getSession();
   if (session) {
     redirect("/dashboard");

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { createUserAction } from "../actions";
+import { singleParams } from "@/lib/query-params";
 
 export default async function NewUserPage({
   searchParams,
@@ -10,7 +11,7 @@ export default async function NewUserPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const session = await getSession();
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   if (!session || !hasPermission(session, PERMISSIONS.USERS_MANAGE)) {
     return (
       <div className="page">

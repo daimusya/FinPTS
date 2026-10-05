@@ -12,6 +12,7 @@ import {
   toggleBankConnectionAction,
 } from "./actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { singleParams } from "@/lib/query-params";
 
 const dateTime = (d: Date | null) => (d ? d.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", dateStyle: "short", timeStyle: "short" }) : "—");
 
@@ -24,7 +25,7 @@ export default async function BankApiPage({ searchParams }: { searchParams: Prom
       </div>
     );
   }
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const [connections, accounts] = await Promise.all([
     prisma.bankConnection.findMany({ include: { bankAccount: { include: { organization: true } } }, orderBy: { createdAt: "asc" } }),
     prisma.bankAccount.findMany({ where: { isArchived: false, apiConnection: null }, include: { organization: true }, orderBy: { bankName: "asc" } }),

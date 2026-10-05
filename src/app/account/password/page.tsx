@@ -4,12 +4,13 @@ import { getSession } from "@/lib/session";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import { changeOwnPasswordAction, endOtherSessionsAction } from "./actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { singleParams } from "@/lib/query-params";
 
 /** Смена собственного пароля; при пароле, выданном администратором, — обязательна. */
 export default async function ChangePasswordPage({ searchParams }: { searchParams: Promise<{ error?: string; done?: string; sessions?: string }> }) {
   const session = await getSession();
   if (!session) redirect("/login");
-  const { error, done, sessions } = await searchParams;
+  const { error, done, sessions } = singleParams(await searchParams);
 
   return (
     <div className="login-page">

@@ -21,6 +21,7 @@ import { planFactMetrics, resolvePlanAvailability } from "@/lib/budget/plan-fact
 import { budgetDim, planSliceNote } from "@/lib/budget/report-links";
 import { PLAN_FACT_HEADERS, PlanFactCells } from "@/components/plan-fact-cells";
 import { mergeProjectPlan, type ProjectPlanRow } from "@/lib/reports/margin-plan";
+import { singleParams } from "@/lib/query-params";
 
 export default async function MarginReportPage({
   searchParams,
@@ -36,7 +37,7 @@ export default async function MarginReportPage({
     );
   }
 
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const period = resolveReportPeriod(sp);
   const filters = extractFilters(sp);
   const scope = await getAccessScope(session);

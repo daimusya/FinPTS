@@ -13,6 +13,7 @@ import { dictionaryTextColumns } from "@/lib/dictionaries/columns";
 import { dictionarySearchWhere } from "@/lib/dictionaries/search";
 import { pageWindow } from "@/lib/paging";
 import { Pager } from "@/components/pager";
+import { singleParams } from "@/lib/query-params";
 
 const PAGE_SIZE = 100;
 
@@ -69,7 +70,7 @@ export default async function DictionaryListPage({
   searchParams: Promise<{ imported?: string; importResult?: string; innError?: string; ratesError?: string; q?: string; page?: string }>;
 }) {
   const { slug } = await params;
-  const { imported, importResult, innError, ratesError, q, page } = await searchParams;
+  const { imported, importResult, innError, ratesError, q, page } = singleParams(await searchParams);
   if (!DICTIONARY_REGISTRY[slug]) notFound();
   const config = getDictionaryConfig(slug);
 

@@ -2,9 +2,10 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS, PERMISSION_LABELS } from "@/lib/permissions";
+import { singleParams } from "@/lib/query-params";
 
 export default async function RolesPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
-  const { notice } = await searchParams;
+  const { notice } = singleParams(await searchParams);
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.USERS_MANAGE)) {
     return (

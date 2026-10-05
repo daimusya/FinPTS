@@ -11,6 +11,7 @@ import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { OrganizationTaxes } from "@/components/organization-taxes";
 import { getAccessScope } from "@/lib/access-scope";
 import { dictionaryRecordAllowed } from "@/lib/dictionaries/scope";
+import { singleParams } from "@/lib/query-params";
 
 export default async function EditDictionaryItemPage({
   params,
@@ -32,7 +33,7 @@ export default async function EditDictionaryItemPage({
   }>;
 }) {
   const { slug, id } = await params;
-  const { error, notice, ...detailsState } = await searchParams;
+  const { error, notice, ...detailsState } = singleParams(await searchParams);
   if (!DICTIONARY_REGISTRY[slug]) notFound();
   const config = getDictionaryConfig(slug);
 

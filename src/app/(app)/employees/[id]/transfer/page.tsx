@@ -6,6 +6,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { transferEmployeeAction } from "../../actions";
 import { departmentScopeWhere, getAccessScope } from "@/lib/access-scope";
 import { isVisible } from "@/lib/access-guard";
+import { singleParams } from "@/lib/query-params";
 
 export default async function TransferEmployeePage({
   params,
@@ -15,7 +16,7 @@ export default async function TransferEmployeePage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.PAYROLL_MANAGE)) {
     return (

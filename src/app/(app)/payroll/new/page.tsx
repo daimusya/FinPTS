@@ -4,6 +4,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { createPayrollRunAction } from "../actions";
 import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
+import { singleParams } from "@/lib/query-params";
 
 export default async function NewPayrollRunPage({
   searchParams,
@@ -11,7 +12,7 @@ export default async function NewPayrollRunPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const session = await getSession();
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   if (!session || !hasPermission(session, PERMISSIONS.PAYROLL_MANAGE)) {
     return (
       <div className="page">

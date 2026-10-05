@@ -15,6 +15,7 @@ import { PLAN_FACT_HEADERS, PlanFactCells } from "@/components/plan-fact-cells";
 import { formatMoneyIn } from "@/lib/currency";
 import { MissingRatesWarning } from "@/components/missing-rates-warning";
 import type Decimal from "decimal.js";
+import { singleParams } from "@/lib/query-params";
 
 type PlanFactRow = CashFlowArticleRow & PlanFactMetrics;
 
@@ -38,7 +39,7 @@ export default async function CashFlowReportPage({
     );
   }
 
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const period = resolveReportPeriod(sp);
   const filters = extractFilters(sp);
   const scope = await getAccessScope(session);

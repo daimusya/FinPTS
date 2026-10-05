@@ -7,6 +7,7 @@ import { DocumentCurrencyFields } from "@/components/document-currency-fields";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createAccrualDocumentAction } from "../actions";
 import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
+import { singleParams } from "@/lib/query-params";
 
 export default async function NewAccrualDocumentPage({
   searchParams,
@@ -14,7 +15,7 @@ export default async function NewAccrualDocumentPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const session = await getSession();
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   if (!session || !hasPermission(session, PERMISSIONS.ACCRUALS_MANAGE)) {
     return (
       <div className="page">

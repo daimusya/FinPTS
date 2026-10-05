@@ -34,6 +34,7 @@ import {
   paymentRequestScopeWhere,
 } from "@/lib/access-scope";
 import { MissingRatesWarning } from "@/components/missing-rates-warning";
+import { singleParams } from "@/lib/query-params";
 
 const MONTH_NAMES = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const WEEKDAY_NAMES = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
@@ -78,7 +79,7 @@ export default async function PaymentCalendarPage({
   const planRequests = canPlanRequests(session);
   const planDocuments = canPlanDocuments(session);
 
-  const params = await searchParams;
+  const params = singleParams(await searchParams);
   const todayKey = localDateKey();
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(params.month ?? "") ? params.month! : todayKey.slice(0, 7);
   const includePending = params.pending !== "0";

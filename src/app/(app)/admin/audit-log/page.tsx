@@ -5,6 +5,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { DICTIONARY_REGISTRY } from "@/lib/dictionaries/registry";
 import { ACTION_LABELS, ENTITY_LABELS, auditChanges, entityLink } from "@/lib/audit-view";
+import { singleParams } from "@/lib/query-params";
 
 const PAGE_SIZE = 100;
 const when = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "medium", timeZone: "Europe/Moscow" });
@@ -22,7 +23,7 @@ function moscowDay(raw: string | undefined, shiftDays = 0): Date | null {
 
 export default async function AuditLogPage({ searchParams }: { searchParams: Promise<Filters> }) {
   const session = await getSession();
-  const filters = await searchParams;
+  const filters = singleParams(await searchParams);
   if (!session || !hasPermission(session, PERMISSIONS.AUDIT_VIEW)) {
     return (
       <div className="page">

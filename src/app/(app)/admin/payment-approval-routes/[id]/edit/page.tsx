@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { updateRouteAction } from "../../actions";
+import { singleParams } from "@/lib/query-params";
 
 const MAX_STEPS = 5;
 
@@ -16,7 +17,7 @@ export default async function EditPaymentApprovalRoutePage({
 }) {
   const { id } = await params;
   const session = await getSession();
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   if (!session || !hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE)) {
     return (
       <div className="page">

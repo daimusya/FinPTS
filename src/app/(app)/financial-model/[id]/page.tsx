@@ -26,6 +26,7 @@ import { DEFAULT_TAX_RATES, TAX_REGIME_LABELS, TAX_REGIMES, usnVatLimit } from "
 import { LOAN_REPAYMENT_LABELS, type LoanRepayment } from "@/lib/financial-model/cash-timing";
 import { loadNewServices, MAX_PAYMENT_DAYS, MAX_RAMP_UP_MONTHS } from "@/lib/financial-model/new-services";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { singleParams } from "@/lib/query-params";
 
 const HORIZON_MONTHS = 12;
 
@@ -55,7 +56,7 @@ export default async function ScenarioDetailPage({
   const scenario = await prisma.financialScenario.findUnique({ where: { id }, include: { values: true } });
   if (!scenario) notFound();
 
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const now = new Date();
   const startYear = Number(sp.startYear) || now.getFullYear();
   const startMonth = Number(sp.startMonth) || now.getMonth() + 1;

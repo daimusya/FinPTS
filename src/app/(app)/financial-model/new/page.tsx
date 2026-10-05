@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { createScenarioAction } from "../actions";
+import { singleParams } from "@/lib/query-params";
 
 export default async function NewScenarioPage({
   searchParams,
@@ -9,7 +10,7 @@ export default async function NewScenarioPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const session = await getSession();
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   if (!session || !hasPermission(session, PERMISSIONS.FINANCIAL_MODEL_MANAGE)) {
     return (
       <div className="page">

@@ -8,6 +8,7 @@ import { computeDebtsReport, type DebtRow } from "@/lib/reports/debts";
 import { prisma } from "@/lib/db";
 import { formatMoneyIn } from "@/lib/currency";
 import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
+import { singleParams } from "@/lib/query-params";
 
 export default async function DebtsReportPage({
   searchParams,
@@ -23,7 +24,7 @@ export default async function DebtsReportPage({
     );
   }
 
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const filters = extractFilters(sp);
   const scope = await getAccessScope(session);
   const [report, organizations, counterparties] = await Promise.all([

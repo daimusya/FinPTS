@@ -5,6 +5,7 @@ import { TIME_SHEET_DAY_TYPE_LABELS } from "@/lib/payroll/labels";
 import { bulkFillTimesheetAction, deleteTimesheetEntryAction } from "./actions";
 import { employeeScopeWhere, getAccessScope, projectScopeWhere } from "@/lib/access-scope";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { singleParams } from "@/lib/query-params";
 
 export default async function TimesheetPage({
   searchParams,
@@ -21,7 +22,7 @@ export default async function TimesheetPage({
   }
   const canManage = hasPermission(session, PERMISSIONS.PAYROLL_MANAGE);
 
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const now = new Date();
   const year = Number(sp.year) || now.getFullYear();
   const month = Number(sp.month) || now.getMonth() + 1;

@@ -12,6 +12,7 @@ import { addBalanceEntryAction, deleteBalanceEntryAction } from "./actions";
 import type Decimal from "decimal.js";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { parseDateParam } from "@/lib/date-param";
+import { singleParams } from "@/lib/query-params";
 
 const CATEGORY_LABELS: Record<string, string> = { ASSET: "актив", LIABILITY: "обязательство", EQUITY: "капитал" };
 
@@ -30,7 +31,7 @@ export default async function BalanceReportPage({
   }
   const canManage = hasPermission(session, PERMISSIONS.ACCRUALS_MANAGE);
 
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const filters = extractFilters(sp);
   const asOfDate = parseDateParam(sp.asOf) ?? new Date();
   const scope = await getAccessScope(session);

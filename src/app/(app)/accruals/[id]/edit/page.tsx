@@ -9,6 +9,7 @@ import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { isVisible } from "@/lib/access-guard";
 import { updateAccrualDocumentAction } from "../../actions";
 import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
+import { singleParams } from "@/lib/query-params";
 
 function toDateInput(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -22,7 +23,7 @@ export default async function EditAccrualDocumentPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error } = singleParams(await searchParams);
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.ACCRUALS_MANAGE)) {
     return (

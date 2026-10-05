@@ -5,6 +5,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { decryptSecret, maskSecret } from "@/lib/crypto/secret-box";
 import { loadChannelSettings } from "@/lib/notify-channels/deliver";
 import { retryDeliveryAction, saveChannelSettingsAction, sendTestEmailAction, sendTestTelegramAction } from "./actions";
+import { singleParams } from "@/lib/query-params";
 
 const dateTime = (d: Date) => d.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", dateStyle: "short", timeStyle: "short" });
 
@@ -17,7 +18,7 @@ export default async function NotificationChannelsPage({ searchParams }: { searc
       </div>
     );
   }
-  const sp = await searchParams;
+  const sp = singleParams(await searchParams);
   const settings = await loadChannelSettings();
   const dayAgo = new Date();
   dayAgo.setUTCDate(dayAgo.getUTCDate() - 1);
