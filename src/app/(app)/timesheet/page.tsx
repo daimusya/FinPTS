@@ -3,11 +3,12 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { TIME_SHEET_DAY_TYPE_LABELS } from "@/lib/payroll/labels";
 import { bulkFillTimesheetAction, deleteTimesheetEntryAction } from "./actions";
+import { employeeScopeWhere, getAccessScope, projectScopeWhere } from "@/lib/access-scope";
 
 export default async function TimesheetPage({
   searchParams,
 }: {
-  searchParams: Promise<{ employeeId?: string; year?: string; month?: string }>;
+  searchParams: Promise<{ employeeId?: string; year?: string; month?: string; error?: string; notice?: string }>;
 }) {
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.PAYROLL_VIEW)) {
@@ -26,14 +27,17 @@ export default async function TimesheetPage({
   const from = new Date(Date.UTC(year, month - 1, 1));
   const to = new Date(Date.UTC(year, month, 0, 23, 59, 59));
 
+  // Only employees and projects of the user's organizations (and departments).
+  const scope = await getAccessScope(session);
   const [employees, projects] = await Promise.all([
-    prisma.employee.findMany({ where: { status: "ACTIVE" }, orderBy: { fullName: "asc" } }),
-    prisma.project.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    prisma.employee.findMany({ where: { status: "ACTIVE", ...employeeScopeWhere(scope) }, orderBy: { fullName: "asc" } }),
+    prisma.project.findMany({ where: { isArchived: false, ...projectScopeWhere(scope) }, orderBy: { name: "asc" } }),
   ]);
 
-  const entries = sp.employeeId
+  const shown = sp.employeeId && employees.some((e) => e.id === sp.employeeId) ? sp.employeeId : undefined;
+  const entries = shown
     ? await prisma.timeSheet.findMany({
-        where: { employeeId: sp.employeeId, date: { gte: from, lte: to } },
+        where: { employeeId: shown, date: { gte: from, lte: to } },
         orderBy: { date: "asc" },
         include: { project: true },
       })
@@ -49,6 +53,9 @@ export default async function TimesheetPage({
           <p>Рабочие дни, отпуска, больничные и проектные часы. Данные используются при расчёте зарплаты.</p>
         </div>
       </div>
+
+      {sp.error ? <p className="form-error" style={{ marginBottom: 14 }}>{sp.error}</p> : null}
+      {sp.notice ? <p className="form-success" style={{ marginBottom: 14 }}>{sp.notice}</p> : null}
 
       {canManage ? (
         <div className="card" style={{ marginBottom: 16 }}>
@@ -118,7 +125,7 @@ export default async function TimesheetPage({
         <form className="filter-bar">
           <label className="field">
             <span>Сотрудник</span>
-            <select name="employeeId" defaultValue={sp.employeeId ?? ""}>
+            <select name="employeeId" defaultValue={shown ?? ""}>
               <option value="">— выбрать —</option>
               {employees.map((e) => (
                 <option key={e.id} value={e.id}>
@@ -140,7 +147,7 @@ export default async function TimesheetPage({
           </button>
         </form>
 
-        {sp.employeeId ? (
+        {shown ? (
           <>
             <p className="text-muted" style={{ marginBottom: 10 }}>
               Всего часов за период: <strong>{totalHours}</strong>

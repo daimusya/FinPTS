@@ -7,6 +7,11 @@ import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { isVisible, NOT_VISIBLE } from "@/lib/access-guard";
+import { getAccessScope, projectScopeWhere } from "@/lib/access-scope";
+import { assertPeriodOpenForDate } from "@/lib/period";
+import { monthsTouched, parseTimesheetFill } from "@/lib/payroll/timesheet-fill";
+
+const back = (param: "error" | "notice", message: string): never => redirect(`/timesheet?${param}=${encodeURIComponent(message)}`);
 import { isWorkingDay, type CalendarOverrides, toCalendarOverrides } from "@/lib/payroll/work-calendar";
 
 export async function bulkFillTimesheetAction(formData: FormData) {
@@ -15,22 +20,29 @@ export async function bulkFillTimesheetAction(formData: FormData) {
   const employeeIds = formData.getAll("employeeIds").map(String);
   // Only employees visible to this user.
   for (const employeeId of employeeIds) {
-    if (!(await isVisible(session, "employee", employeeId))) redirect(`/timesheet?error=${encodeURIComponent(NOT_VISIBLE)}`);
+    if (!(await isVisible(session, "employee", employeeId))) back("error", NOT_VISIBLE);
   }
   const dateFromRaw = String(formData.get("dateFrom") ?? "");
   const dateToRaw = String(formData.get("dateTo") ?? "");
-  const dayType = String(formData.get("dayType") ?? "");
-  const hoursRaw = String(formData.get("hours") ?? "8");
   const projectId = String(formData.get("projectId") ?? "") || null;
   const skipWeekends = formData.get("skipWeekends") === "on";
 
-  if (employeeIds.length === 0 || !dateFromRaw || !dateToRaw || !dayType) {
-    return;
+  const parsed = parseTimesheetFill({
+    employeeCount: employeeIds.length,
+    dateFrom: dateFromRaw,
+    dateTo: dateToRaw,
+    dayType: String(formData.get("dayType") ?? ""),
+    hours: String(formData.get("hours") ?? "8"),
+  });
+  if ("error" in parsed) back("error", parsed.error);
+  const { dateFrom, dateTo, dayType, hours } = parsed as Exclude<typeof parsed, { error: string }>;
+  if (projectId && (await prisma.project.count({ where: { id: projectId, ...projectScopeWhere(await getAccessScope(session)) } })) === 0) {
+    back("error", NOT_VISIBLE);
   }
-
-  const dateFrom = new Date(dateFromRaw);
-  const dateTo = new Date(dateToRaw);
-  const hours = Number(hoursRaw) || 0;
+  // The timesheet feeds payroll: months already closed are not changed.
+  for (const month of monthsTouched(dateFrom, dateTo)) {
+    await assertPeriodOpenForDate(month).catch((e) => back("error", (e as Error).message));
+  }
 
   // Weekends and holidays per the production calendar (without calendar rows — plain Saturday/Sunday).
   const calendarRows = skipWeekends
@@ -67,13 +79,18 @@ export async function bulkFillTimesheetAction(formData: FormData) {
   });
 
   revalidatePath("/timesheet");
+  back(
+    "notice",
+    count > 0 ? `Табель заполнен, записей: ${count}` : "В выбранном периоде нет рабочих дней — табель не изменён",
+  );
 }
 
 export async function deleteTimesheetEntryAction(id: string) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
 
   const entry = await prisma.timeSheet.findUniqueOrThrow({ where: { id } });
-  if (!(await isVisible(session, "employee", entry.employeeId))) redirect(`/timesheet?error=${encodeURIComponent(NOT_VISIBLE)}`);
+  if (!(await isVisible(session, "employee", entry.employeeId))) back("error", NOT_VISIBLE);
+  await assertPeriodOpenForDate(entry.date).catch((e) => back("error", (e as Error).message));
   await prisma.timeSheet.delete({ where: { id } });
 
   await logAudit({
