@@ -11,6 +11,7 @@ import { isDelegationActive } from "@/lib/payment-requests/delegation";
 import type { PaymentRequestStatus } from "@prisma/client";
 import { pageWindow } from "@/lib/paging";
 import { Pager } from "@/components/pager";
+import { textSearchWhere } from "@/lib/text-search";
 
 /** «В работе» — всё, с чем ещё что-то делают (отклонённую автор может доработать); «Завершённые» — оплаченные и отменённые. */
 const IN_WORK: PaymentRequestStatus[] = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "RETURNED", "REJECTED"];
@@ -20,11 +21,11 @@ const DONE_PAGE_SIZE = 100;
 export default async function PaymentRequestsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; view?: string; page?: string }>;
+  searchParams: Promise<{ error?: string; view?: string; page?: string; q?: string }>;
 }) {
   const session = await getSession();
   if (!session) return null;
-  const { error, view, page } = await searchParams;
+  const { error, view, page, q } = await searchParams;
   const showDone = view === "done";
   const canApprove = hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE);
   const canPay = hasPermission(session, PERMISSIONS.CASH_MANAGE);
@@ -34,7 +35,9 @@ export default async function PaymentRequestsPage({
   const today = new Date();
   const scope = await getAccessScope(session);
   // Only the organizations this user may see.
-  const scopeWhere = paymentRequestScopeWhere(scope);
+  const scopeWhere = {
+    AND: [paymentRequestScopeWhere(scope), textSearchWhere(["comment", "counterparty.fullName", "counterparty.shortName", "counterparty.inn", "organization.name"], q)],
+  };
   const [inWorkCount, doneCount] = await Promise.all([
     prisma.paymentRequest.count({ where: { ...scopeWhere, status: { in: IN_WORK } } }),
     prisma.paymentRequest.count({ where: { ...scopeWhere, status: { in: DONE } } }),
@@ -126,6 +129,18 @@ export default async function PaymentRequestsPage({
       ) : null}
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+        <form style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {showDone ? <input type="hidden" name="view" value="done" /> : null}
+          <input type="search" name="q" id="requests-search" defaultValue={q ?? ""} placeholder="Контрагент, ИНН, комментарий" style={{ minWidth: 240 }} />
+          <button type="submit" className="btn btn-secondary btn-sm">
+            Найти
+          </button>
+          {q ? (
+            <Link href={showDone ? "/payment-requests?view=done" : "/payment-requests"} className="btn btn-ghost btn-sm">
+              Сбросить
+            </Link>
+          ) : null}
+        </form>
         <Link href="/payment-requests" className={`btn btn-sm ${showDone ? "btn-ghost" : "btn-secondary"}`} aria-current={showDone ? undefined : "page"}>
           В работе ({inWorkCount})
         </Link>
@@ -253,14 +268,14 @@ export default async function PaymentRequestsPage({
             {requests.length === 0 ? (
               <tr>
                 <td colSpan={9} className="empty-state">
-                  {showDone ? "Оплаченных и отменённых заявок пока нет." : "Заявок в работе нет."}
+                  {q ? `По запросу «${q}» заявок нет.` : showDone ? "Оплаченных и отменённых заявок пока нет." : "Заявок в работе нет."}
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
       </div>
-      {window ? <Pager window={window} basePath="/payment-requests" params={{ view: "done" }} /> : null}
+      {window ? <Pager window={window} basePath="/payment-requests" params={{ view: "done", q }} /> : null}
     </div>
   );
 }

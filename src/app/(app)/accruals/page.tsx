@@ -16,6 +16,7 @@ import type { Prisma } from "@prisma/client";
 import { accrualScopeWhere, getAccessScope } from "@/lib/access-scope";
 import { pageWindow } from "@/lib/paging";
 import { Pager } from "@/components/pager";
+import { textSearchWhere } from "@/lib/text-search";
 
 const PAGE_SIZE = 200;
 
@@ -30,6 +31,7 @@ export default async function AccrualsPage({
     from?: string;
     to?: string;
     page?: string;
+    q?: string;
   }>;
 }) {
   const session = await getSession();
@@ -42,7 +44,7 @@ export default async function AccrualsPage({
   }
   const canManage = hasPermission(session, PERMISSIONS.ACCRUALS_MANAGE);
   const filters = await searchParams;
-  const { direction, status, paymentStatus, pnlArticleId, from, to } = filters;
+  const { direction, status, paymentStatus, pnlArticleId, from, to, q } = filters;
 
   const scope = await getAccessScope(session);
 
@@ -51,6 +53,7 @@ export default async function AccrualsPage({
   if (status) where.status = status as never;
   if (paymentStatus) where.paymentStatus = paymentStatus as never;
   if (pnlArticleId) where.lines = { some: { pnlArticleId } };
+  if (q?.trim()) where.AND = [textSearchWhere(["number", "comment", "counterparty.fullName", "counterparty.shortName", "counterparty.inn"], q)];
   if (from || to) {
     where.date = {
       ...(from ? { gte: new Date(from) } : {}),
@@ -88,6 +91,10 @@ export default async function AccrualsPage({
       </div>
 
       <form className="filter-bar">
+        <label className="field" style={{ minWidth: 240 }}>
+          <span>Поиск</span>
+          <input type="search" name="q" id="accruals-search" defaultValue={q ?? ""} placeholder="номер, контрагент, ИНН" />
+        </label>
         <label className="field">
           <span>Направление</span>
           <select name="direction" defaultValue={direction ?? ""}>

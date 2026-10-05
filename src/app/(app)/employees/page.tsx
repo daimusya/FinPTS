@@ -4,8 +4,14 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { EMPLOYEE_STATUS_BADGE, EMPLOYEE_STATUS_LABELS } from "@/lib/payroll/labels";
 import { employeeScopeWhere, getAccessScope } from "@/lib/access-scope";
+import { textSearchWhere } from "@/lib/text-search";
+import { pageWindow } from "@/lib/paging";
+import { Pager } from "@/components/pager";
 
-export default async function EmployeesPage() {
+const PAGE_SIZE = 100;
+
+export default async function EmployeesPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
+  const { q, page } = await searchParams;
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.PAYROLL_VIEW)) {
     return (
@@ -17,9 +23,13 @@ export default async function EmployeesPage() {
   const canManage = hasPermission(session, PERMISSIONS.PAYROLL_MANAGE);
 
   const scope = await getAccessScope(session);
+  const where = { AND: [employeeScopeWhere(scope), textSearchWhere(["fullName", "personnelNumber", "department.name", "position.name"], q)] };
+  const window = pageWindow(await prisma.employee.count({ where }), page, PAGE_SIZE);
   const employees = await prisma.employee.findMany({
-    where: employeeScopeWhere(scope),
-    orderBy: { fullName: "asc" },
+    where,
+    orderBy: [{ fullName: "asc" }, { id: "asc" }],
+    skip: window.skip,
+    take: window.take,
     include: { organization: true, department: true, position: true },
   });
 
@@ -36,6 +46,24 @@ export default async function EmployeesPage() {
           </Link>
         ) : null}
       </div>
+
+      <form className="filter-bar" style={{ alignItems: "flex-end" }}>
+        <label className="field" style={{ minWidth: 260 }}>
+          <span>Поиск</span>
+          <input type="search" name="q" id="employees-search" defaultValue={q ?? ""} placeholder="ФИО, табельный номер, подразделение" />
+        </label>
+        <button type="submit" className="btn btn-secondary">
+          Найти
+        </button>
+        {q ? (
+          <Link href="/employees" className="btn btn-ghost">
+            Сбросить
+          </Link>
+        ) : null}
+        <span className="text-muted" style={{ fontSize: 12 }}>
+          {window.caption}
+        </span>
+      </form>
 
       <div className="table-wrap">
         <table>
@@ -74,6 +102,7 @@ export default async function EmployeesPage() {
           </tbody>
         </table>
       </div>
+      <Pager window={window} basePath="/employees" params={{ q }} />
     </div>
   );
 }

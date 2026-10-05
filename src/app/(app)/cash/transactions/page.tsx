@@ -10,6 +10,7 @@ import { OperationsWithoutCounterparty } from "@/components/registry-by-inn";
 import { SelectAllCheckbox } from "@/components/select-all-checkbox";
 import { pageWindow } from "@/lib/paging";
 import { Pager } from "@/components/pager";
+import { textSearchWhere } from "@/lib/text-search";
 
 const BULK_FORM = "bulk-delete";
 
@@ -40,6 +41,7 @@ export default async function CashTransactionsPage({
     notice?: string;
     error?: string;
     page?: string;
+    q?: string;
   }>;
 }) {
   const session = await getSession();
@@ -52,7 +54,7 @@ export default async function CashTransactionsPage({
   }
   const canManage = hasPermission(session, PERMISSIONS.CASH_MANAGE);
   const sp = await searchParams;
-  const { matchStatus, direction, cashFlowArticleId, from, to, batchId, notice, error } = sp;
+  const { matchStatus, direction, cashFlowArticleId, from, to, batchId, notice, error, q } = sp;
 
   const scope = await getAccessScope(session);
   const scopeWhere = bankTransactionScopeWhere(scope);
@@ -61,6 +63,7 @@ export default async function CashTransactionsPage({
   if (matchStatus) where.matchStatus = matchStatus as never;
   if (direction) where.direction = direction as never;
   if (cashFlowArticleId) where.cashFlowArticleId = cashFlowArticleId;
+  if (q?.trim()) where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), textSearchWhere(["purpose", "counterpartyInn", "counterparty.fullName", "counterparty.shortName", "counterparty.inn"], q)];
   if (batchId) where.batchId = batchId;
   if (from || to) {
     where.operationDate = {
@@ -84,7 +87,7 @@ export default async function CashTransactionsPage({
   ]);
   // Back to the same filtered list after a bulk delete.
   const query = new URLSearchParams(
-    Object.entries({ matchStatus, direction, cashFlowArticleId, from, to, batchId, page: window.page > 1 ? String(window.page) : undefined }).filter((e): e is [string, string] => Boolean(e[1])),
+    Object.entries({ q, matchStatus, direction, cashFlowArticleId, from, to, batchId, page: window.page > 1 ? String(window.page) : undefined }).filter((e): e is [string, string] => Boolean(e[1])),
   ).toString();
   const returnTo = query ? `/cash/transactions?${query}` : "/cash/transactions";
 
@@ -127,6 +130,10 @@ export default async function CashTransactionsPage({
       {canManage && hasPermission(session, PERMISSIONS.MASTERDATA_MANAGE) ? <OperationsWithoutCounterparty returnTo={returnTo} /> : null}
 
       <form className="filter-bar">
+        <label className="field" style={{ minWidth: 240 }}>
+          <span>Поиск</span>
+          <input type="search" name="q" id="transactions-search" defaultValue={q ?? ""} placeholder="назначение, контрагент, ИНН" />
+        </label>
         <label className="field">
           <span>Статус сопоставления</span>
           <select name="matchStatus" defaultValue={matchStatus ?? ""}>
@@ -226,7 +233,7 @@ export default async function CashTransactionsPage({
       <Pager
         window={window}
         basePath="/cash/transactions"
-        params={{ matchStatus, direction, cashFlowArticleId, from, to, batchId }}
+        params={{ q, matchStatus, direction, cashFlowArticleId, from, to, batchId }}
       />
     </div>
   );
