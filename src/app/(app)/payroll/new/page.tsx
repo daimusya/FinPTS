@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { createPayrollRunAction } from "../actions";
+import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 
 export default async function NewPayrollRunPage({
   searchParams,
@@ -19,7 +20,7 @@ export default async function NewPayrollRunPage({
     );
   }
 
-  const organizations = await prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } });
+  const organizations = await prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(await getAccessScope(session)) }, orderBy: { name: "asc" } });
 
   return (
     <div className="page">

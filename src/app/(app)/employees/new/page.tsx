@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { hireEmployeeAction } from "../actions";
+import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 
 export default async function NewEmployeePage({
   searchParams,
@@ -20,7 +21,7 @@ export default async function NewEmployeePage({
   }
 
   const [organizations, departments, positions, workSchedules] = await Promise.all([
-    prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(await getAccessScope(session)) }, orderBy: { name: "asc" } }),
     prisma.department.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     prisma.position.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     prisma.workSchedule.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),

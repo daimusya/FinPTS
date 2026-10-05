@@ -8,6 +8,7 @@ import { DocumentCurrencyFields } from "@/components/document-currency-fields";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { isVisible } from "@/lib/access-guard";
 import { updateAccrualDocumentAction } from "../../actions";
+import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 
 function toDateInput(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -34,7 +35,7 @@ export default async function EditAccrualDocumentPage({
   const [doc, organizations, counterparties, contracts, users, departments, costCenters, projects, productsServices, pnlArticles] =
     await Promise.all([
       prisma.accrualDocument.findUnique({ where: { id }, include: { lines: true } }),
-      prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+      prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(await getAccessScope(session)) }, orderBy: { name: "asc" } }),
       prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
       prisma.contract.findMany({ where: { isArchived: false }, orderBy: { number: "asc" } }),
       prisma.user.findMany({ where: { isActive: true }, orderBy: { fullName: "asc" } }),

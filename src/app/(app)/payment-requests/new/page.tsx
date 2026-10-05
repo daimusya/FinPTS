@@ -5,6 +5,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createPaymentRequestAction } from "../actions";
+import { getAccessScope, organizationIdScopeWhere, organizationScopeWhere } from "@/lib/access-scope";
 
 export default async function NewPaymentRequestPage({
   searchParams,
@@ -22,11 +23,11 @@ export default async function NewPaymentRequestPage({
   }
 
   const [organizations, counterparties, cashFlowArticles, bankAccounts, cashAccounts] = await Promise.all([
-    prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(await getAccessScope(session)) }, orderBy: { name: "asc" } }),
     prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
     prisma.cashFlowArticle.findMany({ where: { isArchived: false, direction: "OUTFLOW" }, orderBy: { name: "asc" } }),
-    prisma.bankAccount.findMany({ where: { isArchived: false }, include: { organization: true }, orderBy: { bankName: "asc" } }),
-    prisma.cashAccount.findMany({ where: { isArchived: false }, include: { organization: true }, orderBy: { name: "asc" } }),
+    prisma.bankAccount.findMany({ where: { isArchived: false, ...organizationIdScopeWhere(await getAccessScope(session)) }, include: { organization: true }, orderBy: { bankName: "asc" } }),
+    prisma.cashAccount.findMany({ where: { isArchived: false, ...organizationIdScopeWhere(await getAccessScope(session)) }, include: { organization: true }, orderBy: { name: "asc" } }),
   ]);
   const orgName = (o: { name: string; shortName: string | null }) => o.shortName || o.name;
 

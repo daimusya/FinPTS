@@ -4,6 +4,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createBankTransactionAction } from "../../actions";
+import { getAccessScope, organizationIdScopeWhere } from "@/lib/access-scope";
 
 export default async function NewCashTransactionPage({
   searchParams,
@@ -22,8 +23,8 @@ export default async function NewCashTransactionPage({
 
   const [bankAccounts, cashAccounts, counterparties, cashFlowArticles, departments, costCenters, projects, productsServices] =
     await Promise.all([
-      prisma.bankAccount.findMany({ where: { isArchived: false }, orderBy: { bankName: "asc" } }),
-      prisma.cashAccount.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+      prisma.bankAccount.findMany({ where: { isArchived: false, ...organizationIdScopeWhere(await getAccessScope(session)) }, orderBy: { bankName: "asc" } }),
+      prisma.cashAccount.findMany({ where: { isArchived: false, ...organizationIdScopeWhere(await getAccessScope(session)) }, orderBy: { name: "asc" } }),
       prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
       prisma.cashFlowArticle.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
       prisma.department.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),

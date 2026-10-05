@@ -6,6 +6,7 @@ import { AccrualLinesEditor } from "@/components/accrual-lines-editor";
 import { DocumentCurrencyFields } from "@/components/document-currency-fields";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createAccrualDocumentAction } from "../actions";
+import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 
 export default async function NewAccrualDocumentPage({
   searchParams,
@@ -24,7 +25,7 @@ export default async function NewAccrualDocumentPage({
 
   const [organizations, counterparties, contracts, users, departments, costCenters, projects, productsServices, pnlArticles] =
     await Promise.all([
-      prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+      prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(await getAccessScope(session)) }, orderBy: { name: "asc" } }),
       prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
       prisma.contract.findMany({ where: { isArchived: false }, orderBy: { number: "asc" } }),
       prisma.user.findMany({ where: { isActive: true }, orderBy: { fullName: "asc" } }),

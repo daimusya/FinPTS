@@ -44,3 +44,13 @@ export async function organizationAllowed(session: SessionPayload, organizationI
 }
 
 export const ORGANIZATION_NOT_ALLOWED = "У вас нет доступа к этой организации — выберите организацию из своих";
+
+/** Банковский счёт или касса принадлежит организации, доступной пользователю (операции, выписки). */
+export async function accountAllowed(session: SessionPayload, bankAccountId: string | null, cashAccountId: string | null): Promise<boolean> {
+  const organizationId = bankAccountId
+    ? (await prisma.bankAccount.findUnique({ where: { id: bankAccountId }, select: { organizationId: true } }))?.organizationId
+    : cashAccountId
+      ? (await prisma.cashAccount.findUnique({ where: { id: cashAccountId }, select: { organizationId: true } }))?.organizationId
+      : null;
+  return Boolean(organizationId) && (await organizationAllowed(session, organizationId!));
+}

@@ -7,6 +7,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { parseSpreadsheet, type ParsedSheet } from "@/lib/bank-import/parser";
 import { extractRow, type ColumnMapping, type ExtractedRow, type MappingTarget } from "@/lib/bank-import/mapping";
 import { importStatementOperations } from "@/lib/bank-import/import-operations";
+import { ORGANIZATION_NOT_ALLOWED, accountAllowed } from "@/lib/access-guard";
 
 const MAX_ROWS = 5000;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
@@ -95,6 +96,7 @@ export async function importBankStatementAction(_prev: ImportState, formData: Fo
   if (!bankAccountId || rows.length === 0) {
     return { error: "Нет данных для импорта" };
   }
+  if (!(await accountAllowed(session, bankAccountId, null))) return { error: ORGANIZATION_NOT_ALLOWED };
 
   const mapping: ColumnMapping = {};
   headers.forEach((_, index) => {

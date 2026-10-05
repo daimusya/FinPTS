@@ -14,6 +14,7 @@ import {
   updateBankTransactionAction,
   deleteBankTransactionAction,
 } from "../../actions";
+import { getAccessScope, organizationIdScopeWhere } from "@/lib/access-scope";
 
 export default async function CashTransactionDetailPage({
   params,
@@ -62,8 +63,8 @@ export default async function CashTransactionDetailPage({
     : null;
 
   const [bankAccounts, cashAccounts, counterparties, cashFlowArticles, departments, costCenters, projects, productsServices] = await Promise.all([
-    prisma.bankAccount.findMany({ where: { OR: [{ isArchived: false }, { id: tx.bankAccountId ?? "" }] }, orderBy: { bankName: "asc" } }),
-    prisma.cashAccount.findMany({ where: { OR: [{ isArchived: false }, { id: tx.cashAccountId ?? "" }] }, orderBy: { name: "asc" } }),
+    prisma.bankAccount.findMany({ where: { OR: [{ isArchived: false }, { id: tx.bankAccountId ?? "" }], ...organizationIdScopeWhere(await getAccessScope(session)) }, orderBy: { bankName: "asc" } }),
+    prisma.cashAccount.findMany({ where: { OR: [{ isArchived: false }, { id: tx.cashAccountId ?? "" }], ...organizationIdScopeWhere(await getAccessScope(session)) }, orderBy: { name: "asc" } }),
     prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
     prisma.cashFlowArticle.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     prisma.department.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),

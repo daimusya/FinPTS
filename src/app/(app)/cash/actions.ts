@@ -25,7 +25,7 @@ import { allocationTransactionSide, planAllocation, type AllocationAmounts } fro
 import { normalizeCurrency } from "@/lib/currency";
 import { loadRateLookup } from "@/lib/currency-rates";
 import { checkAllocation } from "@/lib/cash/allocation";
-import { ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
+import { ORGANIZATION_NOT_ALLOWED, accountAllowed } from "@/lib/access-guard";
 import crypto from "node:crypto";
 
 export async function createBankTransactionAction(formData: FormData) {
@@ -56,10 +56,7 @@ export async function createBankTransactionAction(formData: FormData) {
     [secondBankAccountId, secondCashAccountId],
   ] as const) {
     if (!bank && !cash) continue;
-    const organizationId = bank
-      ? (await prisma.bankAccount.findUnique({ where: { id: bank } }))?.organizationId
-      : (await prisma.cashAccount.findUnique({ where: { id: cash! } }))?.organizationId;
-    if (!organizationId || !(await organizationAllowed(session, organizationId))) {
+    if (!(await accountAllowed(session, bank, cash))) {
       redirect(`/cash/transactions/new?error=${encodeURIComponent(ORGANIZATION_NOT_ALLOWED)}`);
     }
   }
@@ -310,6 +307,10 @@ export async function updateBankTransactionAction(id: string, formData: FormData
   const parsed = parseTransactionEdit((name) => formData.get(name));
   if ("error" in parsed) back(parsed.error);
   const next = parsed as TransactionEditInput;
+  // The operation may move to another account only within the user's organizations.
+  if ((next.bankAccountId !== tx.bankAccountId || next.cashAccountId !== tx.cashAccountId) && !(await accountAllowed(session, next.bankAccountId, next.cashAccountId))) {
+    back(ORGANIZATION_NOT_ALLOWED);
+  }
   // The other leg of a transfer between currencies keeps its own amount (from the form), otherwise the same.
   let pairAmount = next.amount;
   if (pair) {

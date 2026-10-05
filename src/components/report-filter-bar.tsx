@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/db";
 import type { ReactNode } from "react";
+import { getSession } from "@/lib/session";
+import { UNRESTRICTED_SCOPE, departmentScopeWhere, getAccessScope, organizationScopeWhere, projectScopeWhere } from "@/lib/access-scope";
 
 const MONTH_NAMES = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -27,11 +29,13 @@ export async function ReportFilterBar({
   extraQuery?: string;
   children?: ReactNode;
 }) {
+  const session = await getSession();
+  const scope = session ? await getAccessScope(session) : UNRESTRICTED_SCOPE;
   const [organizations, departments, costCenters, projects, productsServices, counterparties] = await Promise.all([
-    prisma.organization.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
-    prisma.department.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(scope) }, orderBy: { name: "asc" } }),
+    prisma.department.findMany({ where: { isArchived: false, ...departmentScopeWhere(scope) }, orderBy: { name: "asc" } }),
     prisma.costCenter.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
-    prisma.project.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    prisma.project.findMany({ where: { isArchived: false, ...projectScopeWhere(scope) }, orderBy: { name: "asc" } }),
     prisma.productService.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
   ]);
