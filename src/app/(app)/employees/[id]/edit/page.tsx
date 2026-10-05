@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { updateEmployeeAction } from "../../actions";
+import { isVisible } from "@/lib/access-guard";
 
 export default async function EditEmployeePage({
   params,
@@ -27,7 +28,7 @@ export default async function EditEmployeePage({
     prisma.employee.findUnique({ where: { id } }),
     prisma.workSchedule.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
   ]);
-  if (!employee) notFound();
+  if (!employee || !(await isVisible(session, "employee", id))) notFound();
 
   return (
     <div className="page">

@@ -14,7 +14,7 @@ import {
   updateBankTransactionAction,
   deleteBankTransactionAction,
 } from "../../actions";
-import { getAccessScope, organizationIdScopeWhere } from "@/lib/access-scope";
+import { departmentScopeWhere, getAccessScope, organizationIdScopeWhere, projectScopeWhere } from "@/lib/access-scope";
 
 export default async function CashTransactionDetailPage({
   params,
@@ -67,9 +67,15 @@ export default async function CashTransactionDetailPage({
     prisma.cashAccount.findMany({ where: { OR: [{ isArchived: false }, { id: tx.cashAccountId ?? "" }], ...organizationIdScopeWhere(await getAccessScope(session)) }, orderBy: { name: "asc" } }),
     prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
     prisma.cashFlowArticle.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
-    prisma.department.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    prisma.department.findMany({
+      where: { isArchived: false, OR: [departmentScopeWhere(await getAccessScope(session)), { id: tx.departmentId ?? "" }] },
+      orderBy: { name: "asc" },
+    }),
     prisma.costCenter.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
-    prisma.project.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    prisma.project.findMany({
+      where: { isArchived: false, OR: [projectScopeWhere(await getAccessScope(session)), { id: tx.projectId ?? "" }] },
+      orderBy: { name: "asc" },
+    }),
     prisma.productService.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
   ]);
 

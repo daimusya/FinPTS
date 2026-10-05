@@ -96,9 +96,10 @@ export function organizationScopeWhere(scope: AccessScope): Prisma.OrganizationW
   return scope.organizationIds ? { id: { in: scope.organizationIds } } : {};
 }
 
+/** Подразделение без организации — общее: видно при любом ограничении по организациям. */
 export function departmentScopeWhere(scope: AccessScope): Prisma.DepartmentWhereInput {
   const and: Prisma.DepartmentWhereInput[] = [];
-  if (scope.organizationIds) and.push({ organizationId: { in: scope.organizationIds } });
+  if (scope.organizationIds) and.push({ OR: [{ organizationId: { in: scope.organizationIds } }, { organizationId: null }] });
   if (scope.departmentIds) and.push({ id: { in: scope.departmentIds } });
   return and.length > 0 ? { AND: and } : {};
 }
@@ -146,4 +147,19 @@ export async function usersSeeingOrganization(userIds: string[], organizationId:
       )
       .map((u) => u.id),
   );
+}
+
+export const DEPARTMENT_NOT_ALLOWED = "У вас ограничен доступ по подразделениям — выберите подразделение из своих";
+export const PROJECT_NOT_ALLOWED = "У вас ограничен доступ по проектам — выберите проект из своих";
+
+/**
+ * Подразделение и проект записи, которую пользователь сохраняет (операция,
+ * сотрудник): при ограничении по подразделениям (проектам) они обязательны
+ * и должны быть из назначенных — иначе запись сразу пропадёт у него из вида.
+ * projectId undefined — у записи нет проекта (сотрудник), не проверяется.
+ */
+export function analyticsProblem(scope: AccessScope, departmentId: string | null, projectId?: string | null): string | null {
+  if (scope.departmentIds && (!departmentId || !scope.departmentIds.includes(departmentId))) return DEPARTMENT_NOT_ALLOWED;
+  if (projectId !== undefined && scope.projectIds && (!projectId || !scope.projectIds.includes(projectId))) return PROJECT_NOT_ALLOWED;
+  return null;
 }

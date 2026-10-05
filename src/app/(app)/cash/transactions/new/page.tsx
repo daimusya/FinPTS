@@ -4,7 +4,7 @@ import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { createBankTransactionAction } from "../../actions";
-import { getAccessScope, organizationIdScopeWhere } from "@/lib/access-scope";
+import { departmentScopeWhere, getAccessScope, organizationIdScopeWhere, projectScopeWhere } from "@/lib/access-scope";
 
 export default async function NewCashTransactionPage({
   searchParams,
@@ -27,9 +27,9 @@ export default async function NewCashTransactionPage({
       prisma.cashAccount.findMany({ where: { isArchived: false, ...organizationIdScopeWhere(await getAccessScope(session)) }, orderBy: { name: "asc" } }),
       prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
       prisma.cashFlowArticle.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
-      prisma.department.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+      prisma.department.findMany({ where: { isArchived: false, ...departmentScopeWhere(await getAccessScope(session)) }, orderBy: { name: "asc" } }),
       prisma.costCenter.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
-      prisma.project.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+      prisma.project.findMany({ where: { isArchived: false, ...projectScopeWhere(await getAccessScope(session)) }, orderBy: { name: "asc" } }),
       prisma.productService.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     ]);
 

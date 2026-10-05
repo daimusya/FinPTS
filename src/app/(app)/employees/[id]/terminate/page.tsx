@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { terminateEmployeeAction } from "../../actions";
+import { isVisible } from "@/lib/access-guard";
 
 export default async function TerminateEmployeePage({
   params,
@@ -24,7 +25,7 @@ export default async function TerminateEmployeePage({
   }
 
   const employee = await prisma.employee.findUnique({ where: { id } });
-  if (!employee) notFound();
+  if (!employee || !(await isVisible(session, "employee", id))) notFound();
 
   return (
     <div className="page">

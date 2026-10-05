@@ -7,6 +7,7 @@ import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
+import { analyticsProblem, getAccessScope } from "@/lib/access-scope";
 import { EmployeeStatus, Prisma } from "@prisma/client";
 
 /** Страховой стаж до приёма: целое число месяцев 0–720 или пусто. */
@@ -25,6 +26,9 @@ export async function hireEmployeeAction(formData: FormData) {
   const fullName = String(formData.get("fullName") ?? "").trim();
   const organizationId = String(formData.get("organizationId") ?? "");
   const departmentId = String(formData.get("departmentId") ?? "") || null;
+  // A user limited to some departments hires only into them — otherwise the employee would vanish from their view.
+  const departmentProblem = analyticsProblem(await getAccessScope(session), departmentId);
+  if (departmentProblem) redirect(`/employees/new?error=${encodeURIComponent(departmentProblem)}`);
   const positionId = String(formData.get("positionId") ?? "") || null;
   const workScheduleId = String(formData.get("workScheduleId") ?? "") || null;
   const hireDateRaw = String(formData.get("hireDate") ?? "");
@@ -150,6 +154,8 @@ export async function transferEmployeeAction(id: string, formData: FormData) {
   const before = await prisma.employee.findUniqueOrThrow({ where: { id } });
 
   const departmentId = String(formData.get("departmentId") ?? "") || null;
+  const departmentProblem = analyticsProblem(await getAccessScope(session), departmentId);
+  if (departmentProblem) redirect(`/employees/${id}/transfer?error=${encodeURIComponent(departmentProblem)}`);
   const positionId = String(formData.get("positionId") ?? "") || null;
   const eventDateRaw = String(formData.get("eventDate") ?? "");
   const comment = String(formData.get("comment") ?? "").trim() || null;

@@ -58,3 +58,21 @@ describe("dictionaryCreateProblem", () => {
     expect(dictionaryCreateProblem(articles, scope, { name: "x" })).toBeNull();
   });
 });
+
+describe("departments and projects follow the user's own department/project list", () => {
+  const projects = { slug: "projects", fields: [{ name: "organizationId", label: "Организация", type: "select" as const, required: true }] };
+  const byDept = { organizationIds: ["org-a"], departmentIds: ["d1"], projectIds: ["p1"] };
+  it("lists only assigned departments and projects", () => {
+    expect(dictionaryScopeWhere(departments, byDept)).toEqual({
+      AND: [{ OR: [{ organizationId: { in: ["org-a"] } }, { organizationId: null }] }, { id: { in: ["d1"] } }],
+    });
+    expect(dictionaryScopeWhere(projects, { ...byDept, organizationIds: null })).toEqual({ id: { in: ["p1"] } });
+  });
+  it("other departments are not visible, new ones cannot be created", () => {
+    expect(dictionaryRecordAllowed(departments, byDept, { id: "d1", organizationId: null })).toBe(true);
+    expect(dictionaryRecordAllowed(departments, byDept, { id: "d2", organizationId: "org-a" })).toBe(false);
+    expect(dictionaryCreateProblem(departments, byDept, { name: "Новый" })).toMatch(/по подразделениям/);
+    expect(dictionaryCreateProblem(projects, byDept, { organizationId: "org-a" })).toMatch(/по проектам/);
+    expect(dictionaryCreateProblem(accounts, byDept, { organizationId: "org-a" })).toBeNull();
+  });
+});

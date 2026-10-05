@@ -19,7 +19,7 @@ import {
   parseTransactionEdit,
   type TransactionEditInput,
 } from "@/lib/cash/transaction-edit";
-import { bankTransactionScopeWhere, getAccessScope } from "@/lib/access-scope";
+import { analyticsProblem, bankTransactionScopeWhere, getAccessScope } from "@/lib/access-scope";
 import type { Prisma } from "@prisma/client";
 import { allocationTransactionSide, planAllocation, type AllocationAmounts } from "@/lib/accruals/currency";
 import { normalizeCurrency } from "@/lib/currency";
@@ -50,6 +50,9 @@ export async function createBankTransactionAction(formData: FormData) {
   if ((!bankAccountId && !cashAccountId) || (bankAccountId && cashAccountId)) {
     redirect(`/cash/transactions/new?error=${encodeURIComponent("Выберите либо банковский счёт, либо кассу")}`);
   }
+  // With department/project limits the operation must carry the user's own ones — otherwise it would vanish from their view.
+  const analytics = analyticsProblem(await getAccessScope(session), departmentId, projectId);
+  if (analytics) redirect(`/cash/transactions/new?error=${encodeURIComponent(analytics)}`);
   // Both accounts (and the transfer's second one) must belong to organizations this user may see.
   for (const [bank, cash] of [
     [bankAccountId, cashAccountId],
@@ -255,6 +258,9 @@ export async function updateTransactionClassificationAction(id: string, formData
   const productServiceId = String(formData.get("productServiceId") ?? "") || null;
   // A leg of a paired transfer stays a transfer: unticking it would leave the other leg alone.
   const isTransfer = pair ? true : formData.get("isTransfer") === "on";
+
+  const analytics = analyticsProblem(await getAccessScope(session), departmentId, projectId);
+  if (analytics) back(analytics);
 
   const data = { counterpartyId, cashFlowArticleId, departmentId, costCenterId, projectId, productServiceId, isTransfer };
   // Both legs of a transfer carry the same classification, as when they were created.

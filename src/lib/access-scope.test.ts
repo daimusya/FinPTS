@@ -10,6 +10,9 @@ import {
   payrollRunScopeWhere,
   projectScopeWhere,
   seesOrganization,
+  analyticsProblem,
+  DEPARTMENT_NOT_ALLOWED,
+  PROJECT_NOT_ALLOWED,
   UNRESTRICTED_SCOPE,
 } from "./access-scope";
 
@@ -89,10 +92,10 @@ describe("scope-where helpers", () => {
     });
   });
 
-  it("departmentScopeWhere / projectScopeWhere restrict by own id and parent organization", () => {
+  it("departmentScopeWhere / projectScopeWhere restrict by own id and parent organization; a department without organization is shared", () => {
     const scope = { organizationIds: ["org1"], departmentIds: ["dept1"], projectIds: ["proj1"] };
     expect(departmentScopeWhere(scope)).toEqual({
-      AND: [{ organizationId: { in: ["org1"] } }, { id: { in: ["dept1"] } }],
+      AND: [{ OR: [{ organizationId: { in: ["org1"] } }, { organizationId: null }] }, { id: { in: ["dept1"] } }],
     });
     expect(projectScopeWhere(scope)).toEqual({
       AND: [{ organizationId: { in: ["org1"] } }, { id: { in: ["proj1"] } }],
@@ -106,5 +109,19 @@ describe("seesOrganization", () => {
     expect(seesOrganization({ fullAdmin: false, organizationIds: [] }, "b")).toBe(true);
     expect(seesOrganization({ fullAdmin: false, organizationIds: ["a"] }, "a")).toBe(true);
     expect(seesOrganization({ fullAdmin: false, organizationIds: ["a"] }, "b")).toBe(false);
+  });
+});
+
+describe("analyticsProblem", () => {
+  const restricted = { organizationIds: null, departmentIds: ["d1"], projectIds: ["p1"] };
+  it("requires the user's own department and project when those are restricted", () => {
+    expect(analyticsProblem(restricted, "d1", "p1")).toBeNull();
+    expect(analyticsProblem(restricted, "d2", "p1")).toBe(DEPARTMENT_NOT_ALLOWED);
+    expect(analyticsProblem(restricted, null, "p1")).toBe(DEPARTMENT_NOT_ALLOWED);
+    expect(analyticsProblem(restricted, "d1", null)).toBe(PROJECT_NOT_ALLOWED);
+    expect(analyticsProblem(restricted, "d1")).toBeNull();
+  });
+  it("no restriction — anything goes, including empty", () => {
+    expect(analyticsProblem(UNRESTRICTED_SCOPE, null, null)).toBeNull();
   });
 });

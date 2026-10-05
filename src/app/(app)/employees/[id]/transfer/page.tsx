@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { transferEmployeeAction } from "../../actions";
+import { departmentScopeWhere, getAccessScope } from "@/lib/access-scope";
+import { isVisible } from "@/lib/access-guard";
 
 export default async function TransferEmployeePage({
   params,
@@ -25,10 +27,10 @@ export default async function TransferEmployeePage({
 
   const [employee, departments, positions] = await Promise.all([
     prisma.employee.findUnique({ where: { id } }),
-    prisma.department.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    prisma.department.findMany({ where: { isArchived: false, ...departmentScopeWhere(await getAccessScope(session)) }, orderBy: { name: "asc" } }),
     prisma.position.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
   ]);
-  if (!employee) notFound();
+  if (!employee || !(await isVisible(session, "employee", id))) notFound();
 
   return (
     <div className="page">
