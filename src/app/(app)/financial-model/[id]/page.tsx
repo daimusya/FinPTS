@@ -28,6 +28,7 @@ import { loadNewServices, MAX_PAYMENT_DAYS, MAX_RAMP_UP_MONTHS } from "@/lib/fin
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
+import { canExportReport } from "@/lib/reports/export-access";
 
 const HORIZON_MONTHS = 12;
 
@@ -151,9 +152,11 @@ export default async function ScenarioDetailPage({
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <a href={exportHref} className="btn btn-secondary">
-            Экспорт в Excel
-          </a>
+          {canExportReport(session.permissions, "scenario-forecast") ? (
+            <a href={exportHref} className="btn btn-secondary">
+              Экспорт в Excel
+            </a>
+          ) : null}
           <Link href="/financial-model" className="btn btn-secondary">
             К списку
           </Link>

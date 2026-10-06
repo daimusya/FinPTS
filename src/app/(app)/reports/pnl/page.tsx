@@ -29,6 +29,7 @@ import {
 import { PLAN_FACT_HEADERS, PlanFactCells } from "@/components/plan-fact-cells";
 import type Decimal from "decimal.js";
 import { singleParams } from "@/lib/query-params";
+import { canExportReport } from "@/lib/reports/export-access";
 
 function drillDownHref(row: PnlArticleRow, from: string, to: string) {
   const params = new URLSearchParams({ from, to });
@@ -112,9 +113,11 @@ export default async function PnlReportPage({
           <h1>ОПиУ — Отчёт о прибылях и убытках</h1>
           <p>Период: {period.label}, метод начисления. Считается из проведённых документов, плюс амортизация основных средств и проценты по займам (по реестрам в справочниках). Суммы — без НДС: у выручки всегда, у расходов — если организация принимает входящий НДС к вычету (ОСН или ставка НДС 22%/10% в карточке), иначе НДС остаётся в расходе.</p>
         </div>
-        <a href={exportHref} className="btn btn-secondary">
-          Экспорт в Excel
-        </a>
+        {canExportReport(session.permissions, "pnl") ? (
+          <a href={exportHref} className="btn btn-secondary">
+            Экспорт в Excel
+          </a>
+        ) : null}
       </div>
 
       <ReportFilterBar values={{ year: period.year, month: period.month, span: period.span, ...filters }}>

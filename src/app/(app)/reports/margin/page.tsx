@@ -22,6 +22,7 @@ import { budgetDim, planSliceNote } from "@/lib/budget/report-links";
 import { PLAN_FACT_HEADERS, PlanFactCells } from "@/components/plan-fact-cells";
 import { mergeProjectPlan, type ProjectPlanRow } from "@/lib/reports/margin-plan";
 import { singleParams } from "@/lib/query-params";
+import { canExportReport } from "@/lib/reports/export-access";
 
 export default async function MarginReportPage({
   searchParams,
@@ -77,9 +78,11 @@ export default async function MarginReportPage({
             поэтому в таблицы ниже они попадают только через распределение косвенных расходов.
           </p>
         </div>
-        <a href={exportHref} className="btn btn-secondary">
-          Экспорт в Excel
-        </a>
+        {canExportReport(session.permissions, "margin") ? (
+          <a href={exportHref} className="btn btn-secondary">
+            Экспорт в Excel
+          </a>
+        ) : null}
       </div>
 
       <ReportFilterBar values={{ year: period.year, month: period.month, span: period.span, ...filters }}>

@@ -8,6 +8,7 @@ import type Decimal from "decimal.js";
 import { parseDateParam } from "@/lib/date-param";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
+import { canExportReport } from "@/lib/reports/export-access";
 
 export default async function PayrollSummaryPage({
   searchParams,
@@ -66,9 +67,11 @@ export default async function PayrollSummaryPage({
           <h1>Сводная ведомость на выбранную дату</h1>
           <p>Сумма всех расчётов зарплаты с датой выплаты {from.toLocaleDateString("ru-RU")}, независимо от статуса.</p>
         </div>
-        <a href={exportHref} className="btn btn-secondary">
-          Экспорт в Excel
-        </a>
+        {canExportReport(session.permissions, "payroll-summary") ? (
+          <a href={exportHref} className="btn btn-secondary">
+            Экспорт в Excel
+          </a>
+        ) : null}
       </div>
 
       <form className="filter-bar">

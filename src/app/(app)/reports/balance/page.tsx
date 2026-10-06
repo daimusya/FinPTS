@@ -14,6 +14,7 @@ import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { parseDateParam } from "@/lib/date-param";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
+import { canExportReport } from "@/lib/reports/export-access";
 
 const CATEGORY_LABELS: Record<string, string> = { ASSET: "актив", LIABILITY: "обязательство", EQUITY: "капитал" };
 
@@ -77,9 +78,11 @@ export default async function BalanceReportPage({
           <h1>Управленческий баланс</h1>
           <p>На дату: {balance.asOfDate.toLocaleDateString("ru-RU")}</p>
         </div>
-        <a href={exportHref} className="btn btn-secondary">
-          Экспорт в Excel
-        </a>
+        {canExportReport(session.permissions, "balance") ? (
+          <a href={exportHref} className="btn btn-secondary">
+            Экспорт в Excel
+          </a>
+        ) : null}
       </div>
 
       <form className="filter-bar">

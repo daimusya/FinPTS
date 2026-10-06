@@ -16,6 +16,7 @@ import { formatMoneyIn } from "@/lib/currency";
 import { MissingRatesWarning } from "@/components/missing-rates-warning";
 import type Decimal from "decimal.js";
 import { singleParams } from "@/lib/query-params";
+import { canExportReport } from "@/lib/reports/export-access";
 
 type PlanFactRow = CashFlowArticleRow & PlanFactMetrics;
 
@@ -82,9 +83,11 @@ export default async function CashFlowReportPage({
             чтобы увидеть операции.
           </p>
         </div>
-        <a href={exportHref} className="btn btn-secondary">
-          Экспорт в Excel
-        </a>
+        {canExportReport(session.permissions, "cash-flow") ? (
+          <a href={exportHref} className="btn btn-secondary">
+            Экспорт в Excel
+          </a>
+        ) : null}
       </div>
 
       <ReportFilterBar

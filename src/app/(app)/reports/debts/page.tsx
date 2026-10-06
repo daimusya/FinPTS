@@ -10,6 +10,7 @@ import { formatMoneyIn } from "@/lib/currency";
 import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
+import { canExportReport } from "@/lib/reports/export-access";
 
 export default async function DebtsReportPage({
   searchParams,
@@ -45,9 +46,11 @@ export default async function DebtsReportPage({
           <h1>Дебиторская и кредиторская задолженность</h1>
           <p>Считается из проведённых непогашенных документов начисления: сумма минус сопоставленные оплаты.</p>
         </div>
-        <a href={exportHref} className="btn btn-secondary">
-          Экспорт в Excel
-        </a>
+        {canExportReport(session.permissions, "debts") ? (
+          <a href={exportHref} className="btn btn-secondary">
+            Экспорт в Excel
+          </a>
+        ) : null}
       </div>
 
       <form className="filter-bar">

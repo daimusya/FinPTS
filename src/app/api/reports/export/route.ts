@@ -35,6 +35,7 @@ import { computeMarginReport, INDIRECT_DRIVER_LABELS, INDIRECT_DRIVER_OPTIONS, m
 import { mergeProjectPlan } from "@/lib/reports/margin-plan";
 import { loadPlanByProject } from "@/lib/budget/load";
 import { parseDateParam } from "@/lib/date-param";
+import { canExportReport, exportViewPermission } from "@/lib/reports/export-access";
 
 function toNum(d: { toNumber: () => number }) {
   return d.toNumber();
@@ -74,6 +75,9 @@ export async function GET(request: NextRequest) {
 
   const sp = Object.fromEntries(request.nextUrl.searchParams.entries());
   const type = sp.type;
+  // Exporting needs the right to see this very report too (payroll summary — payroll, scenario — financial model).
+  if (!exportViewPermission(type)) return new Response("Неизвестный отчёт", { status: 400 });
+  if (!canExportReport(session.permissions, type)) return new Response("Недостаточно прав для выгрузки этого отчёта", { status: 403 });
   const filters = extractFilters(sp);
 
   let sheets: ExportSheet[];
