@@ -11,6 +11,8 @@ import { analyticsProblem, getAccessScope } from "@/lib/access-scope";
 import { EmployeeStatus, Prisma } from "@prisma/client";
 import { parseFormAmount, parseFormDate } from "@/lib/form-values";
 import { yearProblem } from "@/lib/form-values";
+import { salaryChangeProblem, terminationProblem, transferProblem } from "@/lib/payroll/employment";
+import { assertPeriodOpenForDate } from "@/lib/period";
 import { STALE_EDIT, VERSION_FIELD, editVersion, versionMatches } from "@/lib/edit-version";
 
 /** Страховой стаж до приёма: целое число месяцев 0–720 или пусто. */
@@ -118,6 +120,8 @@ export async function updateEmployeeAction(id: string, formData: FormData) {
   }
   const salaryFromYear = salaryChanged ? yearProblem(salaryFromRaw) : null;
   if (salaryFromYear) redirect(`/employees/${id}/edit?error=${encodeURIComponent(`Оклад действует с: ${salaryFromYear}`)}`);
+  const salaryFromBlocked = salaryChanged ? salaryChangeProblem(before, new Date(`${salaryFromRaw}T00:00:00.000Z`)) : null;
+  if (salaryFromBlocked) redirect(`/employees/${id}/edit?error=${encodeURIComponent(salaryFromBlocked)}`);
 
   const updated = await prisma.$transaction(async (db) => {
     const saved = await db.employee.update({
@@ -176,6 +180,11 @@ export async function transferEmployeeAction(id: string, formData: FormData) {
 
   const transferInput = parseFormDate(eventDateRaw, "Дата перевода");
   if ("error" in transferInput) redirect(`/employees/${id}/transfer?error=${encodeURIComponent(transferInput.error)}`);
+  const transferDate = (transferInput as { date: Date }).date;
+  const transferBlocked = transferProblem(before, transferDate);
+  if (transferBlocked) redirect(`/employees/${id}/transfer?error=${encodeURIComponent(transferBlocked)}`);
+  // Payroll of closed months must not change retroactively.
+  await assertPeriodOpenForDate(transferDate).catch((e) => redirect(`/employees/${id}/transfer?error=${encodeURIComponent((e as Error).message)}`));
 
   const updated = await prisma.employee.update({
     where: { id },
@@ -220,6 +229,9 @@ export async function terminateEmployeeAction(id: string, formData: FormData) {
   const terminationInput = parseFormDate(eventDateRaw, "Дата увольнения");
   if ("error" in terminationInput) redirect(`/employees/${id}/terminate?error=${encodeURIComponent(terminationInput.error)}`);
   const terminationDate = (terminationInput as { date: Date }).date;
+  const terminationBlocked = terminationProblem(before, terminationDate);
+  if (terminationBlocked) redirect(`/employees/${id}/terminate?error=${encodeURIComponent(terminationBlocked)}`);
+  await assertPeriodOpenForDate(terminationDate).catch((e) => redirect(`/employees/${id}/terminate?error=${encodeURIComponent((e as Error).message)}`));
 
   const updated = await prisma.employee.update({
     where: { id },

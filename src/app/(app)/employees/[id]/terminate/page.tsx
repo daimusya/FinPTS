@@ -28,6 +28,15 @@ export default async function TerminateEmployeePage({
 
   const employee = await prisma.employee.findUnique({ where: { id } });
   if (!employee || !(await isVisible(session, "employee", id))) notFound();
+  if (employee.status === "TERMINATED") {
+    return (
+      <div className="page">
+        <div className="card">
+          Сотрудник уже уволен. <Link href={`/employees/${id}`}>К карточке сотрудника</Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page">

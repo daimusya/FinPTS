@@ -33,6 +33,15 @@ export default async function TransferEmployeePage({
     prisma.position.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
   ]);
   if (!employee || !(await isVisible(session, "employee", id))) notFound();
+  if (employee.status === "TERMINATED") {
+    return (
+      <div className="page">
+        <div className="card">
+          Сотрудник уволен — перевод невозможен. <Link href={`/employees/${id}`}>К карточке сотрудника</Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page">
