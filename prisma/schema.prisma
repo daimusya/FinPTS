@@ -84,6 +84,7 @@ model Notification {
 
   @@index([userId, readAt])
   @@index([deliveryState])
+  @@index([userId, createdAt])
   @@map("notifications")
 }
 
@@ -148,6 +149,7 @@ model UserRole {
   role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([userId, roleId])
+  @@index([roleId])
   @@map("user_roles")
 }
 
@@ -401,6 +403,7 @@ model Counterparty {
   bankTx           BankTransaction[]
   paymentRequests  PaymentRequest[]
 
+  @@index([inn])
   @@map("counterparties")
 }
 
@@ -418,6 +421,7 @@ model CounterpartyBankDetail {
 
   counterparty Counterparty @relation(fields: [counterpartyId], references: [id], onDelete: Cascade)
 
+  @@index([counterpartyId])
   @@map("counterparty_bank_details")
 }
 
@@ -434,6 +438,7 @@ model CounterpartyContact {
 
   counterparty Counterparty @relation(fields: [counterpartyId], references: [id], onDelete: Cascade)
 
+  @@index([counterpartyId])
   @@map("counterparty_contacts")
 }
 
@@ -453,6 +458,8 @@ model Contract {
   counterparty  Counterparty      @relation(fields: [counterpartyId], references: [id])
   accrualDocs   AccrualDocument[]
 
+  @@index([counterpartyId])
+  @@index([organizationId])
   @@map("contracts")
 }
 
@@ -583,6 +590,7 @@ model BankAccount {
   plannedPaymentParts    PaymentRequestPart[] @relation("PaymentPartBankAccount")
   plannedAccrualDocuments AccrualDocument[] @relation("AccrualPlannedBankAccount")
   apiConnection BankConnection?
+  @@index([organizationId])
   @@map("bank_accounts")
 }
 
@@ -626,6 +634,7 @@ model CashAccount {
   plannedPaymentRequests PaymentRequest[]  @relation("PaymentRequestCashAccount")
   plannedPaymentParts    PaymentRequestPart[] @relation("PaymentPartCashAccount")
   plannedAccrualDocuments AccrualDocument[] @relation("AccrualPlannedCashAccount")
+  @@index([organizationId])
   @@map("cash_accounts")
 }
 
@@ -736,6 +745,10 @@ model AccrualDocumentLine {
   productService ProductService? @relation(fields: [productServiceId], references: [id])
   pnlArticle     PnlArticle?     @relation(fields: [pnlArticleId], references: [id])
 
+  @@index([documentId])
+  @@index([pnlArticleId])
+  @@index([departmentId])
+  @@index([projectId])
   @@map("accrual_document_lines")
 }
 
@@ -811,6 +824,13 @@ model BankTransaction {
   @@index([operationDate])
   @@index([matchStatus])
   @@index([transferGroupId])
+  @@index([bankAccountId, operationDate])
+  @@index([cashAccountId, operationDate])
+  @@index([counterpartyId])
+  @@index([cashFlowArticleId])
+  @@index([batchId])
+  @@index([departmentId])
+  @@index([projectId])
   @@map("bank_transactions")
 }
 
@@ -865,6 +885,8 @@ model PaymentAllocation {
   bankTransaction BankTransaction @relation(fields: [bankTransactionId], references: [id])
   accrualDocument AccrualDocument @relation(fields: [accrualDocumentId], references: [id])
 
+  @@index([bankTransactionId])
+  @@index([accrualDocumentId])
   @@map("payment_allocations")
 }
 
@@ -924,6 +946,9 @@ model PaymentRequest {
   parts            PaymentRequestPart[]
   @@index([dueDate])
   @@index([status])
+  @@index([organizationId])
+  @@index([counterpartyId])
+  @@index([createdById])
   @@map("payment_requests")
 }
 
@@ -946,6 +971,7 @@ model PaymentRequestApproval {
   approver       User           @relation(fields: [approverId], references: [id])
   onBehalfOf     User?          @relation("ApprovalOnBehalfOf", fields: [onBehalfOfId], references: [id])
 
+  @@index([paymentRequestId])
   @@map("payment_request_approvals")
 }
 
@@ -1142,6 +1168,8 @@ model Employee {
   payrollLines   PayrollLine[]
   projectAlloc   EmployeeProjectAllocation[]
 
+  @@index([organizationId])
+  @@index([departmentId])
   @@map("employees")
 }
 
@@ -1166,6 +1194,7 @@ model EmploymentHistory {
   fromPosition   Position?   @relation("EmploymentHistoryFromPosition", fields: [fromPositionId], references: [id])
   toPosition     Position?   @relation("EmploymentHistoryToPosition", fields: [toPositionId], references: [id])
 
+  @@index([employeeId])
   @@map("employment_history")
 }
 
@@ -1180,6 +1209,7 @@ model EmployeeProjectAllocation {
   employee Employee @relation(fields: [employeeId], references: [id])
   project  Project  @relation(fields: [projectId], references: [id])
 
+  @@index([employeeId])
   @@map("employee_project_allocations")
 }
 
@@ -1247,6 +1277,7 @@ model PayrollRun {
   lines        PayrollLine[]
 
   @@index([payoutDate])
+  @@index([organizationId])
   @@map("payroll_runs")
 }
 
@@ -1273,6 +1304,8 @@ model PayrollLine {
   project     Project?            @relation(fields: [projectId], references: [id])
   allocations PayrollAllocation[]
 
+  @@index([payrollRunId])
+  @@index([employeeId])
   @@map("payroll_lines")
 }
 
@@ -1288,6 +1321,7 @@ model PayrollAllocation {
   department  Department? @relation(fields: [departmentId], references: [id])
   project     Project?    @relation(fields: [projectId], references: [id])
 
+  @@index([payrollLineId])
   @@map("payroll_allocations")
 }
 
@@ -1430,6 +1464,8 @@ model IntegrationExternalObject {
   accrualDocument AccrualDocument?  @relation(fields: [accrualDocumentId], references: [id])
 
   @@unique([sourceSystem, sourceEntityType, externalId])
+  @@index([batchId])
+  @@index([accrualDocumentId])
   @@map("integration_external_objects")
 }
 
@@ -1599,6 +1635,7 @@ model BudgetEntry {
   costCenter        CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Cascade)
   project           Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   @@index([kind, year, month])
+  @@index([kind, year, organizationId])
   @@map("budget_entries")
 }
 
@@ -1645,6 +1682,9 @@ model AuditLog {
   accrualDocument AccrualDocument? @relation(fields: [accrualDocumentId], references: [id])
 
   @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([accrualDocumentId])
   @@map("audit_log")
 }
 
