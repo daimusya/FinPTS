@@ -30,3 +30,14 @@ export function payrollEmployeeWhere(organizationId: string, since: Date) {
 export function payrollEmployeesSince(kind: string, payoutDate: Date): Date {
   return kind === "ADVANCE" ? payoutDate : payrollWorkMonth(kind, payoutDate).start;
 }
+
+/**
+ * Строки можно добавлять и удалять только в черновике и рассчитанном
+ * расчёте: утверждённый уже проведён в документ начисления, выплаченный —
+ * выплачен; правка разошлась бы с ними.
+ */
+export const RUN_NOT_EDITABLE = "Строки меняются только в черновике или рассчитанном расчёте — утверждённый уже проведён в начисления";
+
+export function runLinesEditable(status: string): boolean {
+  return status === "DRAFT" || status === "CALCULATED";
+}

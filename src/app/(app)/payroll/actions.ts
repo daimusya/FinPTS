@@ -26,6 +26,7 @@ import { toDecimal } from "@/lib/money";
 import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
 import { PayrollRunStatus } from "@prisma/client";
 import { parseFormAmount, parseFormDate } from "@/lib/form-values";
+import { RUN_NOT_EDITABLE, runLinesEditable } from "@/lib/payroll/run-month";
 
 export async function createPayrollRunAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
@@ -120,6 +121,7 @@ export async function addPayrollLineAction(runId: string, formData: FormData) {
     prisma.payrollRun.findUniqueOrThrow({ where: { id: runId } }),
     prisma.payrollAccrualType.findUniqueOrThrow({ where: { id: accrualTypeId } }),
   ]);
+  if (!runLinesEditable(run.status)) redirect(`/payroll/${runId}?error=${encodeURIComponent(RUN_NOT_EDITABLE)}`);
   const rates = await loadTaxRates(run.organizationId, run.payoutDate);
 
   try {
@@ -287,7 +289,13 @@ export async function removePayrollLineAction(runId: string, lineId: string) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
   if (!(await isVisible(session, "payrollRun", runId))) redirect(`/payroll?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
-  const line = await prisma.payrollLine.findUniqueOrThrow({ where: { id: lineId } });
+  // The line must belong to this run (not to another one, outside the user's access) and the run be editable.
+  const line = await prisma.payrollLine.findFirst({ where: { id: lineId, payrollRunId: runId }, include: { payrollRun: true } });
+  if (!line) redirect(`/payroll/${runId}?error=${encodeURIComponent("Строка не найдена в этом расчёте")}`);
+  if (!runLinesEditable(line!.payrollRun.status)) redirect(`/payroll/${runId}?error=${encodeURIComponent(RUN_NOT_EDITABLE)}`);
+  await assertPeriodOpenForDate(line!.payrollRun.payoutDate).catch((e) => redirect(`/payroll/${runId}?error=${encodeURIComponent((e as Error).message)}`));
+  const { payrollRun: _run, ...deleted } = line!;
+  void _run;
   await prisma.payrollLine.delete({ where: { id: lineId } });
 
   await logAudit({
@@ -295,7 +303,7 @@ export async function removePayrollLineAction(runId: string, lineId: string) {
     entityType: "payroll_line",
     entityId: lineId,
     action: "delete",
-    before: line as never,
+    before: deleted as never,
   });
 
   revalidatePath(`/payroll/${runId}`);

@@ -18,7 +18,7 @@ import type { AverageParams } from "@/lib/payroll/average-earnings-db";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
-import { payrollEmployeeWhere, payrollWorkMonth } from "@/lib/payroll/run-month";
+import { payrollEmployeeWhere, payrollWorkMonth, runLinesEditable } from "@/lib/payroll/run-month";
 
 export default async function PayrollRunDetailPage({
   params,
@@ -202,7 +202,7 @@ export default async function PayrollRunDetailPage({
                   <td className="mono">{formatMoney(line.insuranceAmount)}</td>
                   <td className="mono">{formatMoney(line.amount.minus(line.ndflAmount))}</td>
                   <td>
-                    {canManage && run.status !== "PAID" ? (
+                    {canManage && runLinesEditable(run.status) ? (
                       <form action={removePayrollLineAction.bind(null, run.id, line.id)}>
                         <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Удалить строку из расчёта зарплаты?">
                           Удалить
@@ -223,7 +223,7 @@ export default async function PayrollRunDetailPage({
           </table>
         </div>
 
-        {canManage && run.status !== "PAID" ? (
+        {canManage && runLinesEditable(run.status) ? (
           <>
             <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Добавить строку вручную</h3>
             <form action={addPayrollLineAction.bind(null, run.id)} className="form-grid" style={{ alignItems: "flex-end" }}>
