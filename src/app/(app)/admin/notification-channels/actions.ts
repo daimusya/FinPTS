@@ -124,10 +124,17 @@ export async function sendTestTelegramAction() {
 
 /** Повторить отправку уведомлений, которые не ушли (после исправления настроек). */
 export async function retryDeliveryAction() {
-  await requirePermission(PERMISSIONS.ADMIN_FULL);
+  const session = await requirePermission(PERMISSIONS.ADMIN_FULL);
   // Failed ones get a fresh set of attempts.
   const reset = await prisma.notification.updateMany({ where: { deliveryState: "failed" }, data: { deliveryState: "pending", deliveryAttempts: 0 } });
   const result = await deliverPendingNotifications();
+  await logAudit({
+    userId: session.userId,
+    entityType: "integration_profile",
+    entityId: CHANNELS_PROFILE_SYSTEM,
+    action: "retry_delivery",
+    after: { requeued: reset.count, ...result } as never,
+  });
   revalidatePath(PAGE);
   back("notice", `Повтор отправки: доставлено ${result.sent}, ждут ${result.pending}, не удалось ${result.failed}${reset.count ? ` (возвращено в очередь ${reset.count})` : ""}`);
 }

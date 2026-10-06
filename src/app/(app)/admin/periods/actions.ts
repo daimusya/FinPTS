@@ -6,26 +6,32 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
+import { MAX_YEAR, MIN_YEAR } from "@/lib/form-values";
 import { PeriodStatus } from "@prisma/client";
 import { runPeriodCloseChecklist } from "@/lib/period-close/checklist";
 import { computeClosingSnapshot } from "@/lib/period-close/snapshot";
 
 export async function createPeriodAction(formData: FormData) {
-  await requirePermission(PERMISSIONS.PERIODS_MANAGE);
+  const session = await requirePermission(PERMISSIONS.PERIODS_MANAGE);
 
   const year = Number(formData.get("year"));
   const month = Number(formData.get("month"));
-  if (!year || !month || month < 1 || month > 12) {
-    redirect(`/admin/periods?error=${encodeURIComponent("Некорректные год/месяц")}`);
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    redirect(`/admin/periods?error=${encodeURIComponent("Выберите месяц")}`);
   }
+  if (!Number.isInteger(year) || year < MIN_YEAR || year > MAX_YEAR) {
+    redirect(`/admin/periods?error=${encodeURIComponent(`Год — от ${MIN_YEAR} до ${MAX_YEAR}`)}`);
+  }
+  const label = `${String(month).padStart(2, "0")}.${year}`;
 
-  await prisma.accountingPeriod.upsert({
-    where: { year_month: { year, month } },
-    update: {},
-    create: { year, month, status: PeriodStatus.OPEN },
-  });
+  const existing = await prisma.accountingPeriod.findUnique({ where: { year_month: { year, month } } });
+  if (existing) redirect(`/admin/periods?notice=${encodeURIComponent(`Период ${label} уже есть`)}`);
+
+  const created = await prisma.accountingPeriod.create({ data: { year, month, status: PeriodStatus.OPEN } });
+  await logAudit({ userId: session.userId, entityType: "accounting_period", entityId: created.id, action: "create", after: created as never });
 
   revalidatePath("/admin/periods");
+  redirect(`/admin/periods?notice=${encodeURIComponent(`Период ${label} создан`)}`);
 }
 
 export async function closePeriodAction(periodId: string, formData: FormData) {

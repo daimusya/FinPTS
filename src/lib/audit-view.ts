@@ -99,6 +99,7 @@ export const ACTION_LABELS: Record<string, string> = {
   reset_password: "сброс пароля",
   restore: "из архива",
   resubmit: "повторная отправка",
+  retry_delivery: "повтор доставки уведомлений",
   return_for_rework: "возврат на доработку",
   set_primary: "основной",
   telegram_link: "привязка Telegram",

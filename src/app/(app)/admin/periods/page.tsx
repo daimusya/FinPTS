@@ -6,13 +6,15 @@ import { formatMoney } from "@/lib/money";
 import { createPeriodAction, reopenPeriodAction } from "./actions";
 import type { ClosingSnapshot } from "@/lib/period-close/snapshot";
 import { SubmitButton } from "@/components/submit-button";
+import { singleParams } from "@/lib/query-params";
 
 const MONTH_NAMES = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
   "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
 ];
 
-export default async function PeriodsPage() {
+export default async function PeriodsPage({ searchParams }: { searchParams: Promise<{ error?: string; notice?: string }> }) {
+  const { error, notice } = singleParams(await searchParams);
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.PERIODS_MANAGE)) {
     return (
@@ -42,6 +44,9 @@ export default async function PeriodsPage() {
           </p>
         </div>
       </div>
+
+      {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
+      {notice ? <p className="form-success" style={{ marginBottom: 14 }}>{notice}</p> : null}
 
       <div className="card" style={{ marginBottom: 16, maxWidth: 420 }}>
         <form action={createPeriodAction} className="form-grid" style={{ alignItems: "flex-end" }}>
