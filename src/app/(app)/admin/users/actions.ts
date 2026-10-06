@@ -15,6 +15,7 @@ import { isUniqueViolation } from "@/lib/dictionaries/errors";
 
 const EMAIL_TAKEN = "Пользователь с таким email уже существует";
 import crypto from "node:crypto";
+import { STALE_EDIT, VERSION_FIELD, editVersion, versionMatches } from "@/lib/edit-version";
 
 export async function createUserAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.USERS_MANAGE);
@@ -78,6 +79,11 @@ export async function updateUserAction(userId: string, formData: FormData) {
   const { email } = parsedEmail as { email: string };
   if (await prisma.user.findFirst({ where: { email, id: { not: userId } } })) {
     redirect(`/admin/users/${userId}/edit?error=${encodeURIComponent(EMAIL_TAKEN)}`);
+  }
+
+  const current = await prisma.user.findUnique({ where: { id: userId }, include: { roles: true } });
+  if (current && !versionMatches(formData.get(VERSION_FIELD), editVersion({ ...current, roleIds: current.roles.map((r) => r.roleId).sort() }, ["fullName", "email", "isActive", "roleIds"]))) {
+    redirect(`/admin/users/${userId}/edit?error=${encodeURIComponent(STALE_EDIT)}`);
   }
 
   const problem = userChangeProblem({ actorId: session.userId, targetId: userId, change: { isActive, roleIds }, ...(await loadAdminState()) });

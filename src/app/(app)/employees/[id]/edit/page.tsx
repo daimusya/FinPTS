@@ -7,6 +7,7 @@ import { updateEmployeeAction } from "../../actions";
 import { isVisible } from "@/lib/access-guard";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
+import { VERSION_FIELD, editVersion } from "@/lib/edit-version";
 
 export default async function EditEmployeePage({
   params,
@@ -44,6 +45,7 @@ export default async function EditEmployeePage({
       <div className="card" style={{ maxWidth: 560 }}>
         {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
         <form action={updateEmployeeAction.bind(null, id)}>
+          <input type="hidden" name={VERSION_FIELD} value={editVersion(employee, ["workScheduleId", "paymentMethod", "bankAccount", "salary", "personnelNumber", "priorInsuranceMonths"])} />
           <div className="form-grid">
             <label className="field">
               <span>Табельный номер</span>

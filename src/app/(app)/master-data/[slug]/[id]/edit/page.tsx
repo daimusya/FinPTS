@@ -13,6 +13,7 @@ import { getAccessScope } from "@/lib/access-scope";
 import { dictionaryRecordAllowed } from "@/lib/dictionaries/scope";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
+import { VERSION_FIELD, editVersion } from "@/lib/edit-version";
 
 export default async function EditDictionaryItemPage({
   params,
@@ -78,6 +79,7 @@ export default async function EditDictionaryItemPage({
         {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
         {notice ? <p className="form-success" style={{ marginBottom: 14 }}>{notice}</p> : null}
         <form action={updateDictionaryItem.bind(null, slug, id)}>
+          <input type="hidden" name={VERSION_FIELD} value={editVersion(record, config.fields.map((field) => field.name))} />
           <DictionaryFormFields fields={resolvedFields} />
           <div className="form-actions">
             <SubmitButton className="btn btn-primary">

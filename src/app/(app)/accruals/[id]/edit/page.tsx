@@ -11,6 +11,7 @@ import { updateAccrualDocumentAction } from "../../actions";
 import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
+import { VERSION_FIELD, editVersion } from "@/lib/edit-version";
 
 function toDateInput(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -83,6 +84,7 @@ export default async function EditAccrualDocumentPage({
       <div className="card">
         {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
         <form action={updateAccrualDocumentAction.bind(null, doc.id)}>
+          <input type="hidden" name={VERSION_FIELD} value={editVersion(doc, ["updatedAt"])} />
           <div className="form-grid">
             <label className="field">
               <span>Организация *</span>

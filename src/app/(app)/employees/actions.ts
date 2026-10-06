@@ -11,6 +11,7 @@ import { analyticsProblem, getAccessScope } from "@/lib/access-scope";
 import { EmployeeStatus, Prisma } from "@prisma/client";
 import { parseFormAmount, parseFormDate } from "@/lib/form-values";
 import { yearProblem } from "@/lib/form-values";
+import { STALE_EDIT, VERSION_FIELD, editVersion, versionMatches } from "@/lib/edit-version";
 
 /** Страховой стаж до приёма: целое число месяцев 0–720 или пусто. */
 function parsePriorMonths(raw: unknown): { value: number | null } | { error: string } {
@@ -93,6 +94,9 @@ export async function updateEmployeeAction(id: string, formData: FormData) {
   if (!(await isVisible(session, "employee", id))) redirect(`/employees?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
   const before = await prisma.employee.findUniqueOrThrow({ where: { id } });
+  if (!versionMatches(formData.get(VERSION_FIELD), editVersion(before, ["workScheduleId", "paymentMethod", "bankAccount", "salary", "personnelNumber", "priorInsuranceMonths"]))) {
+    redirect(`/employees/${id}/edit?error=${encodeURIComponent(STALE_EDIT)}`);
+  }
 
   const workScheduleId = String(formData.get("workScheduleId") ?? "") || null;
   const paymentMethod = String(formData.get("paymentMethod") ?? "BANK");

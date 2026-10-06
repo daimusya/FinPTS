@@ -19,6 +19,7 @@ import { currencyNotAllowed } from "@/lib/foreign-currency";
 import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
 import { enqueueProjectResultsForDocument } from "@/lib/integrations/project-results";
 import { parseFormDate } from "@/lib/form-values";
+import { STALE_EDIT, VERSION_FIELD, editVersion, versionMatches } from "@/lib/edit-version";
 
 interface DocumentHeaderInput {
   organizationId: string;
@@ -165,6 +166,9 @@ export async function updateAccrualDocumentAction(id: string, formData: FormData
   const existing = await prisma.accrualDocument.findUniqueOrThrow({ where: { id } });
   if (existing.status !== AccrualDocumentStatus.DRAFT) {
     redirect(`/accruals/${id}?error=${encodeURIComponent("Изменять можно только черновик")}`);
+  }
+  if (!versionMatches(formData.get(VERSION_FIELD), editVersion(existing, ["updatedAt"]))) {
+    redirect(`/accruals/${id}/edit?error=${encodeURIComponent(STALE_EDIT)}`);
   }
 
   let header: DocumentHeaderInput;

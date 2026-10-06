@@ -6,6 +6,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { updateUserAction, updateUserAccessScopeAction } from "../../actions";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
+import { VERSION_FIELD, editVersion } from "@/lib/edit-version";
 
 export default async function EditUserPage({
   params,
@@ -54,6 +55,7 @@ export default async function EditUserPage({
       <div className="card" style={{ maxWidth: 560 }}>
         {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
         <form action={updateUserAction.bind(null, id)}>
+          <input type="hidden" name={VERSION_FIELD} value={editVersion({ ...user, roleIds: user.roles.map((r) => r.roleId).sort() }, ["fullName", "email", "isActive", "roleIds"])} />
           <div className="form-grid">
             <label className="field">
               <span>ФИО *</span>

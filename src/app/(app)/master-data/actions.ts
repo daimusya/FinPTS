@@ -14,6 +14,7 @@ import { ORGANIZATION_RECORD_NOT_ALLOWED, dictionaryCreateProblem, dictionaryRec
 import type { SessionPayload } from "@/lib/session";
 import type { DictionaryConfig } from "@/lib/dictionaries/types";
 import { parseFormDate } from "@/lib/form-values";
+import { STALE_EDIT, VERSION_FIELD, editVersion, versionMatches } from "@/lib/edit-version";
 
 /** Запись чужой организации нельзя ни изменить, ни отправить в архив (как и увидеть в списке). */
 async function visibleRecord(config: DictionaryConfig, session: SessionPayload, id: string) {
@@ -107,6 +108,9 @@ export async function updateDictionaryItem(slug: string, id: string, formData: F
   const session = await requirePermission(config.permissionManage);
 
   const before = await visibleRecord(config, session, id);
+  if (!versionMatches(formData.get(VERSION_FIELD), editVersion(before, config.fields.map((field) => field.name)))) {
+    redirect(`/master-data/${slug}/${id}/edit?error=${encodeURIComponent(STALE_EDIT)}`);
+  }
 
   let data: Record<string, unknown>;
   try {
