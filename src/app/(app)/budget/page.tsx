@@ -4,10 +4,10 @@ import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { formatMoney, sumMoney, toDecimal } from "@/lib/money";
-import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
+import { departmentScopeWhere, getAccessScope, organizationScopeWhere, projectScopeWhere } from "@/lib/access-scope";
 import { MONTH_NAMES_SHORT } from "@/lib/financial-model/drivers";
 import { loadBudgetArticles } from "@/lib/budget/articles";
-import { dimKey, parseDimKey, planLevelWarning, type BudgetSlice } from "@/lib/budget/slice";
+import { budgetSliceProblem, defaultSliceDims, dimKey, parseDimKey, planLevelWarning, type BudgetSlice } from "@/lib/budget/slice";
 import { copyBudgetFromPreviousYearAction, importBudgetAction, saveBudgetAction, type BudgetKindSlug } from "./actions";
 import type Decimal from "decimal.js";
 import { singleParams } from "@/lib/query-params";
@@ -37,6 +37,7 @@ export default async function BudgetPage({
   }
   const canManage = hasPermission(session, PERMISSIONS.FINANCIAL_MODEL_MANAGE);
   const scope = await getAccessScope(session);
+  const limitedByDims = Boolean(scope.departmentIds || scope.projectIds);
 
   const sp = singleParams(await searchParams);
   const kindSlug: BudgetKindSlug = sp.kind === "cash-flow" ? "cash-flow" : "pnl";
@@ -45,16 +46,29 @@ export default async function BudgetPage({
 
   const [organizations, departments, costCenters, projects] = await Promise.all([
     prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(scope) }, orderBy: { name: "asc" } }),
-    prisma.department.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
-    prisma.costCenter.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
-    prisma.project.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    prisma.department.findMany({ where: { isArchived: false, ...departmentScopeWhere(scope) }, orderBy: { name: "asc" } }),
+    // Cost-centre slices mix departments and projects — closed to users limited by those.
+    limitedByDims ? Promise.resolve([]) : prisma.costCenter.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
+    prisma.project.findMany({ where: { isArchived: false, ...projectScopeWhere(scope) }, orderBy: { name: "asc" } }),
   ]);
   // A user limited to some organizations can't see or edit the company-wide plan.
   const companyWideAllowed = scope.organizationIds === null;
   const requestedOrg = sp.org && organizations.some((o) => o.id === sp.org) ? sp.org : null;
   const organizationId = requestedOrg ?? (companyWideAllowed ? null : (organizations[0]?.id ?? null));
+  // Limited to some departments/projects: without an explicit slice the page opens on the first own one.
   const dims = parseDimKey(sp.dim) ?? { departmentId: null, costCenterId: null, projectId: null };
-  const slice: BudgetSlice = { organizationId, ...dims };
+  const slice: BudgetSlice = { organizationId, ...(limitedByDims && !sp.dim ? defaultSliceDims(scope) : dims) };
+  const sliceProblem = budgetSliceProblem(scope, slice);
+
+  if (organizationId && sliceProblem) {
+    return (
+      <div className="page">
+        <div className="card">
+          {sliceProblem}. <Link href="/budget">К своему плану</Link>
+        </div>
+      </div>
+    );
+  }
 
   if (!companyWideAllowed && !organizationId) {
     return (
@@ -74,6 +88,8 @@ export default async function BudgetPage({
       _count: true,
     }),
   ]);
+  // Only slices this user may open.
+  const ownLevelRows = levelRows.filter((l) => !budgetSliceProblem(scope, l));
   const values = new Map<string, Decimal>();
   for (const e of entries) {
     const articleId = e.cashFlowArticleId ?? e.pnlArticleId;
@@ -103,7 +119,7 @@ export default async function BudgetPage({
   const sliceLabel = [orgName(organizationId), dimName(slice)].filter(Boolean).join(", ");
   const sliceHref = (s: BudgetSlice) =>
     `/budget?${new URLSearchParams({ kind: kindSlug, year: String(year), org: s.organizationId ?? "", dim: dimKey(s) }).toString()}`;
-  const levels = levelRows.map((l) => ({ organizationId: l.organizationId, departmentId: l.departmentId, costCenterId: l.costCenterId, projectId: l.projectId }));
+  const levels = ownLevelRows.map((l) => ({ organizationId: l.organizationId, departmentId: l.departmentId, costCenterId: l.costCenterId, projectId: l.projectId }));
   const warning = planLevelWarning(levels);
   const exportHref = `/api/budget/export?${new URLSearchParams({ kind: kindSlug, year: String(year), org: organizationId ?? "", dim: dimKey(slice) }).toString()}`;
   const reportHref = kind === "CASH_FLOW" ? "/reports/cash-flow" : "/reports/pnl?compare=plan";
@@ -152,7 +168,7 @@ export default async function BudgetPage({
         <label className="field">
           <span>Разрез</span>
           <select name="dim" defaultValue={dimKey(slice)}>
-            <option value="">Без разреза — статья целиком</option>
+            {limitedByDims ? null : <option value="">Без разреза — статья целиком</option>}
             {departments.length ? (
               <optgroup label="Подразделение">
                 {departments.map((d) => (
@@ -207,7 +223,7 @@ export default async function BudgetPage({
         <div className="card" style={{ marginBottom: 16 }}>
           <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Где уже есть план на {year} год</h2>
           <ul className="budget-levels">
-            {levelRows.map((l) => {
+            {ownLevelRows.map((l) => {
               const s = { organizationId: l.organizationId, departmentId: l.departmentId, costCenterId: l.costCenterId, projectId: l.projectId };
               const current = dimKey(s) === dimKey(slice) && s.organizationId === organizationId;
               return (

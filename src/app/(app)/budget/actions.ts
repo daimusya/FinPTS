@@ -14,6 +14,7 @@ import { parseBudgetSheet, parsePercent, scaleCells, type BudgetCell } from "@/l
 import { dimKey, parseDimKey, type BudgetSlice } from "@/lib/budget/slice";
 import { parseSpreadsheet } from "@/lib/bank-import/parser";
 import type { BudgetKind } from "@prisma/client";
+import { budgetSliceProblem } from "@/lib/budget/slice";
 
 const KIND_BY_SLUG = { "cash-flow": "CASH_FLOW", pnl: "PNL" } as const;
 export type BudgetKindSlug = keyof typeof KIND_BY_SLUG;
@@ -33,10 +34,8 @@ async function openSlice(kindSlug: BudgetKindSlug, year: number, organizationId:
   const back = (extra: string): never => redirect(budgetUrl(kindSlug, year, slice, extra));
   if (!parseDimKey(dimRaw)) back(`error=${encodeURIComponent("Неизвестный разрез плана")}`);
 
-  const scope = await getAccessScope(session);
-  if (scope.organizationIds !== null && (!organizationId || !scope.organizationIds.includes(organizationId))) {
-    back(`error=${encodeURIComponent("Нет доступа к плану этой организации")}`);
-  }
+  const problem = budgetSliceProblem(await getAccessScope(session), slice);
+  if (problem) back(`error=${encodeURIComponent(problem)}`);
   return { session, kind, slice, back };
 }
 

@@ -6,7 +6,7 @@ import { getAccessScope } from "@/lib/access-scope";
 import { toDecimal } from "@/lib/money";
 import { loadBudgetArticles } from "@/lib/budget/articles";
 import { buildBudgetSheet } from "@/lib/budget/sheet";
-import { parseDimKey } from "@/lib/budget/slice";
+import { budgetSliceProblem, parseDimKey } from "@/lib/budget/slice";
 import { buildWorkbookBuffer } from "@/lib/reports/xlsx-export";
 
 /** Выгрузка плана на год (один срез) в Excel — она же шаблон для загрузки. */
@@ -25,9 +25,9 @@ export async function GET(request: NextRequest) {
   if (!dims) return new Response("Неизвестный разрез", { status: 400 });
 
   const scope = await getAccessScope(session);
-  if (scope.organizationIds !== null && (!organizationId || !scope.organizationIds.includes(organizationId))) {
-    return new Response("Нет доступа к плану этой организации", { status: 403 });
-  }
+  // The same rule as the budget page: own organizations, departments and projects only.
+  const sliceProblem = budgetSliceProblem(scope, { organizationId, ...dims });
+  if (sliceProblem) return new Response(sliceProblem, { status: 403 });
 
   const [articles, entries] = await Promise.all([
     loadBudgetArticles(kind),
