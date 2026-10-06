@@ -12,14 +12,21 @@ export function payrollWorkMonth(kind: string, payoutDate: Date): { year: number
 }
 
 /**
- * Кто участвует в расчёте за месяц: работающие и уволенные в этом месяце
- * или позже — им положены деньги за отработанные дни месяца увольнения
- * (окончательный расчёт за сентябрь делается 10 октября, когда сотрудник,
- * уволенный 4 сентября, уже «Уволен»).
+ * Кто участвует в расчёте: работающие и уволенные не раньше даты since.
+ * Окончательный расчёт — since = начало рабочего месяца: уволенным в этом
+ * месяце положены деньги за отработанные дни (расчёт за сентябрь делается
+ * 10 октября, когда уволенный 4 сентября уже «Уволен»; выплаченное им при
+ * увольнении вычитается). Аванс — since = дата выплаты: уволенный до неё
+ * аванс уже не получает.
  */
-export function payrollEmployeeWhere(organizationId: string, monthStart: Date) {
+export function payrollEmployeeWhere(organizationId: string, since: Date) {
   return {
     organizationId,
-    OR: [{ status: "ACTIVE" as const }, { terminationDate: { gte: monthStart } }],
+    OR: [{ status: "ACTIVE" as const }, { terminationDate: { gte: since } }],
   };
+}
+
+/** С какой даты уволенные ещё участвуют в расчёте этого вида. */
+export function payrollEmployeesSince(kind: string, payoutDate: Date): Date {
+  return kind === "ADVANCE" ? payoutDate : payrollWorkMonth(kind, payoutDate).start;
 }

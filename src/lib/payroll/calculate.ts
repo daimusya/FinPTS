@@ -18,7 +18,7 @@ import {
   type WorkScheduleRule,
 } from "./work-calendar";
 import { earningsMonth } from "./average-earnings";
-import { payrollEmployeeWhere, payrollWorkMonth } from "./run-month";
+import { payrollEmployeeWhere, payrollEmployeesSince, payrollWorkMonth } from "./run-month";
 
 export interface TaxRates {
   ndflPct: Decimal;
@@ -107,7 +107,7 @@ export async function calculatePayrollRun(runId: string, userId: string) {
   const [employees, rates, advanceType, salaryType] = await Promise.all([
     // Including those dismissed during the work month: they are paid for the days they worked.
     prisma.employee.findMany({
-      where: { ...payrollEmployeeWhere(run.organizationId, monthStart), salary: { not: null } },
+      where: { ...payrollEmployeeWhere(run.organizationId, payrollEmployeesSince(run.kind, run.payoutDate)), salary: { not: null } },
       include: { projectAlloc: { where: { validTo: null } }, workSchedule: true },
     }),
     loadTaxRates(run.organizationId, run.payoutDate),
@@ -180,6 +180,18 @@ export async function calculatePayrollRun(runId: string, userId: string) {
     if (advanceRun) {
       advancesPaidByEmployee = new Map(advanceRun.lines.map((l) => [l.employeeId, toDecimal(l.amount)]));
     }
+    // Salary and advance already paid for this work month in ad hoc runs — typically the settlement on the day
+    // of dismissal (ст. 140 ТК РФ): the monthly settlement must not pay it again.
+    const adhocLines = await prisma.payrollLine.findMany({
+      where: {
+        accrualTypeId: { in: [salaryType.id, advanceType.id] },
+        payrollRun: { organizationId: run.organizationId, kind: PayrollRunKind.ADHOC, id: { not: run.id }, payoutDate: { gte: monthStart, lte: monthEnd } },
+      },
+      select: { employeeId: true, amount: true },
+    });
+    for (const l of adhocLines) {
+      advancesPaidByEmployee.set(l.employeeId, (advancesPaidByEmployee.get(l.employeeId) ?? toDecimal(0)).plus(toDecimal(l.amount)));
+    }
   }
 
   let linesCreated = 0;
@@ -242,7 +254,7 @@ export async function calculatePayrollRun(runId: string, userId: string) {
     const alreadyPaid = advancesPaidByEmployee.get(employee.id) ?? toDecimal(0);
     const salaryAmount = prorated.amount.minus(alreadyPaid);
     let comment = prorated.comment;
-    if (alreadyPaid.greaterThan(0)) comment += `; оклад за месяц ${prorated.amount.toFixed(2)} минус аванс ${alreadyPaid.toFixed(2)}`;
+    if (alreadyPaid.greaterThan(0)) comment += `; оклад за месяц ${prorated.amount.toFixed(2)} минус выплачено ранее (аванс, расчёт при увольнении) ${alreadyPaid.toFixed(2)}`;
     if (salaryAmount.greaterThan(0)) await createLine(employee, salaryType, salaryAmount, comment);
 
     // Overtime and work on days off / holidays (ст. 152–153 ТК РФ) — paid with the monthly settlement.
