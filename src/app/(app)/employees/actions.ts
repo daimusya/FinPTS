@@ -11,7 +11,7 @@ import { analyticsProblem, getAccessScope } from "@/lib/access-scope";
 import { EmployeeStatus, Prisma } from "@prisma/client";
 import { parseFormAmount, parseFormDate } from "@/lib/form-values";
 import { yearProblem } from "@/lib/form-values";
-import { salaryChangeProblem, terminationProblem, transferProblem } from "@/lib/payroll/employment";
+import { allocationProblem, salaryChangeProblem, terminationProblem, transferProblem } from "@/lib/payroll/employment";
 import { assertPeriodOpenForDate } from "@/lib/period";
 import { STALE_EDIT, VERSION_FIELD, editVersion, versionMatches } from "@/lib/edit-version";
 
@@ -272,9 +272,18 @@ export async function setProjectAllocationAction(employeeId: string, formData: F
   if (!projectId || !sharePctRaw) {
     redirect(`/employees/${employeeId}?error=${encodeURIComponent("Выберите проект и укажите долю занятости")}`);
   }
+  const [employee, project, active] = await Promise.all([
+    prisma.employee.findUniqueOrThrow({ where: { id: employeeId } }),
+    prisma.project.findUnique({ where: { id: projectId } }),
+    prisma.employeeProjectAllocation.findMany({ where: { employeeId, validTo: null } }),
+  ]);
+  const problem =
+    allocationProblem({ employee, project, sharePctRaw, active: active.map((a) => ({ projectId: a.projectId, sharePct: Number(a.sharePct) })) }) ??
+    analyticsProblem({ ...(await getAccessScope(session)), departmentIds: null }, null, projectId);
+  if (problem) redirect(`/employees/${employeeId}?error=${encodeURIComponent(problem)}`);
 
   const created = await prisma.employeeProjectAllocation.create({
-    data: { employeeId, projectId, sharePct: sharePctRaw },
+    data: { employeeId, projectId, sharePct: sharePctRaw.trim().replace(",", ".") },
   });
 
   await logAudit({
@@ -292,10 +301,12 @@ export async function removeProjectAllocationAction(employeeId: string, allocati
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
   if (!(await isVisible(session, "employee", employeeId))) redirect(`/employees?error=${encodeURIComponent(NOT_VISIBLE)}`);
 
-  await prisma.employeeProjectAllocation.update({
-    where: { id: allocationId },
+  // Only this employee's allocation, and only an active one (ending it again would move its end date).
+  const ended = await prisma.employeeProjectAllocation.updateMany({
+    where: { id: allocationId, employeeId, validTo: null },
     data: { validTo: new Date() },
   });
+  if (ended.count === 0) redirect(`/employees/${employeeId}?error=${encodeURIComponent("Распределение не найдено или уже завершено")}`);
 
   await logAudit({
     userId: session.userId,

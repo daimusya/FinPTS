@@ -75,3 +75,20 @@ describe("splitByProjectShares", () => {
     expect(sum.toNumber()).toBe(1000);
   });
 });
+
+describe("splitByProjectShares below 100%", () => {
+  it("projects get their part, the rest stays with the department", () => {
+    const result = splitByProjectShares(d(1000), [{ projectId: "p1", sharePct: d(50) }], "dept1");
+    expect(result.map((r) => [r.projectId, r.departmentId, r.amount.toNumber()])).toEqual([
+      ["p1", null, 500],
+      [null, "dept1", 500],
+    ]);
+    const two = splitByProjectShares(d(999.99), [{ projectId: "p1", sharePct: d(30) }, { projectId: "p2", sharePct: d(20) }], "dept1");
+    expect(two.reduce((acc, r) => acc.plus(r.amount), new Decimal(0)).toNumber()).toBe(999.99);
+    expect(two[2]).toMatchObject({ projectId: null, departmentId: "dept1" });
+  });
+  it("over 100% (old data) is split proportionally", () => {
+    const result = splitByProjectShares(d(1200), [{ projectId: "p1", sharePct: d(60) }, { projectId: "p2", sharePct: d(60) }], "dept1");
+    expect(result.map((r) => r.amount.toNumber())).toEqual([600, 600]);
+  });
+});

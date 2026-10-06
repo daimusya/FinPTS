@@ -79,15 +79,20 @@ export function splitByProjectShares(
   }
 
   const totalPct = sumMoney(shares.map((s) => s.sharePct));
-  const normalized = totalPct.greaterThan(0) ? shares : shares.map((s) => ({ ...s, sharePct: toDecimal(100 / shares.length) }));
-  const effectiveTotal = totalPct.greaterThan(0) ? totalPct : toDecimal(100);
+  // Below 100%: the projects get their part, the rest stays with the department ("50% on project X" is half the
+  // salary, not all of it). Above 100% (old data): proportionally.
+  const asLines = shares.map((s) => ({ projectId: s.projectId as string | null, sharePct: s.sharePct }));
+  const withRest =
+    totalPct.greaterThan(0) && totalPct.lessThan(100) ? [...asLines, { projectId: null, sharePct: toDecimal(100).minus(totalPct) }] : asLines;
+  const normalized = totalPct.greaterThan(0) ? withRest : asLines.map((s) => ({ ...s, sharePct: toDecimal(100 / shares.length) }));
+  const effectiveTotal = totalPct.greaterThanOrEqualTo(100) ? totalPct : toDecimal(100);
 
   let allocated = toDecimal(0);
   const result = normalized.map((s, idx) => {
     const isLast = idx === normalized.length - 1;
     const lineAmount = isLast ? amount.minus(allocated) : amount.times(s.sharePct).dividedBy(effectiveTotal);
     allocated = allocated.plus(lineAmount);
-    return { projectId: s.projectId, departmentId: null, sharePct: s.sharePct, amount: lineAmount };
+    return { projectId: s.projectId, departmentId: s.projectId ? null : fallbackDepartmentId, sharePct: s.sharePct, amount: lineAmount };
   });
   return result;
 }
