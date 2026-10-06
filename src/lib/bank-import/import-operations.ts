@@ -5,6 +5,7 @@ import { computeStatementFingerprints } from "./fingerprint";
 import { classifyTransaction, type ClassificationRuleInput } from "./classification";
 import { ensureCounterpartyByInn, isAutoCreateEnabled } from "@/lib/integrations/inn-service";
 import { validateInn } from "@/lib/integrations/inn";
+import { isUniqueViolation } from "@/lib/dictionaries/errors";
 
 /** Операция выписки, готовая к записи: из файла или из API банка. */
 export interface StatementOperation {
@@ -93,9 +94,21 @@ export async function importStatementOperations(params: {
   // New INNs become counterparties from the registry when that is switched on (Integrations → INN lookup).
   const autoCreate = await isAutoCreateEnabled();
   let counterpartiesCreated = 0;
+  // Already imported operations and known counterparties — one query each for the whole statement, not per row.
+  const alreadyImported = new Set<string>();
+  const allFingerprints = fingerprints.map((f) => f.fingerprint);
+  for (let start = 0; start < allFingerprints.length; start += 1000) {
+    const found = await prisma.bankTransaction.findMany({ where: { fingerprint: { in: allFingerprints.slice(start, start + 1000) } }, select: { fingerprint: true } });
+    for (const row of found) alreadyImported.add(row.fingerprint);
+  }
+  const statementInns = [...new Set(operations.map((op) => op.counterpartyInn).filter((inn): inn is string => Boolean(inn)))];
+  if (statementInns.length > 0) {
+    const known = await prisma.counterparty.findMany({ where: { inn: { in: statementInns } }, select: { id: true, inn: true }, orderBy: { createdAt: "asc" } });
+    for (const c of known) if (c.inn && !counterparties.has(c.inn)) counterparties.set(c.inn, c.id);
+  }
   for (const [i, op] of operations.entries()) {
     const { fingerprint, occurrence } = fingerprints[i];
-    if (await prisma.bankTransaction.findUnique({ where: { fingerprint } })) {
+    if (alreadyImported.has(fingerprint)) {
       duplicates += 1;
       continue;
     }
@@ -104,7 +117,7 @@ export async function importStatementOperations(params: {
     let counterpartyId: string | null = null;
     if (op.counterpartyInn) {
       if (!counterparties.has(op.counterpartyInn)) {
-        let found = (await prisma.counterparty.findFirst({ where: { inn: op.counterpartyInn } }))?.id ?? null;
+        let found: string | null = null;
         if (!found && autoCreate && !validateInn(op.counterpartyInn)) {
           // An INN missing from the registry (a private person) or a service error just leaves the operation without one.
           const outcome = await ensureCounterpartyByInn(op.counterpartyInn);
@@ -126,7 +139,8 @@ export async function importStatementOperations(params: {
     });
     if (classification) autoClassified += 1;
 
-    await prisma.bankTransaction.create({
+    // The same statement imported at the same moment elsewhere: the operation is already there — a duplicate, not an error.
+    const created = await prisma.bankTransaction.create({
       data: {
         bankAccountId,
         batchId: batch.id,
@@ -143,7 +157,16 @@ export async function importStatementOperations(params: {
         projectId: classification?.projectId ?? null,
         productServiceId: classification?.productServiceId ?? null,
       },
+    }).catch((error: unknown) => {
+      if (isUniqueViolation(error)) return null;
+      throw error;
     });
+    if (!created) {
+      duplicates += 1;
+      if (classification) autoClassified -= 1;
+      continue;
+    }
+    alreadyImported.add(fingerprint);
     imported += 1;
   }
 

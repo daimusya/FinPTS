@@ -55,20 +55,29 @@ export async function bulkFillTimesheetAction(formData: FormData) {
     dates.push(new Date(d));
   }
 
-  let count = 0;
+  // Not upsert: the unique key includes projectId, which Prisma rejects as null in `where` — and PostgreSQL
+  // does not enforce uniqueness for NULLs anyway. Existing entries are read once (not per employee and day),
+  // then updated and created in one transaction: all or nothing.
+  const dayKey = (employeeId: string, date: Date) => `${employeeId}|${date.toISOString().slice(0, 10)}`;
+  const existingRows = await prisma.timeSheet.findMany({
+    where: { employeeId: { in: employeeIds }, date: { gte: dateFrom, lte: dateTo }, dayType, projectId },
+    select: { id: true, employeeId: true, date: true },
+  });
+  const existing = new Map(existingRows.map((row) => [dayKey(row.employeeId, row.date), row.id]));
+  const toUpdate: string[] = [];
+  const toCreate: Array<{ employeeId: string; date: Date; dayType: string; hours: number; projectId: string | null }> = [];
   for (const employeeId of employeeIds) {
     for (const date of dates) {
-      // Not upsert: the unique key includes projectId, which Prisma rejects as null in `where` — and
-      // PostgreSQL does not enforce uniqueness for NULLs anyway, so the check happens here.
-      const existing = await prisma.timeSheet.findFirst({ where: { employeeId, date, dayType, projectId } });
-      if (existing) {
-        await prisma.timeSheet.update({ where: { id: existing.id }, data: { hours } });
-      } else {
-        await prisma.timeSheet.create({ data: { employeeId, date, dayType, hours, projectId } });
-      }
-      count += 1;
+      const id = existing.get(dayKey(employeeId, date));
+      if (id) toUpdate.push(id);
+      else toCreate.push({ employeeId, date, dayType, hours, projectId });
     }
   }
+  await prisma.$transaction([
+    prisma.timeSheet.updateMany({ where: { id: { in: toUpdate } }, data: { hours } }),
+    prisma.timeSheet.createMany({ data: toCreate }),
+  ]);
+  const count = toUpdate.length + toCreate.length;
 
   await logAudit({
     userId: session.userId,
