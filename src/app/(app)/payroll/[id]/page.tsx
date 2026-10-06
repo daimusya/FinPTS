@@ -18,6 +18,7 @@ import type { AverageParams } from "@/lib/payroll/average-earnings-db";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
+import { payrollEmployeeWhere, payrollWorkMonth } from "@/lib/payroll/run-month";
 
 export default async function PayrollRunDetailPage({
   params,
@@ -57,7 +58,8 @@ export default async function PayrollRunDetailPage({
   });
 
   const [employees, accrualTypes, departments, projects] = await Promise.all([
-    prisma.employee.findMany({ where: { organizationId: run.organizationId, status: "ACTIVE" }, orderBy: { fullName: "asc" } }),
+    // Also those dismissed during the run's work month (final pay, unused-vacation compensation).
+    prisma.employee.findMany({ where: payrollEmployeeWhere(run.organizationId, payrollWorkMonth(run.kind, run.payoutDate).start), orderBy: { fullName: "asc" } }),
     prisma.payrollAccrualType.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     prisma.department.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),
     prisma.project.findMany({ where: { isArchived: false }, orderBy: { name: "asc" } }),

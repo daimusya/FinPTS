@@ -18,6 +18,7 @@ import {
   type WorkScheduleRule,
 } from "./work-calendar";
 import { earningsMonth } from "./average-earnings";
+import { payrollEmployeeWhere, payrollWorkMonth } from "./run-month";
 
 export interface TaxRates {
   ndflPct: Decimal;
@@ -100,9 +101,13 @@ export async function calculatePayrollRun(runId: string, userId: string) {
     include: { period: true },
   });
 
+  // Month the run pays for: the advance on the 25th — its own month, the final settlement on the 10th — the previous one.
+  const { year: workYear, month: workMonth, start: monthStart, end: monthEnd } = payrollWorkMonth(run.kind, run.payoutDate);
+
   const [employees, rates, advanceType, salaryType] = await Promise.all([
+    // Including those dismissed during the work month: they are paid for the days they worked.
     prisma.employee.findMany({
-      where: { organizationId: run.organizationId, status: "ACTIVE", salary: { not: null } },
+      where: { ...payrollEmployeeWhere(run.organizationId, monthStart), salary: { not: null } },
       include: { projectAlloc: { where: { validTo: null } }, workSchedule: true },
     }),
     loadTaxRates(run.organizationId, run.payoutDate),
@@ -110,13 +115,6 @@ export async function calculatePayrollRun(runId: string, userId: string) {
     prisma.payrollAccrualType.findFirstOrThrow({ where: { code: "salary" } }),
   ]);
 
-  // Month the run pays for: the advance on the 25th — its own month, the final settlement on the 10th — the previous one.
-  const shift = run.kind === PayrollRunKind.FINAL ? -1 : 0;
-  const monthIndex = run.payoutDate.getUTCFullYear() * 12 + run.payoutDate.getUTCMonth() + shift;
-  const workYear = Math.floor(monthIndex / 12);
-  const workMonth = (monthIndex % 12) + 1;
-  const monthStart = new Date(Date.UTC(workYear, workMonth - 1, 1));
-  const monthEnd = new Date(Date.UTC(workYear, workMonth, 0));
 
   const [calendarRows, timesheetRows, extraTypes] = await Promise.all([
     // The previous year too: a business trip is paid by the average of the 12 months before it.
