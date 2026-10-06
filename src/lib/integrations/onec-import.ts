@@ -34,20 +34,42 @@ type LineRefs = {
 const insensitive = (value: string) => ({ equals: value, mode: "insensitive" as const });
 
 /**
+ * Найденное за одну загрузку: в файле одни и те же организации, контрагенты,
+ * статьи и разрезы повторяются из документа в документ — каждое ищется в базе
+ * один раз на файл, а не на каждый документ и строку. Неудачная попытка не
+ * запоминается.
+ */
+export type ImportMemo = <T>(key: string, load: () => Promise<T>) => Promise<T>;
+
+export function createImportMemo(): ImportMemo {
+  const cache = new Map<string, Promise<unknown>>();
+  return <T>(key: string, load: () => Promise<T>) => {
+    if (!cache.has(key)) {
+      const pending = load();
+      cache.set(key, pending);
+      pending.catch(() => cache.delete(key));
+    }
+    return cache.get(key) as Promise<T>;
+  };
+}
+
+/**
  * Находит ссылки строки: статью ОПиУ — по коду или названию, подразделение —
  * по названию, ЦФО, проект и продукт/услугу — по названию или коду (проект —
  * в организации документа). Незнакомое значение — ошибка документа, а не
  * тихо пустая аналитика.
  */
-async function resolveLine(line: OnecLine, organizationId: string): Promise<LineRefs> {
-  const pnlArticle = await prisma.pnlArticle.findFirst({
-    where: { isArchived: false, OR: [{ code: line.pnlArticleCode }, { name: insensitive(line.pnlArticleCode) }] },
-  });
+async function resolveLine(line: OnecLine, organizationId: string, memo: ImportMemo): Promise<LineRefs> {
+  const pnlArticle = await memo(`pnl:${line.pnlArticleCode.toLowerCase()}`, () =>
+    prisma.pnlArticle.findFirst({
+      where: { isArchived: false, OR: [{ code: line.pnlArticleCode }, { name: insensitive(line.pnlArticleCode) }] },
+    }),
+  );
   if (!pnlArticle) throw new Error(`статья ОПиУ «${line.pnlArticleCode}» не найдена (строка ${line.rowNumber})`);
 
   const lookup = async <T extends { id: string } | null>(value: string | null, label: string, find: (v: string) => Promise<T>) => {
     if (!value) return null;
-    const found = await find(value);
+    const found = await memo(`${label}:${label === "проект" ? organizationId + ":" : ""}${value.toLowerCase()}`, () => find(value));
     if (!found) throw new Error(`в справочнике нет значения «${value}» (${label}, строка ${line.rowNumber})`);
     return found.id;
   };
@@ -69,30 +91,34 @@ async function resolveLine(line: OnecLine, organizationId: string): Promise<Line
   };
 }
 
-async function importDocument(doc: OnecDocumentGroup, batchId: string): Promise<"created" | "updated"> {
+async function importDocument(doc: OnecDocumentGroup, batchId: string, memo: ImportMemo): Promise<"created" | "updated"> {
   const h = doc.header;
-  const organization = await prisma.organization.findFirst({ where: { inn: h.organizationInn! } });
+  const organization = await memo(`org:${h.organizationInn}`, () => prisma.organization.findFirst({ where: { inn: h.organizationInn! } }));
   if (!organization) throw new Error(`организация с ИНН «${h.organizationInn}» не найдена в платформе`);
 
-  let counterparty = await prisma.counterparty.findFirst({ where: { inn: h.counterpartyInn! } });
-  // With automatic creation switched on, a new counterparty gets its requisites from the registry.
-  if (!counterparty && (await isAutoCreateEnabled())) {
-    const outcome = await ensureCounterpartyByInn(h.counterpartyInn!);
-    if (outcome.id) counterparty = await prisma.counterparty.findUnique({ where: { id: outcome.id } });
-  }
-  if (!counterparty) {
-    counterparty = await prisma.counterparty.create({
-      data: {
-        inn: h.counterpartyInn!,
-        fullName: h.counterpartyName ?? `Контрагент ИНН ${h.counterpartyInn}`,
-        dataSource: "1C",
-        dataUpdatedAt: new Date(),
-      },
-    });
-  }
+  // Found or created once per file: the next document with the same INN uses the same counterparty.
+  const counterparty = await memo(`cp:${h.counterpartyInn}`, async () => {
+    let found = await prisma.counterparty.findFirst({ where: { inn: h.counterpartyInn! } });
+    // With automatic creation switched on, a new counterparty gets its requisites from the registry.
+    if (!found && (await memo("autoCreate", () => isAutoCreateEnabled()))) {
+      const outcome = await ensureCounterpartyByInn(h.counterpartyInn!);
+      if (outcome.id) found = await prisma.counterparty.findUnique({ where: { id: outcome.id } });
+    }
+    return (
+      found ??
+      prisma.counterparty.create({
+        data: {
+          inn: h.counterpartyInn!,
+          fullName: h.counterpartyName ?? `Контрагент ИНН ${h.counterpartyInn}`,
+          dataSource: "1C",
+          dataUpdatedAt: new Date(),
+        },
+      })
+    );
+  });
 
   const lineRefs: LineRefs[] = [];
-  for (const line of doc.lines) lineRefs.push(await resolveLine(line, organization.id));
+  for (const line of doc.lines) lineRefs.push(await resolveLine(line, organization.id, memo));
   // A document in a foreign currency: amounts in the file are in that currency, roubles at the rate from the file
   // or the CBR rate on the document date (as in the document form).
   const currency = normalizeCurrency(h.currency);
@@ -211,9 +237,10 @@ export async function importOnecDocuments(params: {
   };
   for (const e of groupErrors) addError(e.rowNumbers, e.externalId, e.message);
 
+  const memo = createImportMemo();
   for (const doc of documents) {
     try {
-      const outcome = await importDocument(doc, batch.id);
+      const outcome = await importDocument(doc, batch.id, memo);
       if (outcome === "created") imported += 1;
       else updated += 1;
       lines += doc.lines.length;
