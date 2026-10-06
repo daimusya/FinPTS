@@ -37,6 +37,7 @@ export default async function AccrualsPage({
     to?: string;
     page?: string;
     q?: string;
+    error?: string;
   }>;
 }) {
   const session = await getSession();
@@ -49,7 +50,7 @@ export default async function AccrualsPage({
   }
   const canManage = hasPermission(session, PERMISSIONS.ACCRUALS_MANAGE);
   const filters = singleParams(await searchParams);
-  const { direction, status, paymentStatus, pnlArticleId, from, to, q } = filters;
+  const { direction, status, paymentStatus, pnlArticleId, from, to, q, error } = filters;
 
   const scope = await getAccessScope(session);
 
@@ -101,6 +102,8 @@ export default async function AccrualsPage({
           </Link>
         ) : null}
       </div>
+
+      {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
 
       <form className="filter-bar">
         <label className="field" style={{ minWidth: 240 }}>

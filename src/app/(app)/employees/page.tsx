@@ -12,8 +12,8 @@ import { SubmitButton } from "@/components/submit-button";
 
 const PAGE_SIZE = 100;
 
-export default async function EmployeesPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
-  const { q, page } = singleParams(await searchParams);
+export default async function EmployeesPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string; error?: string }> }) {
+  const { q, page, error } = singleParams(await searchParams);
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.PAYROLL_VIEW)) {
     return (
@@ -48,6 +48,8 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
           </Link>
         ) : null}
       </div>
+
+      {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
 
       <form className="filter-bar" style={{ alignItems: "flex-end" }}>
         <label className="field" style={{ minWidth: 260 }}>

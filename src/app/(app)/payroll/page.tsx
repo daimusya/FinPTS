@@ -5,8 +5,10 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { PAYROLL_RUN_KIND_LABELS, PAYROLL_RUN_STATUS_BADGE, PAYROLL_RUN_STATUS_LABELS } from "@/lib/payroll/labels";
 import { formatMoney, sumMoney } from "@/lib/money";
 import { getAccessScope, payrollRunScopeWhere } from "@/lib/access-scope";
+import { singleParams } from "@/lib/query-params";
 
-export default async function PayrollRunsPage() {
+export default async function PayrollRunsPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const { error } = singleParams(await searchParams);
   const session = await getSession();
   if (!session || !hasPermission(session, PERMISSIONS.PAYROLL_VIEW)) {
     return (
@@ -37,6 +39,8 @@ export default async function PayrollRunsPage() {
           </Link>
         ) : null}
       </div>
+
+      {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
 
       <div className="table-wrap">
         <table>
