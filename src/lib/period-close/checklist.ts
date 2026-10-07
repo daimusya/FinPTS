@@ -2,6 +2,8 @@ import { prisma } from "@/lib/db";
 import { monthRange } from "@/lib/reports/period";
 import { computeManagementBalance } from "@/lib/reports/balance";
 import { formatMoney } from "@/lib/money";
+import { accountCurrencies } from "@/lib/currency-rates";
+import { fxCoverageProblem } from "./fx-coverage";
 
 export type CheckSeverity = "critical" | "warning";
 
@@ -193,6 +195,34 @@ export async function runPeriodCloseChecklist(year: number, month: number): Prom
       unpostedPayroll === 0
         ? "Все строки утверждённых расчётов зарплаты за месяц попали в документы начисления."
         : `Строк утверждённых расчётов зарплаты, не попавших в начисления (у вида начисления нет статьи ОПиУ): ${unpostedPayroll}. Этот расход не виден в ОПиУ — оформите документ начисления вручную.`,
+  });
+
+  // Foreign accounts need a fresh CBR rate for every day of the month (up to today): reports silently fall back
+  // to the last known rate, so a stopped rate loading would revalue at an old rate without a word.
+  const foreignCurrencies = await accountCurrencies();
+  let fxProblem: string | null = null;
+  if (foreignCurrencies.length > 0) {
+    const today = new Date();
+    const until = to < today ? to : today;
+    const rates = await prisma.currencyRate.findMany({
+      where: { isArchived: false, currency: { in: foreignCurrencies }, date: { gte: new Date(from.getTime() - 11 * 86_400_000), lte: until } },
+      select: { currency: true, date: true },
+    });
+    const byCurrency = new Map(foreignCurrencies.map((c) => [c, [] as string[]]));
+    for (const r of rates) byCurrency.get(r.currency)?.push(r.date.toISOString().slice(0, 10));
+    fxProblem = from <= until ? fxCoverageProblem(byCurrency, from.toISOString().slice(0, 10), until.toISOString().slice(0, 10)) : null;
+  }
+  results.push({
+    checkType: "fx_rates_coverage",
+    label: "Курсы валют за месяц",
+    severity: "warning",
+    passed: fxProblem === null,
+    message:
+      foreignCurrencies.length === 0
+        ? "Валютных счетов и касс нет — курсы не нужны."
+        : fxProblem === null
+          ? `Курсы ЦБ за месяц загружены (${foreignCurrencies.join(", ")}).`
+          : `${fxProblem}. Отчёты пересчитают по последнему известному курсу — загрузите курсы в справочнике «Курсы валют».`,
   });
 
   const duplicateFingerprints = await prisma.$queryRaw<Array<{ fingerprint: string; count: bigint }>>`
