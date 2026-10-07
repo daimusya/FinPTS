@@ -158,6 +158,43 @@ export async function runPeriodCloseChecklist(year: number, month: number): Prom
         : `Документов в статусе «черновик» за период: ${unpostedDocuments}. Они не попадают в ОПиУ, пока не проведены.`,
   });
 
+  // Operations without a cash-flow article land in "no article" of the cash-flow report (transfers need none).
+  const unclassified = await prisma.bankTransaction.count({
+    where: { operationDate: { gte: from, lte: to }, cashFlowArticleId: null, isTransfer: false },
+  });
+  results.push({
+    checkType: "unclassified_transactions",
+    label: "Операции без статьи ДДС",
+    severity: "warning",
+    passed: unclassified === 0,
+    message:
+      unclassified === 0
+        ? "У всех операций банка и кассы за период указана статья ДДС (кроме переводов между своими счетами)."
+        : `Операций без статьи ДДС за период: ${unclassified}. В отчёте ДДС они попадают в «без статьи» — разнесите их (вручную или правилами разнесения).`,
+  });
+
+  // Approved payroll of this month whose accrual type has no P&L article never reached an accrual document:
+  // the check on document lines above cannot see it.
+  const unpostedPayroll = await prisma.payrollLine.count({
+    where: {
+      accrualType: { pnlArticleId: null },
+      payrollRun: {
+        status: { in: ["APPROVED", "PAID"] },
+        OR: [...(period ? [{ periodId: period.id, kind: { not: "FINAL" as const } }] : []), { kind: "FINAL", payoutDate: { gte: next.from, lte: next.to } }],
+      },
+    },
+  });
+  results.push({
+    checkType: "unposted_payroll_lines",
+    label: "Зарплата, не попавшая в начисления",
+    severity: "warning",
+    passed: unpostedPayroll === 0,
+    message:
+      unpostedPayroll === 0
+        ? "Все строки утверждённых расчётов зарплаты за месяц попали в документы начисления."
+        : `Строк утверждённых расчётов зарплаты, не попавших в начисления (у вида начисления нет статьи ОПиУ): ${unpostedPayroll}. Этот расход не виден в ОПиУ — оформите документ начисления вручную.`,
+  });
+
   const duplicateFingerprints = await prisma.$queryRaw<Array<{ fingerprint: string; count: bigint }>>`
     SELECT fingerprint, COUNT(*) as count FROM bank_transactions
     WHERE "operationDate" >= ${from} AND "operationDate" <= ${to}
