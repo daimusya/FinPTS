@@ -7,6 +7,9 @@ import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { classifyTransaction, hasAnyCondition, type ClassificationRuleInput } from "@/lib/bank-import/classification";
+import { ruleConditionsProblem } from "@/lib/bank-import/rule-form";
+import { bankTransactionScopeWhere, getAccessScope } from "@/lib/access-scope";
+import { PeriodStatus } from "@prisma/client";
 
 function readRuleForm(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
@@ -51,8 +54,10 @@ export async function createRuleAction(formData: FormData) {
   if (!fields.cashFlowArticleId) {
     redirect(`/cash/classification-rules/new?error=${encodeURIComponent("Выберите статью ДДС, которая будет назначена")}`);
   }
+  const checked = ruleConditionsProblem(fields);
+  if ("error" in checked) redirect(`/cash/classification-rules/new?error=${encodeURIComponent(checked.error)}`);
 
-  const rule = await prisma.bankClassificationRule.create({ data: fields });
+  const rule = await prisma.bankClassificationRule.create({ data: { ...fields, ...(checked as { amountEquals: string | null; counterpartyInn: string | null }) } });
 
   await logAudit({
     userId: session.userId,
@@ -82,9 +87,14 @@ export async function updateRuleAction(id: string, formData: FormData) {
   if (!fields.cashFlowArticleId) {
     redirect(`/cash/classification-rules/${id}/edit?error=${encodeURIComponent("Выберите статью ДДС, которая будет назначена")}`);
   }
+  const checked = ruleConditionsProblem(fields);
+  if ("error" in checked) redirect(`/cash/classification-rules/${id}/edit?error=${encodeURIComponent(checked.error)}`);
 
   const before = await prisma.bankClassificationRule.findUniqueOrThrow({ where: { id } });
-  const updated = await prisma.bankClassificationRule.update({ where: { id }, data: { ...fields, isArchived } });
+  const updated = await prisma.bankClassificationRule.update({
+    where: { id },
+    data: { ...fields, ...(checked as { amountEquals: string | null; counterpartyInn: string | null }), isArchived },
+  });
 
   await logAudit({
     userId: session.userId,
@@ -107,10 +117,16 @@ export async function updateRuleAction(id: string, formData: FormData) {
 export async function applyRulesToUnclassifiedAction() {
   const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
 
-  const [rules, transactions] = await Promise.all([
+  // Only operations the user may see, outside closed months, and not transfers between own accounts (they need no article).
+  const scope = await getAccessScope(session);
+  const closed = await prisma.accountingPeriod.findMany({ where: { status: PeriodStatus.CLOSED }, select: { year: true, month: true } });
+  const closedKeys = new Set(closed.map((p) => `${p.year}-${p.month}`));
+  const [rules, candidates] = await Promise.all([
     prisma.bankClassificationRule.findMany({ where: { isArchived: false } }),
-    prisma.bankTransaction.findMany({ where: { cashFlowArticleId: null } }),
+    prisma.bankTransaction.findMany({ where: { cashFlowArticleId: null, isTransfer: false, ...bankTransactionScopeWhere(scope) } }),
   ]);
+  const transactions = candidates.filter((tx) => !closedKeys.has(`${tx.operationDate.getUTCFullYear()}-${tx.operationDate.getUTCMonth() + 1}`));
+  const skippedClosed = candidates.length - transactions.length;
 
   const ruleInputs: ClassificationRuleInput[] = rules.map((r) => ({
     id: r.id,
@@ -126,7 +142,8 @@ export async function applyRulesToUnclassifiedAction() {
     productServiceId: r.productServiceId,
   }));
 
-  let appliedCount = 0;
+  // Operations getting the same values are updated together: a rule's empty dimension keeps the operation's own.
+  const groups = new Map<string, { data: Record<string, string>; ids: string[] }>();
   for (const tx of transactions) {
     const result = classifyTransaction(ruleInputs, {
       direction: tx.direction,
@@ -134,20 +151,19 @@ export async function applyRulesToUnclassifiedAction() {
       counterpartyInn: tx.counterpartyInn,
       amount: tx.amount,
     });
-    if (!result) continue;
-
-    await prisma.bankTransaction.update({
-      where: { id: tx.id },
-      data: {
-        cashFlowArticleId: result.cashFlowArticleId,
-        departmentId: result.departmentId ?? tx.departmentId,
-        costCenterId: result.costCenterId ?? tx.costCenterId,
-        projectId: result.projectId ?? tx.projectId,
-        productServiceId: result.productServiceId ?? tx.productServiceId,
-      },
-    });
-    appliedCount += 1;
+    if (!result?.cashFlowArticleId) continue;
+    const data: Record<string, string> = { cashFlowArticleId: result.cashFlowArticleId };
+    for (const key of ["departmentId", "costCenterId", "projectId", "productServiceId"] as const) if (result[key]) data[key] = result[key]!;
+    const groupKey = JSON.stringify(data);
+    const group = groups.get(groupKey) ?? { data, ids: [] };
+    group.ids.push(tx.id);
+    groups.set(groupKey, group);
   }
+  // cashFlowArticleId: null in the condition — an operation classified meanwhile by someone else is left alone.
+  const updates = await prisma.$transaction(
+    [...groups.values()].map((g) => prisma.bankTransaction.updateMany({ where: { id: { in: g.ids }, cashFlowArticleId: null }, data: g.data })),
+  );
+  const appliedCount = updates.reduce((sum, u) => sum + u.count, 0);
 
   if (appliedCount > 0) {
     await logAudit({
@@ -155,7 +171,7 @@ export async function applyRulesToUnclassifiedAction() {
       entityType: "bank_transaction",
       entityId: "bulk",
       action: "auto_classify_bulk",
-      after: { appliedCount, scannedCount: transactions.length } as never,
+      after: { appliedCount, scannedCount: transactions.length, skippedClosed } as never,
     });
   }
 
