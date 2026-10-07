@@ -246,3 +246,22 @@ export async function postPayrollRunToAccrual(payrollRunId: string): Promise<str
   for (const id of created) await enqueueProjectResultsForDocument(id);
   return created[0];
 }
+
+/**
+ * Строки, которые не попадут (не попали) в документ начисления: у вида
+ * начисления нет статьи ОПиУ. По видам — сколько строк и на какую сумму
+ * (начислено + взносы), чтобы предупредить на странице расчёта.
+ */
+export function unpostedByType(
+  lines: Array<{ accrualTypeName: string; pnlArticleId: string | null; amount: Decimal.Value; insuranceAmount: Decimal.Value }>,
+): Array<{ name: string; count: number; total: Decimal }> {
+  const byType = new Map<string, { count: number; total: Decimal }>();
+  for (const line of lines) {
+    if (line.pnlArticleId) continue;
+    const entry = byType.get(line.accrualTypeName) ?? { count: 0, total: toDecimal(0) };
+    entry.count += 1;
+    entry.total = entry.total.plus(toDecimal(line.amount)).plus(toDecimal(line.insuranceAmount));
+    byType.set(line.accrualTypeName, entry);
+  }
+  return [...byType.entries()].map(([name, v]) => ({ name, ...v }));
+}

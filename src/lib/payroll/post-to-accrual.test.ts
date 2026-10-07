@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accrualDateForRun, buildPayrollAccrualDocuments, buildPayrollAccrualLines, splitByMonthDays, type PayrollLineForPosting } from "./post-to-accrual";
+import { accrualDateForRun, buildPayrollAccrualDocuments, buildPayrollAccrualLines, splitByMonthDays, unpostedByType, type PayrollLineForPosting } from "./post-to-accrual";
 import Decimal from "decimal.js";
 
 function line(overrides: Partial<PayrollLineForPosting> = {}): PayrollLineForPosting {
@@ -105,5 +105,18 @@ describe("the expense date of a payroll run", () => {
     );
     expect(docs.main.map((d) => d.amount.toNumber())).toEqual([6000]);
     expect(docs.later.map((l) => [l.month, l.lines[0].amount.toNumber()])).toEqual([[10, 8000]]);
+  });
+});
+
+describe("unpostedByType", () => {
+  it("groups lines whose accrual type has no P&L article", () => {
+    const result = unpostedByType([
+      { accrualTypeName: "Оклад", pnlArticleId: "pnl1", amount: 1000, insuranceAmount: 302 },
+      { accrualTypeName: "Компенсация отпуска", pnlArticleId: null, amount: 500, insuranceAmount: 151 },
+      { accrualTypeName: "Компенсация отпуска", pnlArticleId: null, amount: 250, insuranceAmount: 0 },
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ name: "Компенсация отпуска", count: 2 });
+    expect(result[0].total.toNumber()).toBe(901);
   });
 });

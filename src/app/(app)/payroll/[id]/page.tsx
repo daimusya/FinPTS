@@ -19,6 +19,7 @@ import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
 import { payrollEmployeeWhere, payrollWorkMonth, runLinesEditable } from "@/lib/payroll/run-month";
+import { unpostedByType } from "@/lib/payroll/post-to-accrual";
 
 export default async function PayrollRunDetailPage({
   params,
@@ -66,6 +67,10 @@ export default async function PayrollRunDetailPage({
   ]);
 
   const totalAmount = sumMoney(run.lines.map((l) => l.amount));
+  // Lines whose accrual type has no P&L article do not reach the accrual document — said aloud, not skipped silently.
+  const unposted = unpostedByType(
+    run.lines.map((l) => ({ accrualTypeName: l.accrualType.name, pnlArticleId: l.accrualType.pnlArticleId, amount: l.amount, insuranceAmount: l.insuranceAmount })),
+  );
   const totalNdfl = sumMoney(run.lines.map((l) => l.ndflAmount));
   const totalInsurance = sumMoney(run.lines.map((l) => l.insuranceAmount));
   const cashTotal = sumMoney(run.lines.filter((l) => l.employee.paymentMethod === "CASH").map((l) => l.amount));
@@ -109,6 +114,19 @@ export default async function PayrollRunDetailPage({
       </div>
 
       {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
+      {unposted.length > 0 ? (
+        <div className="card" style={{ marginBottom: 14, borderColor: "var(--color-warning)" }}>
+          <p style={{ margin: 0 }}>
+            <strong>{run.status === "APPROVED" || run.status === "PAID" ? "Не проведены в начисления" : "Не попадут в начисления при утверждении"}:</strong>{" "}
+            {unposted.map((u) => `${u.name} — ${u.count} стр. на ${formatMoney(u.total)}`).join("; ")}.
+          </p>
+          <p className="text-muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
+            У этих видов начисления не указана статья ОПиУ, поэтому расход не попадёт в отчёт о прибылях и убытках. Укажите статью в
+            справочнике <Link href="/master-data/payroll-accrual-types">«Виды начислений»</Link>
+            {run.status === "APPROVED" || run.status === "PAID" ? " и оформите документ начисления вручную." : " до утверждения."}
+          </p>
+        </div>
+      ) : null}
 
       {accrualDocuments.length > 0 ? (
         <div className="card" style={{ marginBottom: 16 }}>
