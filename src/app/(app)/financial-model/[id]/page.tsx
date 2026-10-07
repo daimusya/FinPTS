@@ -205,6 +205,7 @@ export default async function ScenarioDetailPage({
       <div className="card" style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Драйверы сценария</h2>
         <form action={saveScenarioValuesAction.bind(null, id)}>
+          {keepStart}
           <div className="table-wrap" style={{ marginBottom: 14 }}>
             <table>
               <thead>

@@ -11,6 +11,7 @@ import { parseNewServiceForm, type NewServiceFormData, NEW_SERVICE_FIELDS, newSe
 import { materializeScenarioDepartments } from "@/lib/financial-model/scenario-departments";
 import { LOAN_FIELDS, parseLoanForm, type LoanFormData } from "@/lib/financial-model/loans";
 import { TAX_REGIMES, type TaxRegime } from "@/lib/financial-model/taxes";
+import { parseCellMonth, parseScenarioCell } from "@/lib/financial-model/cell-value";
 
 export async function createScenarioAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
@@ -301,6 +302,8 @@ export async function saveScenarioValuesAction(scenarioId: string, formData: For
   const session = await requirePermission(PERMISSIONS.FINANCIAL_MODEL_MANAGE);
 
   const driverCodes = new Set(ALL_DRIVER_DEFS.map((d) => d.code));
+  const driverLabel = (code: string) => ALL_DRIVER_DEFS.find((d) => d.code === code)?.label ?? code;
+  const rejected: string[] = [];
   const toUpsert: Array<{ year: number; month: number; driver: string; dimension: string; value: string }> = [];
   const toDelete: Array<{ year: number; month: number; driver: string; dimension: string }> = [];
 
@@ -320,17 +323,21 @@ export async function saveScenarioValuesAction(scenarioId: string, formData: For
       continue;
     }
     if (!driverCodes.has(driver as never)) continue;
-    const [yearStr, monthStr] = ym.split("_");
-    const year = Number(yearStr);
-    const month = Number(monthStr);
-    const value = String(rawValue).trim();
+    const cellMonth = parseCellMonth(ym);
+    if (!cellMonth) continue;
+    const { year, month } = cellMonth;
+    const raw = String(rawValue).trim();
 
-    if (!value) {
+    if (!raw) {
       toDelete.push({ year, month, driver, dimension });
-    } else if (!Number.isNaN(Number(value))) {
-      toUpsert.push({ year, month, driver, dimension, value });
+      continue;
     }
+    // "1 500,5" is a number; anything else is reported, not silently dropped.
+    const cell = parseScenarioCell(raw);
+    if ("error" in cell) rejected.push(`${driverLabel(driver)} ${String(month).padStart(2, "0")}.${year}: ${cell.error}`);
+    else toUpsert.push({ year, month, driver, dimension, value: cell.value });
   }
+  if (!(await prisma.financialScenario.findUnique({ where: { id: scenarioId }, select: { id: true } }))) redirect("/financial-model");
 
   await prisma.$transaction([
     ...toUpsert.map((row) =>
@@ -360,8 +367,12 @@ export async function saveScenarioValuesAction(scenarioId: string, formData: For
     entityType: "financial_scenario",
     entityId: scenarioId,
     action: "update_values",
-    after: { upserted: toUpsert.length, deleted: toDelete.length } as never,
+    after: { upserted: toUpsert.length, deleted: toDelete.length, rejected: rejected.length } as never,
   });
 
   revalidatePath(`/financial-model/${scenarioId}`);
+  if (rejected.length > 0) {
+    const shown = rejected.slice(0, 5).join("; ") + (rejected.length > 5 ? `; и ещё ${rejected.length - 5}` : "");
+    redirect(scenarioUrl(scenarioId, formData, `Остальное сохранено, не сохранены ячейки: ${shown}`));
+  }
 }
