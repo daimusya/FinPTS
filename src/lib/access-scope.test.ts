@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   accrualScopeWhere,
+  accrualLineScopeWhere,
   bankTransactionScopeWhere,
   buildScope,
   departmentScopeWhere,
@@ -123,5 +124,15 @@ describe("analyticsProblem", () => {
   });
   it("no restriction — anything goes, including empty", () => {
     expect(analyticsProblem(UNRESTRICTED_SCOPE, null, null)).toBeNull();
+  });
+});
+
+describe("accrualLineScopeWhere", () => {
+  it("limits report lines to own departments and projects", () => {
+    expect(accrualLineScopeWhere(UNRESTRICTED_SCOPE)).toEqual({});
+    expect(accrualLineScopeWhere({ organizationIds: ["o"], departmentIds: ["d1"], projectIds: null })).toEqual({ AND: [{ departmentId: { in: ["d1"] } }] });
+    expect(accrualLineScopeWhere({ organizationIds: null, departmentIds: ["d1"], projectIds: ["p1"] })).toEqual({
+      AND: [{ departmentId: { in: ["d1"] } }, { projectId: { in: ["p1"] } }],
+    });
   });
 });

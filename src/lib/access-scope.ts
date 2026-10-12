@@ -65,6 +65,19 @@ export function accrualScopeWhere(scope: AccessScope): Prisma.AccrualDocumentWhe
   return organizationIdScopeWhere(scope);
 }
 
+/**
+ * Строки документов начисления в отчётах (ОПиУ, маржинальность) для
+ * пользователя с ограничением по подразделениям/проектам: только строки его
+ * подразделений и проектов — сам документ виден по организации, но расходы и
+ * доходы других отделов в его отчётах не нужны.
+ */
+export function accrualLineScopeWhere(scope: AccessScope): Prisma.AccrualDocumentLineWhereInput {
+  const and: Prisma.AccrualDocumentLineWhereInput[] = [];
+  if (scope.departmentIds) and.push({ departmentId: { in: scope.departmentIds } });
+  if (scope.projectIds) and.push({ projectId: { in: scope.projectIds } });
+  return and.length > 0 ? { AND: and } : {};
+}
+
 export function payrollRunScopeWhere(scope: AccessScope): Prisma.PayrollRunWhereInput {
   return organizationIdScopeWhere(scope);
 }

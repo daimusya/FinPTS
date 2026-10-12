@@ -4,7 +4,7 @@ import Decimal from "decimal.js";
 import type { ReportFilters } from "./filters";
 import type { ReportPeriod } from "./period";
 import { nonCashByArticle, type PnlType } from "./pnl";
-import { accrualScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
+import { accrualLineScopeWhere, accrualScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
 import { lineNetAmount, loadInputVatRule, type InputVatRule } from "@/lib/accruals/vat";
 import type { PlanItem } from "@/lib/budget/plan-fact";
 
@@ -155,7 +155,7 @@ async function aggregateByDimension(
     },
     include: {
       counterparty: true,
-      lines: { include: { pnlArticle: true, project: true, productService: true } },
+      lines: { where: accrualLineScopeWhere(scope), include: { pnlArticle: true, project: true, productService: true } },
     },
   });
 
@@ -247,6 +247,7 @@ export async function computeMarginReport(
           ...(filters.costCenterId ? { costCenterId: filters.costCenterId } : {}),
           ...(filters.projectId ? { projectId: filters.projectId } : {}),
           ...(filters.productServiceId ? { productServiceId: filters.productServiceId } : {}),
+          ...accrualLineScopeWhere(scope),
         },
         include: { pnlArticle: true },
       },

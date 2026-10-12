@@ -4,7 +4,7 @@ import type Decimal from "decimal.js";
 import type { Prisma } from "@prisma/client";
 import type { ReportFilters } from "./filters";
 import type { ReportPeriod } from "./period";
-import { accrualScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
+import { accrualLineScopeWhere, accrualScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
 import { chargesIn } from "./non-cash";
 import { loadNonCashCharges, organizationFilter } from "./non-cash-load";
 import { lineNetAmount, loadInputVatRule } from "@/lib/accruals/vat";
@@ -94,6 +94,7 @@ export async function computePnlReport(
           ...(filters.costCenterId ? { costCenterId: filters.costCenterId } : {}),
           ...(filters.projectId ? { projectId: filters.projectId } : {}),
           ...(filters.productServiceId ? { productServiceId: filters.productServiceId } : {}),
+          ...accrualLineScopeWhere(scope),
         },
         include: { pnlArticle: true },
       },
@@ -177,10 +178,14 @@ export async function nonCashByArticle(
   scope: AccessScope = UNRESTRICTED_SCOPE,
 ): Promise<Array<{ article: { id: string; name: string; type: PnlType }; amount: Decimal }>> {
   if (filters.counterpartyId || filters.costCenterId || filters.projectId || filters.productServiceId) return [];
+  // Limited to some projects: non-cash charges have no project. Limited to some departments: only fixed assets
+  // of those departments (a loan has no department).
+  if (scope.projectIds) return [];
   const items = await loadNonCashCharges(period.to, organizationFilter(filters.organizationId, scope.organizationIds));
   const result: Array<{ article: { id: string; name: string; type: PnlType }; amount: Decimal }> = [];
   for (const item of items) {
     if (filters.departmentId && item.departmentId !== filters.departmentId) continue;
+    if (scope.departmentIds && (!item.departmentId || !scope.departmentIds.includes(item.departmentId))) continue;
     const amount = chargesIn(item.schedule, period.from, period.to);
     if (!amount.isZero()) result.push({ article: item.pnlArticle, amount });
   }
