@@ -186,6 +186,7 @@ textarea:focus {
 
 .form-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 4px;
 }
@@ -1254,4 +1255,23 @@ tbody tr:hover {
 .notification__time {
   font-size: 12px;
   color: var(--color-graphite-500);
+}
+
+/* Phones: the user block wraps instead of pushing "Выйти" off the screen. */
+@media (max-width: 560px) {
+  .topbar {
+    padding: 10px 14px;
+  }
+
+  .topbar-user {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px 10px;
+    min-width: 0;
+  }
+
+  .topbar-user > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
 }
