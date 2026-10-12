@@ -5,6 +5,7 @@ import { showDueDate } from "@/lib/payment-calendar";
 import { formatMoneyIn } from "@/lib/currency";
 import { isDelegationActive, stepDeciders } from "./delegation";
 import { usersSeeingOrganization } from "@/lib/access-scope";
+import { approvalSeparationProblem } from "./separation";
 
 type Decider = { userId: string; onBehalfOfId: string | null };
 
@@ -39,13 +40,41 @@ async function decidersOf(requestId: string, date: Date): Promise<{ all: Decider
   const request = await prisma.paymentRequest.findUniqueOrThrow({ where: { id: requestId }, select: { organizationId: true } });
   const all = await roleDeciders(requestId, date);
   const seeing = await usersSeeingOrganization(all.map((d) => d.userId), request.organizationId);
-  const visible = all.filter((d) => seeing.has(d.userId));
+  // The author and whoever approved an earlier step of this round cannot approve this one (administrators can).
+  const separationOk = await separationAllowed(requestId, all.map((d) => d.userId));
+  const visible = all.filter((d) => seeing.has(d.userId) && separationOk.has(d.userId));
   if (visible.length > 0) return { all, visible, byAdmin: false };
   const admins = await prisma.user.findMany({
     where: { isActive: true, roles: { some: { role: { permissions: { some: { permission: { code: PERMISSIONS.ADMIN_FULL } } } } } } },
     select: { id: true },
   });
   return { all, visible: admins.map((a) => ({ userId: a.id, onBehalfOfId: null })), byAdmin: true };
+}
+
+async function separationAllowed(requestId: string, userIds: string[]): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set();
+  const [request, decisions, admins] = await Promise.all([
+    prisma.paymentRequest.findUniqueOrThrow({ where: { id: requestId }, select: { createdById: true, round: true, currentStep: true, routeId: true } }),
+    prisma.paymentRequestApproval.findMany({ where: { paymentRequestId: requestId }, select: { approverId: true, decision: true, stepOrder: true, round: true } }),
+    prisma.user.findMany({
+      where: { id: { in: userIds }, roles: { some: { role: { permissions: { some: { permission: { code: PERMISSIONS.ADMIN_FULL } } } } } } },
+      select: { id: true },
+    }),
+  ]);
+  const adminIds = new Set(admins.map((a) => a.id));
+  return new Set(
+    userIds.filter(
+      (userId) =>
+        !approvalSeparationProblem({
+          isAdmin: adminIds.has(userId),
+          userId,
+          authorId: request.createdById,
+          round: request.round,
+          currentStep: request.routeId ? request.currentStep : null,
+          decisions,
+        }),
+    ),
+  );
 }
 
 async function roleDeciders(requestId: string, date: Date): Promise<Decider[]> {

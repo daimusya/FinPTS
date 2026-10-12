@@ -35,6 +35,7 @@ import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed }
 import { currentDeciders, notifyAuthor, notifyDeciders } from "@/lib/payment-requests/notify";
 import { parseFormAmount, parseFormDate } from "@/lib/form-values";
 import { yearProblem } from "@/lib/form-values";
+import { approvalSeparationProblem } from "@/lib/payment-requests/separation";
 
 async function loadActiveRoutes(): Promise<ApprovalRouteCandidate[]> {
   const routes = await prisma.paymentApprovalRoute.findMany({
@@ -233,6 +234,23 @@ async function decideStep(id: string, decision: ApprovalDecision, formData: Form
       }
       onBehalfOfId = authority.onBehalfOfId;
     }
+  }
+
+  // Four eyes: the author does not approve their own request, nor one person two steps of the same round.
+  if (decision === "approved") {
+    const decisions = await prisma.paymentRequestApproval.findMany({
+      where: { paymentRequestId: id },
+      select: { approverId: true, decision: true, stepOrder: true, round: true },
+    });
+    const separation = approvalSeparationProblem({
+      isAdmin,
+      userId: session.userId,
+      authorId: request.createdById,
+      round: request.round,
+      currentStep: request.route ? request.currentStep : null,
+      decisions,
+    });
+    if (separation) fail(separation);
   }
 
   const before = request;

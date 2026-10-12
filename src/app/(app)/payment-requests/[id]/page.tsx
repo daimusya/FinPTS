@@ -38,6 +38,7 @@ import { currentDeciders, hasDecidersIgnoringAccess, noDecidersReason } from "@/
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
+import { approvalSeparationProblem } from "@/lib/payment-requests/separation";
 
 const STATE_LABELS: Record<TimelineState, string> = {
   approved: "Согласовано",
@@ -122,7 +123,19 @@ export default async function PaymentRequestPage({
   // Members of the step's role (or holders of the approve permission) and their deputies for today.
   const deciders = pending ? await currentDeciders(request.id) : [];
   const myAuthority = deciders.find((d) => d.userId === session.userId && d.onBehalfOfId === null) ?? deciders.find((d) => d.userId === session.userId);
-  const canDecide = pending && (isAdmin || Boolean(myAuthority) || (!request.route && canApprove));
+  // Four eyes: the author, or whoever approved an earlier step of this round, sees why someone else decides.
+  const separation = pending
+    ? approvalSeparationProblem({
+        isAdmin,
+        userId: session.userId,
+        authorId: request.createdById,
+        round: request.round,
+        currentStep: request.route ? request.currentStep : null,
+        decisions: request.approvals.map((a) => ({ approverId: a.approverId, decision: a.decision, stepOrder: a.stepOrder, round: a.round })),
+      })
+    : null;
+  const mayDecide = pending && (isAdmin || Boolean(myAuthority) || (!request.route && canApprove));
+  const canDecide = mayDecide && !separation;
   const nobodyDecides = pending && deciders.length === 0 ? noDecidersReason(await hasDecidersIgnoringAccess(request.id), request.organization.name) : null;
   const onBehalfOfName =
     myAuthority?.onBehalfOfId && !isAdmin ? (await prisma.user.findUnique({ where: { id: myAuthority.onBehalfOfId } }))?.fullName ?? null : null;
@@ -545,6 +558,11 @@ export default async function PaymentRequestPage({
         </div>
       ) : null}
 
+      {mayDecide && separation ? (
+        <div className="card" id="decision" style={{ marginTop: 16 }}>
+          <p style={{ margin: 0 }}>{separation}.</p>
+        </div>
+      ) : null}
       {canDecide ? (
         <div className="card" id="decision">
           <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
