@@ -22,7 +22,7 @@ export async function sendEmail(settings: SmtpSettings, password: string | null,
 }
 
 export interface TelegramUpdate {
-  message?: { text?: string; chat?: { id?: number | string } };
+  message?: { text?: string; chat?: { id?: number | string; username?: string; first_name?: string; last_name?: string; title?: string } };
 }
 
 /** Вызов Bot API Telegram. fetchImpl подменяется в тестах. */

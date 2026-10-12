@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { decryptSecret } from "@/lib/crypto/secret-box";
-import { findChatByCode, makeLinkCode } from "@/lib/notify-channels/compose";
+import { TELEGRAM_LINK_TTL_MINUTES, findLinkChat, linkCodeExpired, makeLinkCode } from "@/lib/notify-channels/compose";
 import { loadChannelSettings } from "@/lib/notify-channels/deliver";
 import { telegramCall, type TelegramUpdate } from "@/lib/notify-channels/transport";
 import { isInternalPath } from "@/lib/internal-path";
@@ -51,8 +51,8 @@ export async function startTelegramLinkAction() {
   const session = await requireSession();
   const settings = await loadChannelSettings();
   if (!settings.telegram.enabled || !settings.telegram.tokenEnc) back("channelError", "Telegram для уведомлений не настроен администратором");
-  await prisma.user.update({ where: { id: session.userId }, data: { telegramLinkCode: makeLinkCode() } });
-  back("channelNotice", "Отправьте боту код ниже и нажмите «Проверить»");
+  await prisma.user.update({ where: { id: session.userId }, data: { telegramLinkCode: makeLinkCode(), telegramLinkCodeAt: new Date() } });
+  back("channelNotice", `Отправьте боту код ниже и нажмите «Проверить» — код действует ${TELEGRAM_LINK_TTL_MINUTES} минут`);
 }
 
 /** Привязка Telegram, шаг 2: найти сообщение с кодом среди новых сообщений бота. */
@@ -61,17 +61,27 @@ export async function checkTelegramLinkAction() {
   const settings = await loadChannelSettings();
   const user = await prisma.user.findUniqueOrThrow({ where: { id: session.userId } });
   if (!user.telegramLinkCode || !settings.telegram.tokenEnc) back("channelError", "Нажмите «Привязать Telegram», чтобы получить код");
-  let chatId: string | null = null;
+  if (linkCodeExpired(user.telegramLinkCodeAt)) {
+    await prisma.user.update({ where: { id: user.id }, data: { telegramLinkCode: null, telegramLinkCodeAt: null } });
+    back("channelError", `Код устарел (действует ${TELEGRAM_LINK_TTL_MINUTES} минут) — нажмите «Привязать Telegram», чтобы получить новый`);
+  }
+  let found: ReturnType<typeof findLinkChat> = null;
   try {
     const updates = await telegramCall<TelegramUpdate[]>(decryptSecret(settings.telegram.tokenEnc!), "getUpdates", { allowed_updates: ["message"], limit: 100 });
-    chatId = findChatByCode(updates, user.telegramLinkCode!);
+    found = findLinkChat(updates, user.telegramLinkCode!);
   } catch (error) {
     back("channelError", error instanceof Error ? error.message : String(error));
   }
-  if (!chatId) back("channelError", `Бот ещё не получил код ${user.telegramLinkCode} — отправьте его боту и нажмите «Проверить» ещё раз`);
-  await prisma.user.update({ where: { id: user.id }, data: { telegramChatId: chatId, telegramLinkCode: null, notifyTelegram: true } });
-  await logAudit({ userId: user.id, entityType: "user", entityId: user.id, action: "telegram_link", after: { linked: true } as never });
-  back("channelNotice", "Telegram привязан — уведомления будут приходить и туда");
+  if (!found) back("channelError", `Бот ещё не получил код ${user.telegramLinkCode} — отправьте его боту и нажмите «Проверить» ещё раз`);
+  if (found && "conflict" in found) {
+    // The code came from more than one chat: someone else saw it. Nothing is linked; a new code is needed.
+    await prisma.user.update({ where: { id: user.id }, data: { telegramLinkCode: null, telegramLinkCodeAt: null } });
+    back("channelError", "Код прислали боту из нескольких чатов — привязка отменена. Получите новый код и отправьте его только из своего Telegram");
+  }
+  const chat = found as { id: string; label: string | null };
+  await prisma.user.update({ where: { id: user.id }, data: { telegramChatId: chat.id, telegramLinkCode: null, telegramLinkCodeAt: null, notifyTelegram: true } });
+  await logAudit({ userId: user.id, entityType: "user", entityId: user.id, action: "telegram_link", after: { linked: true, chat: chat.label } as never });
+  back("channelNotice", `Telegram привязан${chat.label ? ` — чат ${chat.label}` : ""}. Если это не ваш чат, нажмите «Отвязать Telegram»`);
 }
 
 export async function unlinkTelegramAction() {

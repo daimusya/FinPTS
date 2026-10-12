@@ -5,6 +5,8 @@ import {
   DEFAULT_SETTINGS,
   deliveryChannels,
   findChatByCode,
+  findLinkChat,
+  linkCodeExpired,
   makeLinkCode,
   normalizeAppUrl,
   readSettings,
@@ -99,6 +101,24 @@ describe("Telegram linking", () => {
     ];
     expect(findChatByCode(updates, "K7M2QP")).toBe("777");
     expect(findChatByCode(updates, "ZZZZZZ")).toBeNull();
+  });
+
+  it("names the linked chat, refuses a code sent from two chats, expires codes", () => {
+    expect(findLinkChat([{ message: { text: "K7M2QP", chat: { id: 5, username: "ivan" } } }], "K7M2QP")).toEqual({ id: "5", label: "@ivan" });
+    expect(findLinkChat([{ message: { text: "K7M2QP", chat: { id: 5, first_name: "Иван", last_name: "Петров" } } }], "K7M2QP")).toEqual({ id: "5", label: "Иван Петров" });
+    expect(
+      findLinkChat(
+        [
+          { message: { text: "K7M2QP", chat: { id: 5 } } },
+          { message: { text: "/start K7M2QP", chat: { id: 9 } } },
+        ],
+        "K7M2QP",
+      ),
+    ).toEqual({ conflict: true });
+    const issued = new Date("2026-10-12T10:00:00Z");
+    expect(linkCodeExpired(issued, new Date("2026-10-12T10:29:00Z"))).toBe(false);
+    expect(linkCodeExpired(issued, new Date("2026-10-12T10:31:00Z"))).toBe(true);
+    expect(linkCodeExpired(null)).toBe(true);
   });
 
   it("turns Bot API errors into plain messages", async () => {

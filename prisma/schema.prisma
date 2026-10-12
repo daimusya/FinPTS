@@ -34,6 +34,8 @@ model User {
   telegramChatId   String?
   /// Код привязки Telegram, который пользователь отправляет боту.
   telegramLinkCode String?
+  /// Когда выдан код привязки: код действует ограниченное время (TELEGRAM_LINK_TTL_MINUTES).
+  telegramLinkCodeAt DateTime?
 
   roles              UserRole[]
   orgAccess          UserOrganizationAccess[]

@@ -4,6 +4,7 @@
  * telegram.ts, очередь — deliver.ts.
  */
 
+import { randomInt } from "node:crypto";
 import { isInternalPath } from "@/lib/internal-path";
 
 export type SmtpSecurity = "ssl" | "starttls" | "none";
@@ -150,16 +151,43 @@ export function stateAfterAttempt(attempts: number, allSent: boolean): "sent" | 
 }
 
 /** Код привязки Telegram: 6 знаков без похожих букв и цифр. */
-export function makeLinkCode(random: () => number = Math.random): string {
+/** Код привязки Telegram: криптографически случайный (random — только для тестов). */
+export function makeLinkCode(random?: () => number): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from({ length: 6 }, () => alphabet[Math.floor(random() * alphabet.length)]).join("");
+  return Array.from({ length: 6 }, () => alphabet[random ? Math.floor(random() * alphabet.length) : randomInt(alphabet.length)]).join("");
+}
+
+/** Сколько минут действует код привязки: дольше незачем, а увиденный кем-то старый код не должен сработать. */
+export const TELEGRAM_LINK_TTL_MINUTES = 30;
+
+export function linkCodeExpired(issuedAt: Date | null, now: Date = new Date()): boolean {
+  return !issuedAt || now.getTime() - issuedAt.getTime() > TELEGRAM_LINK_TTL_MINUTES * 60_000;
+}
+
+/** Как назвать привязанный чат пользователю («@ivan_petrov», «Иван Петров») — чтобы чужую привязку было видно. */
+export function chatLabel(chat: { username?: string; first_name?: string; last_name?: string; title?: string } | undefined): string | null {
+  if (!chat) return null;
+  if (chat.username) return `@${chat.username}`;
+  const name = [chat.first_name, chat.last_name].filter(Boolean).join(" ") || chat.title;
+  return name || null;
 }
 
 /** Чат, из которого боту прислали код привязки (в тексте сообщения или в /start КОД). */
-export function findChatByCode(updates: Array<{ message?: { text?: string; chat?: { id?: number | string } } }>, code: string): string | null {
-  for (const u of [...updates].reverse()) {
+type LinkUpdate = { message?: { text?: string; chat?: { id?: number | string; username?: string; first_name?: string; last_name?: string; title?: string } } };
+
+export function findChatByCode(updates: LinkUpdate[], code: string): string | null {
+  const found = findLinkChat(updates, code);
+  return found && "id" in found ? found.id : null;
+}
+
+/** Чат и его название; если код прислали из нескольких чатов — привязки нет (кто-то кроме владельца видел код). */
+export function findLinkChat(updates: LinkUpdate[], code: string): { id: string; label: string | null } | { conflict: true } | null {
+  const chats = new Map<string, string | null>();
+  for (const u of updates) {
     const text = (u.message?.text ?? "").toUpperCase();
-    if (text.includes(code.toUpperCase()) && u.message?.chat?.id !== undefined) return String(u.message.chat.id);
+    if (text.includes(code.toUpperCase()) && u.message?.chat?.id !== undefined) chats.set(String(u.message.chat.id), chatLabel(u.message.chat));
   }
-  return null;
+  if (chats.size > 1) return { conflict: true };
+  const [first] = chats.entries();
+  return first ? { id: first[0], label: first[1] } : null;
 }
