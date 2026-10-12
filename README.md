@@ -61,16 +61,23 @@
 Порядок:
 
 ```bash
-export AUTH_SECRET=$(openssl rand -base64 32)
+export AUTH_SECRET=$(openssl rand -base64 48)
+# пароль базы — только буквы и цифры: он входит в адрес подключения
+export POSTGRES_PASSWORD=$(openssl rand -hex 24)
 docker compose up -d postgres
 # примените миграции и заполните справочники с хоста, указав на
 # опубликованный порт контейнера (localhost:5432) — сознательно не
 # выполняется автоматически при старте контейнера приложения, см. раздел
 # «Правила выполнения задачи», п.8 ТЗ
-DATABASE_URL="postgresql://promtehnosfera:promtehnosfera@localhost:5432/promtehnosfera" npm run db:migrate
-DATABASE_URL="postgresql://promtehnosfera:promtehnosfera@localhost:5432/promtehnosfera" npm run db:seed
+DATABASE_URL="postgresql://promtehnosfera:$POSTGRES_PASSWORD@localhost:5432/promtehnosfera" npm run db:migrate
+DATABASE_URL="postgresql://promtehnosfera:$POSTGRES_PASSWORD@localhost:5432/promtehnosfera" npm run db:seed
 docker compose up -d app
 ```
+
+Сохраните `AUTH_SECRET` и `POSTGRES_PASSWORD` в надёжном месте (например, в файле
+`.env` рядом с `docker-compose.yml`, который compose читает сам): без пароля
+базы `docker compose` не запустится — пароля по умолчанию нет. PostgreSQL
+доступен только с самого сервера (`127.0.0.1:5432`), не с других машин сети.
 
 Обязательные переменные окружения для продакшена: `DATABASE_URL`,
 `AUTH_SECRET` (длинная случайная строка — используется и для подписи

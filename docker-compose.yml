@@ -4,10 +4,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: promtehnosfera
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-promtehnosfera}
+      # No default: a known password plus an open port would give away the whole database.
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - generate one with: openssl rand -hex 24}"
       POSTGRES_DB: promtehnosfera
     ports:
-      - "5432:5432"
+      # Only this server can reach PostgreSQL (migrations and seeding run from the host); not other machines.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,8 +25,8 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://promtehnosfera:${POSTGRES_PASSWORD:-promtehnosfera}@postgres:5432/promtehnosfera?schema=public
-      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required — generate one with: openssl rand -base64 32}
+      DATABASE_URL: postgresql://promtehnosfera:${POSTGRES_PASSWORD}@postgres:5432/promtehnosfera?schema=public
+      AUTH_SECRET: "${AUTH_SECRET:?AUTH_SECRET is required - generate one with: openssl rand -base64 48}"
       NODE_ENV: production
     ports:
       - "3000:3000"
@@ -38,7 +40,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://promtehnosfera:${POSTGRES_PASSWORD:-promtehnosfera}@postgres:5432/promtehnosfera?schema=public
+      DATABASE_URL: postgresql://promtehnosfera:${POSTGRES_PASSWORD}@postgres:5432/promtehnosfera?schema=public
       BACKUP_DIR: /backups
       BACKUP_KEEP: ${BACKUP_KEEP:-14}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
