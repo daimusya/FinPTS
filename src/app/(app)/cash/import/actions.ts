@@ -72,6 +72,9 @@ export interface ImportState {
   /** Operations identical to an earlier row of the file (no bank reference) — imported as separate ones. */
   repeatedImported?: number;
   counterpartiesCreated?: number;
+  /** Operations dated in closed months — not imported. */
+  closedPeriodRows?: number;
+  closedMonths?: string[];
   errorSamples?: string[];
   error?: string;
 }
@@ -143,17 +146,17 @@ export async function importBankStatementAction(_prev: ImportState, formData: Fo
     totalRows: rows.length,
     errorRows: errors,
   });
-  const { batchId, imported, duplicates, autoClassified, repeatedImported, counterpartiesCreated } = result;
+  const { batchId, imported, duplicates, autoClassified, repeatedImported, counterpartiesCreated, closedPeriodRows, closedMonths } = result;
 
   await logAudit({
     userId: session.userId,
     entityType: "bank_import_batch",
     entityId: batchId,
     action: "import",
-    after: { fileName, imported, duplicates, errors, autoClassified, repeatedImported, counterpartiesCreated } as never,
+    after: { fileName, imported, duplicates, errors, autoClassified, repeatedImported, counterpartiesCreated, closedPeriodRows } as never,
   });
 
   revalidatePath("/cash/transactions");
 
-  return { done: true, imported, duplicates, errors, autoClassified, repeatedImported, counterpartiesCreated, errorSamples };
+  return { done: true, imported, duplicates, errors, autoClassified, repeatedImported, counterpartiesCreated, closedPeriodRows, closedMonths, errorSamples };
 }

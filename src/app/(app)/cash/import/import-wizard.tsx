@@ -45,6 +45,13 @@ export function ImportWizard({ bankAccounts }: { bankAccounts: FieldOption[] }) 
           {importState.errors}. Автоклассифицировано по правилам: {importState.autoClassified ?? 0}.
           {importState.counterpartiesCreated ? ` Новых контрагентов по ИНН из ЕГРЮЛ/ЕГРИП: ${importState.counterpartiesCreated}.` : ""}
         </p>
+        {importState.closedPeriodRows ? (
+          <p className="form-error" style={{ marginTop: 8 }}>
+            Не загружено операций с датой в закрытом периоде: {importState.closedPeriodRows} ({importState.closedMonths?.join(", ")}).
+            Цифры закрытого месяца не меняются; если эти операции нужны — откройте период в «Администрирование → Периоды» и
+            загрузите выписку снова.
+          </p>
+        ) : null}
         {importState.repeatedImported ? (
           <p className="text-muted" style={{ marginTop: 8 }}>
             Из них {importState.repeatedImported} — повторы уже встречавшейся в файле операции (та же дата, сумма и

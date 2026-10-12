@@ -27,6 +27,10 @@ export interface StatementImportResult {
   repeatedImported: number;
   /** Контрагентов создано по ИНН из реестра (если включено автосоздание). */
   counterpartiesCreated: number;
+  /** Операций с датой в закрытом периоде — не загружены (цифры закрытого месяца не меняются). */
+  closedPeriodRows: number;
+  /** Закрытые месяцы, на которые пришлись такие операции, «ММ.ГГГГ». */
+  closedMonths: string[];
 }
 
 /**
@@ -94,6 +98,11 @@ export async function importStatementOperations(params: {
   // New INNs become counterparties from the registry when that is switched on (Integrations → INN lookup).
   const autoCreate = await isAutoCreateEnabled();
   let counterpartiesCreated = 0;
+  // Operations dated in a closed month are not loaded: the closed month's figures must not change behind its back.
+  const closedPeriods = await prisma.accountingPeriod.findMany({ where: { status: "CLOSED" }, select: { year: true, month: true } });
+  const closedKeys = new Set(closedPeriods.map((p) => `${p.year}-${p.month}`));
+  let closedPeriodRows = 0;
+  const closedMonths = new Set<string>();
   // Already imported operations and known counterparties — one query each for the whole statement, not per row.
   const alreadyImported = new Set<string>();
   const allFingerprints = fingerprints.map((f) => f.fingerprint);
@@ -110,6 +119,11 @@ export async function importStatementOperations(params: {
     const { fingerprint, occurrence } = fingerprints[i];
     if (alreadyImported.has(fingerprint)) {
       duplicates += 1;
+      continue;
+    }
+    if (closedKeys.has(`${op.date.getUTCFullYear()}-${op.date.getUTCMonth() + 1}`)) {
+      closedPeriodRows += 1;
+      closedMonths.add(`${String(op.date.getUTCMonth() + 1).padStart(2, "0")}.${op.date.getUTCFullYear()}`);
       continue;
     }
     if (occurrence > 1) repeatedImported += 1;
@@ -174,5 +188,5 @@ export async function importStatementOperations(params: {
     where: { id: batch.id },
     data: { importedRows: imported, duplicateRows: duplicates, errorRows: params.errorRows ?? 0 },
   });
-  return { batchId: batch.id, imported, duplicates, autoClassified, repeatedImported, counterpartiesCreated };
+  return { batchId: batch.id, imported, duplicates, autoClassified, repeatedImported, counterpartiesCreated, closedPeriodRows, closedMonths: [...closedMonths].sort() };
 }

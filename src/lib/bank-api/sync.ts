@@ -72,6 +72,7 @@ export async function syncConnection(connectionId: string, options: { http?: Htt
     }
     let imported = 0;
     let duplicates = 0;
+    let closedPeriodRows = 0;
     if (result.operations.length > 0) {
       const saved = await importStatementOperations({
         bankAccountId: connection.bankAccountId,
@@ -83,6 +84,7 @@ export async function syncConnection(connectionId: string, options: { http?: Htt
       });
       imported = saved.imported;
       duplicates = saved.duplicates;
+      closedPeriodRows = saved.closedPeriodRows;
       if (saved.imported > 0) {
         await logAudit({
           userId: options.userId ?? null,
@@ -95,7 +97,7 @@ export async function syncConnection(connectionId: string, options: { http?: Htt
     }
     const message = `${window.from}…${window.to}: операций в выписке ${result.operations.length}, новых ${imported}, уже были ${duplicates}${
       result.skipped ? `, пропущено неполных ${result.skipped}` : ""
-    }`;
+    }${closedPeriodRows ? `, не загружено в закрытый период ${closedPeriodRows}` : ""}`;
     await prisma.bankConnection.update({
       where: { id: connectionId },
       data: { lastStatus: "ok", lastSuccessAt: now, lastMessage: message, lastImported: imported },
