@@ -3,6 +3,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requestIsHttps } from "./request-security";
+import { usableSecret } from "./auth-secret";
 import { PERMISSIONS, type PermissionCode } from "./permissions";
 import { prisma } from "./db";
 import { getUserPermissions } from "./auth";
@@ -12,11 +13,7 @@ const COOKIE_NAME = "pts_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
 
 function getSecret() {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) {
-    throw new Error("AUTH_SECRET не задан в окружении");
-  }
-  return new TextEncoder().encode(secret);
+  return new TextEncoder().encode(usableSecret());
 }
 
 export interface SessionPayload {

@@ -6,6 +6,7 @@ import { loadBackupFreshness } from "@/lib/backup/status";
 import { accountCurrencies, amountInRub, loadRateLookup } from "@/lib/currency-rates";
 import { localDateKey } from "@/lib/payment-calendar";
 import {
+  checkAuthSecret,
   checkBackup,
   checkBankApi,
   checkDelivery,
@@ -17,6 +18,7 @@ import {
   checkUnmatched,
   type CheckResult,
 } from "./checks";
+import { secretWeakness } from "@/lib/auth-secret";
 
 const DAY = 86_400_000;
 const MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
@@ -78,6 +80,7 @@ export async function runChecks(now: Date = new Date()): Promise<CheckResult[]> 
   );
 
   return [
+    checkAuthSecret(secretWeakness(process.env.AUTH_SECRET)),
     checkDatabase(latency),
     checkBackup(backup),
     checkBankApi(

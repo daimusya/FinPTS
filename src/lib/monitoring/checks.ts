@@ -1,3 +1,4 @@
+import { isUnusableSecret, SECRET_ADVICE, secretProblemText, type SecretWeakness } from "@/lib/auth-secret";
 /**
  * Проверки мониторинга — чистые функции: на вход факты о системе, на выход
  * состояние (ok / warn / fail) и понятное сообщение. Факты собирает
@@ -130,4 +131,15 @@ export function checkDelivery(input: { failedLastDay: number; stuck: number; las
 /** Худшее состояние из проверок — общий итог. */
 export function overallStatus(checks: CheckResult[]): CheckStatus {
   return checks.some((c) => c.status === "fail") ? "fail" : checks.some((c) => c.status === "warn") ? "warn" : "ok";
+}
+
+/** AUTH_SECRET: заготовка или короткий секрет позволяют подделать вход. */
+export function checkAuthSecret(weakness: SecretWeakness | null): CheckResult {
+  const base = { key: "auth_secret", title: "Секрет подписи сеансов", link: null };
+  if (!weakness) return { ...base, status: "ok", message: "AUTH_SECRET достаточно длинный и случайный" };
+  return {
+    ...base,
+    status: isUnusableSecret(weakness) ? "fail" : "warn",
+    message: `${secretProblemText(weakness)}. ${SECRET_ADVICE}`,
+  };
 }

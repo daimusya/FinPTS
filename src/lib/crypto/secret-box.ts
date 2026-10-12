@@ -1,13 +1,10 @@
 import crypto from "node:crypto";
+import { usableSecret } from "@/lib/auth-secret";
 
 const ALGORITHM = "aes-256-gcm";
 
 function getKey(): Buffer {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) {
-    throw new Error("AUTH_SECRET не задан в окружении");
-  }
-  return crypto.createHash("sha256").update(secret).digest();
+  return crypto.createHash("sha256").update(usableSecret()).digest();
 }
 
 /**
