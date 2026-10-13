@@ -420,6 +420,8 @@ model CounterpartyBankDetail {
   /// с реквизитами основной ровно один (следит код при добавлении, смене и удалении).
   isPrimary      Boolean  @default(false)
   createdAt      DateTime @default(now())
+  /// Когда реквизиты меняли (или делали счёт основным): изменение после согласования заявки — повод сверить счёт перед оплатой.
+  updatedAt      DateTime @default(now()) @updatedAt
 
   counterparty Counterparty @relation(fields: [counterpartyId], references: [id], onDelete: Cascade)
 

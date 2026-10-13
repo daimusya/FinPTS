@@ -39,6 +39,7 @@ import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
 import { approvalSeparationProblem } from "@/lib/payment-requests/separation";
+import { payeeChangedSince } from "@/lib/payment-requests/payee-change";
 
 const STATE_LABELS: Record<TimelineState, string> = {
   approved: "Согласовано",
@@ -170,6 +171,26 @@ export default async function PaymentRequestPage({
 
   const counterpartyName = request.counterparty ? request.counterparty.shortName || request.counterparty.fullName : "—";
   const primaryAccount = request.counterparty?.bankDetails[0] ?? null;
+  // The payee's account changed after the first approval of this round: approvers saw another one — check before paying.
+  const payeeChangedAfter =
+    request.status === "PENDING_APPROVAL" || request.status === "APPROVED"
+      ? payeeChangedSince(primaryAccount?.updatedAt ?? null, request.approvals, request.round)
+      : null;
+  const payeeChange = payeeChangedAfter && primaryAccount
+    ? await (async () => {
+        const entry = await prisma.auditLog.findFirst({
+          where: { entityType: "counterparty_bank_detail", entityId: primaryAccount.id },
+          orderBy: { createdAt: "desc" },
+          include: { user: { select: { fullName: true } } },
+        });
+        const before = (entry?.beforeJson ?? null) as { account?: string; primaryId?: string } | null;
+        let previous = before?.account ?? null;
+        if (!previous && before?.primaryId) {
+          previous = (await prisma.counterpartyBankDetail.findUnique({ where: { id: before.primaryId }, select: { account: true } }))?.account ?? null;
+        }
+        return { who: entry?.user?.fullName ?? null, previous };
+      })()
+    : null;
 
   return (
     <div className="page">
@@ -192,6 +213,21 @@ export default async function PaymentRequestPage({
 
       {error ? <p className="form-error" style={{ marginBottom: 14 }}>{error}</p> : null}
       {notice ? <p className="form-success" style={{ marginBottom: 14 }}>{notice}</p> : null}
+      {payeeChangedAfter && primaryAccount ? (
+        <div className="card" style={{ borderColor: "var(--color-danger)", marginBottom: 14 }}>
+          <p style={{ margin: 0 }}>
+            <strong>Реквизиты получателя изменены после согласования.</strong> Основной счёт контрагента{" "}
+            {primaryAccount.updatedAt.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", dateStyle: "short", timeStyle: "short" })}
+            {payeeChange?.who ? ` изменил(а) ${payeeChange.who}` : " изменён"}
+            {payeeChange?.previous ? ` (был р/с ${payeeChange.previous})` : ""}, а первое согласование было{" "}
+            {payeeChangedAfter.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", dateStyle: "short", timeStyle: "short" })}.
+          </p>
+          <p className="text-muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
+            Согласующие видели другой счёт. Перед оплатой сверьте реквизиты с контрагентом по известному телефону, не по письму с новыми
+            реквизитами, — так подменяют получателя.
+          </p>
+        </div>
+      ) : null}
       {nobodyDecides ? (
         <div className="card" style={{ borderColor: "var(--color-warning)", marginBottom: 14 }}>
           <p>
