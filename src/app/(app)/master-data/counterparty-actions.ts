@@ -7,6 +7,7 @@ import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { nextPrimaryAfterRemoval, validateBankDetail, validateContact } from "@/lib/counterparties/validation";
+import { alertPayeeChanged } from "@/lib/payment-requests/payee-alert";
 
 function editPath(counterpartyId: string) {
   return `/master-data/counterparties/${counterpartyId}/edit`;
@@ -49,6 +50,7 @@ export async function addBankDetailAction(counterpartyId: string, formData: Form
   // The first account is primary automatically; a new one becomes primary only when asked.
   const existingCount = await prisma.counterpartyBankDetail.count({ where: { counterpartyId } });
   const isPrimary = existingCount === 0 || formData.get("isPrimary") === "on";
+  const previousPrimary = isPrimary ? await prisma.counterpartyBankDetail.findFirst({ where: { counterpartyId, isPrimary: true } }) : null;
   const created = await prisma.$transaction(async (db) => {
     if (isPrimary) await db.counterpartyBankDetail.updateMany({ where: { counterpartyId, isPrimary: true }, data: { isPrimary: false } });
     return db.counterpartyBankDetail.create({ data: { counterpartyId, ...value, isPrimary } });
@@ -59,8 +61,10 @@ export async function addBankDetailAction(counterpartyId: string, formData: Form
     entityType: "counterparty_bank_detail",
     entityId: created.id,
     action: "create",
+    before: previousPrimary ? ({ account: previousPrimary.account, primaryId: previousPrimary.id } as never) : undefined,
     after: created as never,
   });
+  if (previousPrimary) await alertPayeeChanged({ counterpartyId, actorId: session.userId, previousAccount: previousPrimary.account, newAccount: created.account });
 
   revalidatePath(editPath(counterpartyId));
   back(counterpartyId, "bank", "notice", isPrimary ? "Счёт добавлен и отмечен основным" : "Счёт добавлен");
@@ -89,6 +93,9 @@ export async function updateBankDetailAction(counterpartyId: string, id: string,
     before: before as never,
     after: updated as never,
   });
+  if (before!.isPrimary && (before!.account !== updated.account || before!.bik !== updated.bik)) {
+    await alertPayeeChanged({ counterpartyId, actorId: session.userId, previousAccount: before!.account, newAccount: updated.account });
+  }
 
   revalidatePath(editPath(counterpartyId));
   back(counterpartyId, "bank", "notice", "Реквизиты сохранены");
@@ -110,9 +117,10 @@ export async function setPrimaryBankDetailAction(counterpartyId: string, id: str
     entityType: "counterparty_bank_detail",
     entityId: id,
     action: "set_primary",
-    before: { primaryId: previous?.id ?? null } as never,
+    before: { primaryId: previous?.id ?? null, account: previous?.account ?? null } as never,
     after: { primaryId: id } as never,
   });
+  if (previous && previous.id !== id) await alertPayeeChanged({ counterpartyId, actorId: session.userId, previousAccount: previous.account, newAccount: target!.account });
 
   revalidatePath(editPath(counterpartyId));
   back(counterpartyId, "bank", "notice", `Основной счёт: ${target!.bankName} · ${target!.account}`);
@@ -139,6 +147,21 @@ export async function removeBankDetailAction(counterpartyId: string, id: string)
     before: before as never,
     after: nextPrimary ? ({ newPrimaryId: nextPrimary } as never) : undefined,
   });
+  // The primary removed: the heir becomes primary — recorded on the heir too, so the request card can show the old account.
+  if (before!.isPrimary) {
+    const heirDetail = nextPrimary ? (all.find((d) => d.id === nextPrimary) ?? null) : null;
+    if (heirDetail) {
+      await logAudit({
+        userId: session.userId,
+        entityType: "counterparty_bank_detail",
+        entityId: heirDetail.id,
+        action: "set_primary",
+        before: { primaryId: id, account: before!.account } as never,
+        after: { primaryId: heirDetail.id } as never,
+      });
+    }
+    await alertPayeeChanged({ counterpartyId, actorId: session.userId, previousAccount: before!.account, newAccount: heirDetail?.account ?? null });
+  }
 
   revalidatePath(editPath(counterpartyId));
   const heir = nextPrimary ? all.find((d) => d.id === nextPrimary) : null;
