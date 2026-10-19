@@ -6,8 +6,9 @@
  *   npm run reset-password -- адрес@почты
  *
  * Печатает временный пароль только в этот терминал; при первом входе система
- * попросит заменить его своим. Все прежние сеансы пользователя завершаются,
- * в журнале остаётся запись reset_password (без пароля).
+ * попросит заменить его своим. Блокировка входа после неудачных попыток
+ * снимается, все прежние сеансы пользователя завершаются, в журнале остаётся
+ * запись reset_password (без пароля).
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -24,6 +25,7 @@ async function main() {
   const { prisma } = await import("@/lib/db");
   const { hashPassword } = await import("@/lib/auth");
   const { logAudit } = await import("@/lib/audit");
+  const { clearLoginFailures } = await import("@/lib/login-throttle");
   try {
     const user = await prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } } });
     if (!user) {
@@ -42,6 +44,8 @@ async function main() {
       where: { id: user.id },
       data: { passwordHash: await hashPassword(tempPassword), mustChangePassword: true, passwordChangedAt: new Date() },
     });
+    // Guessing has usually locked the sign-in: the temporary password must work right away.
+    await clearLoginFailures(user.email.trim().toLowerCase());
     await logAudit({ userId: null, entityType: "user", entityId: user.id, action: "reset_password", after: { via: "console" } as never });
     console.log(`Пароль пользователя ${user.email} сброшен.`);
     console.log(`Временный пароль: ${tempPassword}`);

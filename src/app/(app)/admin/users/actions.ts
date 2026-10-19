@@ -11,6 +11,7 @@ import { setFlash } from "@/lib/flash";
 import { userChangeProblem } from "@/lib/user-admin-guard";
 import { loadAdminState } from "@/lib/user-admin-state";
 import { normalizeUserEmail } from "@/lib/user-email";
+import { clearLoginFailures } from "@/lib/login-throttle";
 import { isUniqueViolation } from "@/lib/dictionaries/errors";
 
 const EMAIL_TAKEN = "Пользователь с таким email уже существует";
@@ -152,6 +153,8 @@ export async function resetPasswordAction(userId: string) {
   const passwordHash = await hashPassword(tempPassword);
   // A reset ends the user's current sessions and asks for an own password at the next sign-in.
   const user = await prisma.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: true, passwordChangedAt: new Date() } });
+  // Whoever forgot the password has usually locked the sign-in by guessing: the new one must work right away.
+  await clearLoginFailures(user.email.trim().toLowerCase());
 
   await logAudit({
     userId: session.userId,
