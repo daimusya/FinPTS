@@ -16,6 +16,7 @@ import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
 import { findPossibleDuplicates } from "@/lib/payment-requests/find-duplicates";
+import { payeeChangedSince } from "@/lib/payment-requests/payee-change";
 
 /** «В работе» — всё, с чем ещё что-то делают (отклонённую автор может доработать); «Завершённые» — оплаченные и отменённые. */
 const IN_WORK: PaymentRequestStatus[] = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "RETURNED", "REJECTED"];
@@ -55,7 +56,7 @@ export default async function PaymentRequestsPage({
       ...(window ? { skip: window.skip, take: window.take } : {}),
       include: {
         organization: true,
-        counterparty: true,
+        counterparty: { include: { bankDetails: { where: { isPrimary: true }, take: 1, select: { updatedAt: true } } } },
         cashFlowArticle: true,
         createdBy: true,
         route: { include: { steps: { include: { role: true } } } },
@@ -79,6 +80,25 @@ export default async function PaymentRequestsPage({
   ]);
   // The same invoice entered twice: flagged where a decision or payment is still ahead.
   const duplicates = showDone ? null : await findPossibleDuplicates(requests, paymentRequestScopeWhere(scope));
+  // The payee's account changed after approval: approvers saw another one — also shown here, where one click approves or pays.
+  const decidedRequests = requests.filter((r) => r.status === "PENDING_APPROVAL" || r.status === "APPROVED");
+  const approvalRows = decidedRequests.length
+    ? await prisma.paymentRequestApproval.findMany({
+        where: { paymentRequestId: { in: decidedRequests.map((r) => r.id) }, decision: "approved" },
+        select: { paymentRequestId: true, decision: true, round: true, decidedAt: true },
+      })
+    : [];
+  const payeeChanged = new Set(
+    decidedRequests
+      .filter((r) =>
+        payeeChangedSince(
+          r.counterparty?.bankDetails[0]?.updatedAt ?? null,
+          approvalRows.filter((a) => a.paymentRequestId === r.id),
+          r.round,
+        ),
+      )
+      .map((r) => r.id),
+  );
   // Whom I stand in for today: their step roles count as mine, and their right to approve single-step requests.
   const activeDelegations = myDelegations.filter((d) => isDelegationActive(d, today));
   const myRoleIds = new Set([...myRoleRows.map((r) => r.roleId), ...activeDelegations.flatMap((d) => d.fromUser.roles.map((r) => r.roleId))]);
@@ -186,6 +206,11 @@ export default async function PaymentRequestsPage({
                     ? canApprove || approvesByDelegation
                     : isAdmin || (requiredRoleId !== null && myRoleIds.has(requiredRoleId));
               const currentStepRoleName = req.route?.steps.find((s) => s.stepOrder === req.currentStep)?.role.name;
+              const warning = [
+                payeeChanged.has(req.id) ? "основной счёт контрагента изменён после согласования" : null,
+                duplicates?.has(req.id) ? "тому же контрагенту на ту же сумму есть другая заявка (возможный дубль)" : null,
+              ].filter(Boolean);
+              const confirmText = (what: string) => `Внимание: ${warning.join("; ")}. Всё равно ${what}?`;
 
               return (
                 <tr key={req.id}>
@@ -222,6 +247,17 @@ export default async function PaymentRequestsPage({
                   </td>
                   <td>
                     <span className={`badge ${STATUS_BADGE[req.status]}`}>{STATUS_LABELS[req.status]}</span>
+                    {payeeChanged.has(req.id) ? (
+                      <div style={{ marginTop: 4 }}>
+                        <Link
+                          href={`/payment-requests/${req.id}`}
+                          className="badge badge-danger"
+                          title="Основной счёт контрагента изменён после согласования — перед оплатой сверьте реквизиты"
+                        >
+                          реквизиты изменены
+                        </Link>
+                      </div>
+                    ) : null}
                     {duplicates?.has(req.id) ? (
                       <div style={{ marginTop: 4 }}>
                         <Link
@@ -245,9 +281,15 @@ export default async function PaymentRequestsPage({
                         <>
                           <form action={approvePaymentRequestAction.bind(null, req.id)}>
                             <input type="hidden" name="expectedStep" value={req.currentStep} />
-                            <SubmitButton className="btn btn-primary btn-sm">
-                              Согласовать
-                            </SubmitButton>
+                            {warning.length > 0 ? (
+                              <ConfirmSubmitButton className="btn btn-primary btn-sm" message={confirmText("согласовать")}>
+                                Согласовать
+                              </ConfirmSubmitButton>
+                            ) : (
+                              <SubmitButton className="btn btn-primary btn-sm">
+                                Согласовать
+                              </SubmitButton>
+                            )}
                           </form>
                           {/* Rejection and return for rework need a reason, so they are done on the request page. */}
                           <Link href={`/payment-requests/${req.id}#decision`} className="btn btn-danger btn-sm">
@@ -257,9 +299,15 @@ export default async function PaymentRequestsPage({
                       ) : null}
                       {canPay && req.status === "APPROVED" ? (
                         <form action={markPaymentRequestPaidAction.bind(null, req.id)}>
-                          <SubmitButton className="btn btn-secondary btn-sm">
-                            Отметить оплаченной
-                          </SubmitButton>
+                          {warning.length > 0 ? (
+                            <ConfirmSubmitButton className="btn btn-secondary btn-sm" message={confirmText("отметить оплаченной")}>
+                              Отметить оплаченной
+                            </ConfirmSubmitButton>
+                          ) : (
+                            <SubmitButton className="btn btn-secondary btn-sm">
+                              Отметить оплаченной
+                            </SubmitButton>
+                          )}
                         </form>
                       ) : null}
                       {canApprove && (req.status === "PENDING_APPROVAL" || req.status === "APPROVED" || req.status === "RETURNED") ? (
