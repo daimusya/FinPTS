@@ -15,6 +15,7 @@ import { textSearchWhere } from "@/lib/text-search";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
+import { findPossibleDuplicates } from "@/lib/payment-requests/find-duplicates";
 
 /** «В работе» — всё, с чем ещё что-то делают (отклонённую автор может доработать); «Завершённые» — оплаченные и отменённые. */
 const IN_WORK: PaymentRequestStatus[] = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "RETURNED", "REJECTED"];
@@ -76,6 +77,8 @@ export default async function PaymentRequestsPage({
       },
     }),
   ]);
+  // The same invoice entered twice: flagged where a decision or payment is still ahead.
+  const duplicates = showDone ? null : await findPossibleDuplicates(requests, paymentRequestScopeWhere(scope));
   // Whom I stand in for today: their step roles count as mine, and their right to approve single-step requests.
   const activeDelegations = myDelegations.filter((d) => isDelegationActive(d, today));
   const myRoleIds = new Set([...myRoleRows.map((r) => r.roleId), ...activeDelegations.flatMap((d) => d.fromUser.roles.map((r) => r.roleId))]);
@@ -219,6 +222,17 @@ export default async function PaymentRequestsPage({
                   </td>
                   <td>
                     <span className={`badge ${STATUS_BADGE[req.status]}`}>{STATUS_LABELS[req.status]}</span>
+                    {duplicates?.has(req.id) ? (
+                      <div style={{ marginTop: 4 }}>
+                        <Link
+                          href={`/payment-requests/${req.id}#duplicates`}
+                          className="badge badge-warning"
+                          title="Тому же контрагенту на ту же сумму есть другая заявка со сроком в пределах двух недель — проверьте, не один ли это счёт"
+                        >
+                          возможный дубль
+                        </Link>
+                      </div>
+                    ) : null}
                     {req.approvals[0]?.comment ? (
                       <div className="text-muted" style={{ fontSize: 12, marginTop: 4, maxWidth: 220 }} title={req.approvals[0].comment}>
                         «{req.approvals[0].comment.length > 60 ? `${req.approvals[0].comment.slice(0, 60)}…` : req.approvals[0].comment}»

@@ -36,6 +36,7 @@ import { currentDeciders, notifyAuthor, notifyDeciders } from "@/lib/payment-req
 import { parseFormAmount, parseFormDate } from "@/lib/form-values";
 import { yearProblem } from "@/lib/form-values";
 import { approvalSeparationProblem } from "@/lib/payment-requests/separation";
+import { findPossibleDuplicates } from "@/lib/payment-requests/find-duplicates";
 
 async function loadActiveRoutes(): Promise<ApprovalRouteCandidate[]> {
   const routes = await prisma.paymentApprovalRoute.findMany({
@@ -123,7 +124,9 @@ export async function createPaymentRequestAction(formData: FormData) {
   await notifyDeciders(created.id, session.userId);
 
   revalidatePath("/payment-requests");
-  redirect("/payment-requests");
+  // A possible duplicate: the author lands on the request, where the other one is shown.
+  const duplicates = await findPossibleDuplicates([created]);
+  redirect(duplicates.has(created.id) ? `/payment-requests/${created.id}#duplicates` : "/payment-requests");
 }
 
 const TRANSITION_PERMISSION: Record<string, (typeof PERMISSIONS)[keyof typeof PERMISSIONS]> = {

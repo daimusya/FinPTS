@@ -40,6 +40,8 @@ import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
 import { approvalSeparationProblem } from "@/lib/payment-requests/separation";
 import { payeeChangedSince } from "@/lib/payment-requests/payee-change";
+import { findPossibleDuplicates } from "@/lib/payment-requests/find-duplicates";
+import { getAccessScope, paymentRequestScopeWhere } from "@/lib/access-scope";
 
 const STATE_LABELS: Record<TimelineState, string> = {
   approved: "Согласовано",
@@ -176,6 +178,8 @@ export default async function PaymentRequestPage({
     request.status === "PENDING_APPROVAL" || request.status === "APPROVED"
       ? payeeChangedSince(primaryAccount?.updatedAt ?? null, request.approvals, request.round)
       : null;
+  // The same invoice entered twice — before it is paid twice.
+  const duplicates = (await findPossibleDuplicates([request], paymentRequestScopeWhere(await getAccessScope(session)))).get(request.id) ?? [];
   const payeeChange = payeeChangedAfter && primaryAccount
     ? await (async () => {
         const entry = await prisma.auditLog.findFirst({
@@ -225,6 +229,26 @@ export default async function PaymentRequestPage({
           <p className="text-muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
             Согласующие видели другой счёт. Перед оплатой сверьте реквизиты с контрагентом по известному телефону, не по письму с новыми
             реквизитами, — так подменяют получателя.
+          </p>
+        </div>
+      ) : null}
+      {duplicates.length > 0 ? (
+        <div id="duplicates" className="card" style={{ borderColor: "var(--color-warning)", marginBottom: 14 }}>
+          <p style={{ margin: 0 }}>
+            <strong>Возможный дубль.</strong> Контрагенту «{counterpartyName}» на ту же сумму {money(request.amount)} есть{" "}
+            {duplicates.length === 1 ? "другая заявка" : `другие заявки (${duplicates.length})`} со сроком оплаты в пределах двух недель:
+          </p>
+          <ul style={{ margin: "6px 0 0", paddingLeft: 20 }}>
+            {duplicates.map((d) => (
+              <li key={d.id}>
+                <Link href={`/payment-requests/${d.id}`}>срок {d.dueDate.toLocaleDateString("ru-RU", { timeZone: "UTC" })}</Link> ·{" "}
+                {PAYMENT_REQUEST_STATUS_LABELS[d.status]} · создал(а) {d.createdBy.fullName}{" "}
+                {d.createdAt.toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow" })}
+              </li>
+            ))}
+          </ul>
+          <p className="text-muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
+            Проверьте, не один ли это счёт, заведённый дважды. Если это повтор — заявку нужно отменить, а не согласовывать и не оплачивать.
           </p>
         </div>
       ) : null}
