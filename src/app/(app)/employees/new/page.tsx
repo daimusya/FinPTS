@@ -115,8 +115,8 @@ export default async function NewEmployeePage({
               </select>
             </label>
             <label className="field">
-              <span>Банковские реквизиты</span>
-              <input type="text" name="bankAccount" />
+              <span>Счёт или карта для зарплаты</span>
+              <input type="text" name="bankAccount" inputMode="numeric" placeholder="20 цифр счёта или 16–19 цифр карты" />
             </label>
           </div>
 

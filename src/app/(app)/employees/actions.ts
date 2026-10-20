@@ -14,6 +14,8 @@ import { yearProblem } from "@/lib/form-values";
 import { allocationProblem, salaryChangeProblem, terminationProblem, transferProblem } from "@/lib/payroll/employment";
 import { assertPeriodOpenForDate } from "@/lib/period";
 import { STALE_EDIT, VERSION_FIELD, editVersion, versionMatches } from "@/lib/edit-version";
+import { parsePayAccount } from "@/lib/payroll/pay-account";
+import { alertPayAccountChanged } from "@/lib/payroll/pay-account-alert";
 
 /** Страховой стаж до приёма: целое число месяцев 0–720 или пусто. */
 function parsePriorMonths(raw: unknown): { value: number | null } | { error: string } {
@@ -50,6 +52,8 @@ export async function hireEmployeeAction(formData: FormData) {
   if ("error" in hireInput) redirect(`/employees/new?error=${encodeURIComponent(hireInput.error)}`);
   const hireSalary = salaryRaw.trim() ? parseFormAmount(salaryRaw, "Оклад") : null;
   if (hireSalary && "error" in hireSalary) redirect(`/employees/new?error=${encodeURIComponent(hireSalary.error)}`);
+  const payAccount = parsePayAccount(bankAccount);
+  if ("error" in payAccount) redirect(`/employees/new?error=${encodeURIComponent(payAccount.error)}`);
 
   const employee = await prisma.employee.create({
     data: {
@@ -60,7 +64,7 @@ export async function hireEmployeeAction(formData: FormData) {
       workScheduleId,
       hireDate: (hireInput as { date: Date }).date,
       paymentMethod: paymentMethod as never,
-      bankAccount,
+      bankAccount: (payAccount as { value: string | null }).value,
       salary: hireSalary && "value" in hireSalary ? hireSalary.value : null,
       personnelNumber,
       priorInsuranceMonths: "error" in prior ? null : prior.value,
@@ -107,6 +111,9 @@ export async function updateEmployeeAction(id: string, formData: FormData) {
   const personnelNumber = String(formData.get("personnelNumber") ?? "").trim() || null;
   const prior = parsePriorMonths(formData.get("priorInsuranceMonths"));
   if ("error" in prior) redirect(`/employees/${id}/edit?error=${encodeURIComponent(prior.error)}`);
+  const payAccount = parsePayAccount(bankAccount);
+  if ("error" in payAccount) redirect(`/employees/${id}/edit?error=${encodeURIComponent(payAccount.error)}`);
+  const newPayAccount = (payAccount as { value: string | null }).value;
 
   const salaryInput = salaryRaw.trim() ? parseFormAmount(salaryRaw, "Оклад") : null;
   if (salaryInput && "error" in salaryInput) redirect(`/employees/${id}/edit?error=${encodeURIComponent(salaryInput.error)}`);
@@ -129,7 +136,7 @@ export async function updateEmployeeAction(id: string, formData: FormData) {
       data: {
         workScheduleId,
         paymentMethod: paymentMethod as never,
-        bankAccount,
+        bankAccount: newPayAccount,
         salary: salaryInput && "value" in salaryInput ? salaryInput.value : null,
         personnelNumber,
         priorInsuranceMonths: (prior as { value: number | null }).value,
@@ -159,6 +166,18 @@ export async function updateEmployeeAction(id: string, formData: FormData) {
     before: before as never,
     after: updated as never,
   });
+  // The same digits typed with spaces are not a change.
+  if ((before.bankAccount ?? "").replace(/[\s-]/g, "") !== (newPayAccount ?? "")) {
+    await alertPayAccountChanged({
+      employeeId: id,
+      employeeName: before.fullName,
+      employeeUserId: before.userId,
+      organizationId: before.organizationId,
+      actorId: session.userId,
+      previous: before.bankAccount,
+      next: newPayAccount,
+    });
+  }
 
   revalidatePath("/employees");
   revalidatePath(`/employees/${id}`);
