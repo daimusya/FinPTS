@@ -36,6 +36,7 @@ export default async function PaymentRequestsPage({
   const canPay = hasPermission(session, PERMISSIONS.CASH_MANAGE);
   const canCreate = hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_CREATE);
   const isAdmin = hasPermission(session, PERMISSIONS.ADMIN_FULL);
+  const canSeeStatement = hasPermission(session, PERMISSIONS.CASH_VIEW) || canPay;
 
   const today = new Date();
   const scope = await getAccessScope(session);
@@ -131,6 +132,11 @@ export default async function PaymentRequestsPage({
           {canApprove ? (
             <Link href="/admin/payment-approval-routes" className="btn btn-secondary">
               Маршруты согласования
+            </Link>
+          ) : null}
+          {canSeeStatement ? (
+            <Link href="/payment-requests/statement-check" className="btn btn-secondary" title="Платежи по выписке без заявки или до согласования">
+              Сверка с выпиской
             </Link>
           ) : null}
           {canCreate ? (
