@@ -2,7 +2,8 @@ import { rateAt, type TaxRateRecord } from "@/lib/organizations/taxes";
 import { prisma } from "@/lib/db";
 import { toDecimal, sumMoney } from "@/lib/money";
 import Decimal from "decimal.js";
-import { PayrollRunKind } from "@prisma/client";
+import { PayrollRunKind, type Prisma } from "@prisma/client";
+import { RunNotEditableError, withEditableRun } from "./run-lock";
 import {
   ABSENCE_DAY_TYPES,
   WORK_DAY_TYPES,
@@ -161,8 +162,6 @@ export async function calculatePayrollRun(runId: string, userId: string) {
     return type;
   };
 
-  await prisma.payrollLine.deleteMany({ where: { payrollRunId: runId } });
-
   let advancesPaidByEmployee = new Map<string, Decimal>();
   if (run.kind === PayrollRunKind.FINAL) {
     // Окончательный расчёт 10 числа закрывает работу ЗА ПРЕДЫДУЩИЙ месяц,
@@ -199,7 +198,11 @@ export async function calculatePayrollRun(runId: string, userId: string) {
     }
   }
 
-  let linesCreated = 0;
+  // Lines are collected first and written at the end in one locked transaction (see withEditableRun).
+  const pending: Array<{
+    line: Prisma.PayrollLineUncheckedCreateInput;
+    splits: Array<{ departmentId: string | null; projectId: string | null; sharePct: Decimal; amount: Decimal }>;
+  }> = [];
   const createLine = async (
     employee: (typeof employees)[number],
     accrualType: { id: string; subjectToNdfl: boolean; subjectToInsurance: boolean },
@@ -207,8 +210,10 @@ export async function calculatePayrollRun(runId: string, userId: string) {
     comment: string,
   ) => {
     const { ndflAmount, insuranceAmount } = computeTaxes(amount, accrualType.subjectToNdfl, accrualType.subjectToInsurance, rates);
-    const line = await prisma.payrollLine.create({
-      data: {
+    const shares = employee.projectAlloc.map((a) => ({ projectId: a.projectId, sharePct: toDecimal(a.sharePct) }));
+    const splits = splitByProjectShares(amount, shares, employee.departmentId);
+    pending.push({
+      line: {
         payrollRunId: runId,
         employeeId: employee.id,
         accrualTypeId: accrualType.id,
@@ -218,19 +223,8 @@ export async function calculatePayrollRun(runId: string, userId: string) {
         insuranceAmount,
         comment,
       },
+      splits: splits.map((s) => ({ departmentId: s.departmentId ?? employee.departmentId, projectId: s.projectId, sharePct: s.sharePct, amount: s.amount })),
     });
-    const shares = employee.projectAlloc.map((a) => ({ projectId: a.projectId, sharePct: toDecimal(a.sharePct) }));
-    const splits = splitByProjectShares(amount, shares, employee.departmentId);
-    await prisma.payrollAllocation.createMany({
-      data: splits.map((s) => ({
-        payrollLineId: line.id,
-        departmentId: s.departmentId ?? employee.departmentId,
-        projectId: s.projectId,
-        sharePct: s.sharePct,
-        amount: s.amount,
-      })),
-    });
-    linesCreated += 1;
   };
 
   for (const employee of employees) {
@@ -347,9 +341,21 @@ export async function calculatePayrollRun(runId: string, userId: string) {
     }
   }
 
-  await prisma.payrollRun.update({ where: { id: runId }, data: { status: "CALCULATED" } });
+  try {
+    await withEditableRun(runId, async (tx) => {
+      await tx.payrollLine.deleteMany({ where: { payrollRunId: runId } });
+      for (const p of pending) {
+        const line = await tx.payrollLine.create({ data: p.line });
+        await tx.payrollAllocation.createMany({ data: p.splits.map((s) => ({ ...s, payrollLineId: line.id })) });
+      }
+      await tx.payrollRun.update({ where: { id: runId }, data: { status: "CALCULATED" } });
+    });
+  } catch (e) {
+    if (e instanceof RunNotEditableError) throw new PayrollCalculationError("Расчёт успели утвердить, пока шёл пересчёт, — строки не изменены");
+    throw e;
+  }
 
-  return { linesCreated };
+  return { linesCreated: pending.length };
 }
 
 /**

@@ -24,9 +24,19 @@ import {
 import { accrualDateForRun, postPayrollRunToAccrual } from "@/lib/payroll/post-to-accrual";
 import { toDecimal } from "@/lib/money";
 import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed } from "@/lib/access-guard";
-import { PayrollRunStatus } from "@prisma/client";
+import { PayrollRunStatus, type Prisma } from "@prisma/client";
 import { parseFormAmount, parseFormDate } from "@/lib/form-values";
 import { RUN_NOT_EDITABLE, runLinesEditable } from "@/lib/payroll/run-month";
+import { RunNotEditableError, withEditableRun } from "@/lib/payroll/run-lock";
+import { PAYROLL_RUN_STATUS_LABELS } from "@/lib/payroll/labels";
+
+/** Строки расчёта меняются под блокировкой расчёта; утверждённый тем временем — сообщение, а не изменение. */
+function editLines<T>(runId: string, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return withEditableRun(runId, fn).catch((e: unknown) => {
+    if (e instanceof RunNotEditableError) redirect(`/payroll/${runId}?error=${encodeURIComponent(RUN_NOT_EDITABLE)}`);
+    throw e;
+  });
+}
 
 export async function createPayrollRunAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYROLL_MANAGE);
@@ -133,11 +143,14 @@ export async function addPayrollLineAction(runId: string, formData: FormData) {
   const amount = toDecimal(amountRaw);
   const { ndflAmount, insuranceAmount } = computeTaxes(amount, accrualType.subjectToNdfl, accrualType.subjectToInsurance, rates);
 
-  const line = await prisma.payrollLine.create({
-    data: { payrollRunId: runId, employeeId, accrualTypeId, departmentId, projectId, amount, ndflAmount, insuranceAmount },
-  });
-  await prisma.payrollAllocation.create({
-    data: { payrollLineId: line.id, departmentId, projectId, sharePct: 100, amount },
+  const line = await editLines(runId, async (tx) => {
+    const created = await tx.payrollLine.create({
+      data: { payrollRunId: runId, employeeId, accrualTypeId, departmentId, projectId, amount, ndflAmount, insuranceAmount },
+    });
+    await tx.payrollAllocation.create({
+      data: { payrollLineId: created.id, departmentId, projectId, sharePct: 100, amount },
+    });
+    return created;
   });
 
   await logAudit({
@@ -196,7 +209,7 @@ export async function addAverageEarningsLineAction(runId: string, formData: Form
     result.employee.departmentId,
   );
 
-  const line = await prisma.$transaction(async (tx) => {
+  const line = await editLines(runId, async (tx) => {
     const created = await tx.payrollLine.create({
       data: {
         payrollRunId: runId,
@@ -296,7 +309,7 @@ export async function removePayrollLineAction(runId: string, lineId: string) {
   await assertPeriodOpenForDate(line!.payrollRun.payoutDate).catch((e) => redirect(`/payroll/${runId}?error=${encodeURIComponent((e as Error).message)}`));
   const { payrollRun: _run, ...deleted } = line!;
   void _run;
-  await prisma.payrollLine.delete({ where: { id: lineId } });
+  await editLines(runId, (tx) => tx.payrollLine.delete({ where: { id: lineId } }));
 
   await logAudit({
     userId: session.userId,
@@ -311,10 +324,13 @@ export async function removePayrollLineAction(runId: string, lineId: string) {
 
 async function transitionRun(id: string, from: PayrollRunStatus[], to: PayrollRunStatus, action: string, userId: string) {
   const run = await prisma.payrollRun.findUniqueOrThrow({ where: { id } });
-  if (!from.includes(run.status)) {
-    redirect(`/payroll/${id}?error=${encodeURIComponent(`Действие недоступно для статуса «${run.status}»`)}`);
-  }
-  const updated = await prisma.payrollRun.update({ where: { id }, data: { status: to } });
+  const notNow = (status: PayrollRunStatus): never =>
+    redirect(`/payroll/${id}?error=${encodeURIComponent(`Действие недоступно: расчёт в статусе «${PAYROLL_RUN_STATUS_LABELS[status]}»`)}`);
+  if (!from.includes(run.status)) notNow(run.status);
+  // Conditional: it waits for a recalculation in progress (the run row is locked) and does nothing twice.
+  const changed = await prisma.payrollRun.updateMany({ where: { id, status: { in: from } }, data: { status: to } });
+  if (changed.count === 0) notNow((await prisma.payrollRun.findUniqueOrThrow({ where: { id } })).status);
+  const updated = await prisma.payrollRun.findUniqueOrThrow({ where: { id } });
   await logAudit({ userId, entityType: "payroll_run", entityId: id, action, before: run as never, after: updated as never });
   revalidatePath(`/payroll/${id}`);
   revalidatePath("/payroll");
