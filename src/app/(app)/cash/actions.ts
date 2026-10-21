@@ -25,6 +25,7 @@ import { allocationTransactionSide, planAllocation, type AllocationAmounts } fro
 import { normalizeCurrency } from "@/lib/currency";
 import { loadRateLookup } from "@/lib/currency-rates";
 import { checkAllocation } from "@/lib/cash/allocation";
+import { createAllocationLocked } from "@/lib/cash/allocate-locked";
 import { ORGANIZATION_NOT_ALLOWED, accountAllowed } from "@/lib/access-guard";
 import crypto from "node:crypto";
 import { parseFormAmount, parseFormDate } from "@/lib/form-values";
@@ -570,15 +571,16 @@ export async function allocatePaymentAction(transactionId: string, formData: For
   if ("error" in planned) redirect(`/cash/transactions/${transactionId}?error=${encodeURIComponent(planned.error)}`);
   const amounts = planned as AllocationAmounts;
 
-  const allocation = await prisma.paymentAllocation.create({
-    data: {
-      bankTransactionId: transactionId,
-      accrualDocumentId,
-      amount: amounts.amount.toFixed(2),
-      currencyAmount: amounts.currencyAmount?.toFixed(2) ?? null,
-      transactionAmount: amounts.transactionAmount?.toFixed(2) ?? null,
-    },
+  // The remainder is checked again under a lock on the operation (two allocations at once must not exceed it).
+  const saved = await createAllocationLocked({
+    transaction,
+    accrualDocumentId,
+    documentDirection: document!.direction,
+    entered: amountRaw,
+    currency: transactionCurrency,
+    amounts,
   });
+  const allocation = saved.ok ? saved.created : back(saved.problem);
 
   await Promise.all([
     recomputeAccrualDocumentStatus(accrualDocumentId),
