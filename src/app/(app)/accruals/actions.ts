@@ -182,7 +182,12 @@ export async function updateAccrualDocumentAction(id: string, formData: FormData
     redirect(`/accruals/${id}/edit?error=${encodeURIComponent((error as Error).message)}`);
   }
 
+  // Under a lock, re-checked: posted (or changed by someone else) meanwhile — the draft is not overwritten.
   const updated = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "accrual_documents" WHERE "id" = ${id} FOR UPDATE`;
+    const current = await tx.accrualDocument.findUniqueOrThrow({ where: { id } });
+    if (current.status !== AccrualDocumentStatus.DRAFT) return null;
+    if (current.updatedAt.getTime() !== existing.updatedAt.getTime()) return "stale" as const;
     await tx.accrualDocumentLine.deleteMany({ where: { documentId: id } });
     return tx.accrualDocument.update({
       where: { id },
@@ -194,6 +199,8 @@ export async function updateAccrualDocumentAction(id: string, formData: FormData
       },
     });
   });
+  if (updated === null) redirect(`/accruals/${id}?error=${encodeURIComponent("Документ уже проведён или отменён — изменения не сохранены")}`);
+  if (updated === "stale") redirect(`/accruals/${id}/edit?error=${encodeURIComponent(STALE_EDIT)}`);
 
   await recomputeAccrualDocumentStatus(id);
 
@@ -226,10 +233,10 @@ export async function postAccrualDocumentAction(id: string) {
     redirect(`/accruals/${id}?error=${encodeURIComponent((e as Error).message)}`);
   }
 
-  const updated = await prisma.accrualDocument.update({
-    where: { id },
-    data: { status: AccrualDocumentStatus.POSTED },
-  });
+  // Conditional: a second click (another tab, another user) does not post — and queue its results — twice.
+  const posted = await prisma.accrualDocument.updateMany({ where: { id, status: AccrualDocumentStatus.DRAFT }, data: { status: AccrualDocumentStatus.POSTED } });
+  if (posted.count === 0) redirect(`/accruals/${id}?error=${encodeURIComponent("Документ уже проведён или отменён — обновите страницу")}`);
+  const updated = await prisma.accrualDocument.findUniqueOrThrow({ where: { id } });
   await enqueueProjectResultsForDocument(id);
 
   await logAudit({
@@ -265,10 +272,21 @@ export async function cancelAccrualDocumentAction(id: string) {
     redirect(`/accruals/${id}?error=${encodeURIComponent((e as Error).message)}`);
   }
 
-  const updated = await prisma.accrualDocument.update({
-    where: { id },
-    data: { status: AccrualDocumentStatus.CANCELLED },
+  // Under a lock on the document: a payment allocated to it meanwhile (that takes the same lock) is seen here,
+  // so a document with an active payment is never cancelled; a second click does nothing twice.
+  const problem = await prisma.$transaction(async (db) => {
+    await db.$queryRaw`SELECT "id" FROM "accrual_documents" WHERE "id" = ${id} FOR UPDATE`;
+    if ((await db.paymentAllocation.count({ where: { accrualDocumentId: id, cancelledAt: null } })) > 0) {
+      return "Нельзя отменить документ с активными сопоставлениями оплат — сначала отмените сопоставления";
+    }
+    const cancelled = await db.accrualDocument.updateMany({
+      where: { id, status: { not: AccrualDocumentStatus.CANCELLED } },
+      data: { status: AccrualDocumentStatus.CANCELLED },
+    });
+    return cancelled.count === 0 ? "Документ уже отменён" : null;
   });
+  if (problem) redirect(`/accruals/${id}?error=${encodeURIComponent(problem)}`);
+  const updated = await prisma.accrualDocument.findUniqueOrThrow({ where: { id } });
   await enqueueProjectResultsForDocument(id);
 
   await logAudit({

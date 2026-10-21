@@ -19,7 +19,9 @@ export async function createAllocationLocked(input: {
   amounts: AllocationAmounts;
 }) {
   return prisma.$transaction(async (db) => {
+    // The operation, then the document (cancelling a document takes the same lock): one is never cancelled under a payment.
     await db.$queryRaw`SELECT "id" FROM "bank_transactions" WHERE "id" = ${input.transaction.id} FOR UPDATE`;
+    await db.$queryRaw`SELECT "id" FROM "accrual_documents" WHERE "id" = ${input.accrualDocumentId} FOR UPDATE`;
     const [fresh, document] = await Promise.all([
       db.paymentAllocation.findMany({ where: { bankTransactionId: input.transaction.id, cancelledAt: null } }),
       db.accrualDocument.findUniqueOrThrow({ where: { id: input.accrualDocumentId }, select: { status: true } }),
