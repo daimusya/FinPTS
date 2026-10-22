@@ -14,6 +14,8 @@ export default async function PaymentApprovalRoutesPage() {
     );
   }
 
+  // Approvers see the routes; only an administrator changes them (who decides must not rewrite who decides).
+  const canEdit = hasPermission(session, PERMISSIONS.ADMIN_FULL);
   const routes = await prisma.paymentApprovalRoute.findMany({
     orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
     include: { steps: { include: { role: true }, orderBy: { stepOrder: "asc" } }, organization: true },
@@ -31,9 +33,11 @@ export default async function PaymentApprovalRoutesPage() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <Link href="/admin/payment-approval-routes/new" className="btn btn-primary">
-            Новый маршрут
-          </Link>
+          {canEdit ? (
+            <Link href="/admin/payment-approval-routes/new" className="btn btn-primary">
+              Новый маршрут
+            </Link>
+          ) : null}
           <Link href="/payment-requests" className="btn btn-secondary">
             К заявкам
           </Link>
@@ -70,9 +74,11 @@ export default async function PaymentApprovalRoutesPage() {
                     </span>
                   </td>
                   <td>
-                    <Link href={`/admin/payment-approval-routes/${route.id}/edit`} className="btn btn-ghost btn-sm">
-                      Изменить
-                    </Link>
+                    {canEdit ? (
+                      <Link href={`/admin/payment-approval-routes/${route.id}/edit`} className="btn btn-ghost btn-sm">
+                        Изменить
+                      </Link>
+                    ) : null}
                   </td>
                 </tr>
               );

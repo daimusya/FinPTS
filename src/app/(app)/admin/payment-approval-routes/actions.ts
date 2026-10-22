@@ -35,7 +35,7 @@ function readRouteForm(formData: FormData) {
 }
 
 export async function createRouteAction(formData: FormData) {
-  const session = await requirePermission(PERMISSIONS.PAYMENT_REQUEST_APPROVE);
+  const session = await requirePermission(PERMISSIONS.ADMIN_FULL);
   const fields = readRouteForm(formData);
 
   if (!fields.name) {
@@ -69,7 +69,7 @@ export async function createRouteAction(formData: FormData) {
 }
 
 export async function updateRouteAction(id: string, formData: FormData) {
-  const session = await requirePermission(PERMISSIONS.PAYMENT_REQUEST_APPROVE);
+  const session = await requirePermission(PERMISSIONS.ADMIN_FULL);
   const fields = readRouteForm(formData);
   const isArchived = formData.get("isArchived") === "on";
 
@@ -81,6 +81,19 @@ export async function updateRouteAction(id: string, formData: FormData) {
   }
 
   const before = await prisma.paymentApprovalRoute.findUniqueOrThrow({ where: { id }, include: { steps: true } });
+  // Requests on their way keep the steps they started with: changing them would skip or swap approvers mid-route.
+  const stepsBefore = [...before.steps].sort((a, b) => a.stepOrder - b.stepOrder).map((s) => s.roleId);
+  const stepsChanged = stepsBefore.length !== fields.steps.length || stepsBefore.some((roleId, i) => roleId !== fields.steps[i]);
+  if (stepsChanged) {
+    const onTheWay = await prisma.paymentRequest.count({ where: { routeId: id, status: "PENDING_APPROVAL" } });
+    if (onTheWay > 0) {
+      redirect(
+        `/admin/payment-approval-routes/${id}/edit?error=${encodeURIComponent(
+          `По этому маршруту сейчас на согласовании заявок: ${onTheWay} — шаги менять нельзя, иначе у них сменятся согласующие. Создайте новый маршрут с нужными шагами и отправьте этот в архив: заявки в работе дойдут по старому, новые пойдут по новому.`,
+        )}`,
+      );
+    }
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
     await tx.paymentApprovalRouteStep.deleteMany({ where: { routeId: id } });

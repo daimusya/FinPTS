@@ -15,10 +15,10 @@ export default async function NewPaymentApprovalRoutePage({
 }) {
   const session = await getSession();
   const { error } = singleParams(await searchParams);
-  if (!session || !hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE)) {
+  if (!session || !hasPermission(session, PERMISSIONS.ADMIN_FULL)) {
     return (
       <div className="page">
-        <div className="card">Недостаточно прав.</div>
+        <div className="card">Маршруты согласования настраивает администратор.</div>
       </div>
     );
   }
