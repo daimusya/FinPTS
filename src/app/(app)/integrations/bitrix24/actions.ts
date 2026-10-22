@@ -9,12 +9,16 @@ import { sendOutboxEvent } from "@/lib/integrations/outbox";
 import { encryptSecret } from "@/lib/crypto/secret-box";
 import { enqueueProjectResults } from "@/lib/integrations/project-results";
 import { redirect } from "next/navigation";
+import { bitrixWebhookProblem } from "@/lib/integrations/bitrix-webhook";
 
 export async function saveBitrix24ProfileAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.INTEGRATIONS_MANAGE);
 
   const newWebhookUrl = String(formData.get("webhookUrl") ?? "").trim();
   const isEnabled = formData.get("isEnabled") === "on";
+  const back = (message: string): never => redirect(`/integrations/bitrix24?error=${encodeURIComponent(message)}`);
+  const urlProblem = newWebhookUrl ? bitrixWebhookProblem(newWebhookUrl) : null;
+  if (urlProblem) back(urlProblem);
 
   const existing = await prisma.integrationProfile.findFirst({ where: { system: "BITRIX24" } });
   const existingConfig = existing?.config as { webhookUrlEnc?: string } | null;
@@ -23,9 +27,7 @@ export async function saveBitrix24ProfileAction(formData: FormData) {
   // расшифрованное значение), непустое = заменить и зашифровать заново.
   const webhookUrlEnc = newWebhookUrl ? encryptSecret(newWebhookUrl) : existingConfig?.webhookUrlEnc;
 
-  if (isEnabled && !webhookUrlEnc) {
-    throw new Error("Укажите адрес вебхука перед включением интеграции");
-  }
+  if (isEnabled && !webhookUrlEnc) back("Укажите адрес вебхука перед включением интеграции");
 
   const profile = existing
     ? await prisma.integrationProfile.update({
@@ -45,6 +47,7 @@ export async function saveBitrix24ProfileAction(formData: FormData) {
   });
 
   revalidatePath("/integrations/bitrix24");
+  redirect(`/integrations/bitrix24?notice=${encodeURIComponent(isEnabled ? "Настройки сохранены, интеграция включена" : "Настройки сохранены, интеграция выключена")}`);
 }
 
 /** Пересчитать финансовый результат всех проектов со сделкой и поставить изменившиеся в очередь. */

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { decryptSecret } from "@/lib/crypto/secret-box";
+import { BITRIX_TIMEOUT_MS } from "@/lib/integrations/bitrix-webhook";
 
 /**
  * Идемпотентная постановка события в очередь на отправку в Битрикс24.
@@ -52,6 +53,8 @@ export async function sendOutboxEvent(eventId: string): Promise<SendResult> {
   try {
     const response = await fetch(webhookUrl, {
       method: "POST",
+      // A hanging portal must not hold the queue (and the page that sends) indefinitely.
+      signal: AbortSignal.timeout(BITRIX_TIMEOUT_MS),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ eventType: event.eventType, payload: event.payload }),
     });

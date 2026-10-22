@@ -29,7 +29,7 @@ const STATUS_BADGE: Record<string, string> = {
 export default async function Bitrix24IntegrationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ checked?: string; queued?: string }>;
+  searchParams: Promise<{ checked?: string; queued?: string; error?: string; notice?: string }>;
 }) {
   const sp = singleParams(await searchParams);
   const session = await getSession();
@@ -85,6 +85,8 @@ export default async function Bitrix24IntegrationPage({
 
       <div className="card" style={{ marginBottom: 16, maxWidth: 560 }}>
         <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Настройка вебхука</h2>
+        {sp.error ? <p className="form-error" style={{ marginBottom: 10 }}>{sp.error}</p> : null}
+        {sp.notice ? <p className="form-success" style={{ marginBottom: 10 }}>{sp.notice}</p> : null}
         <form action={saveBitrix24ProfileAction}>
           {webhookMasked ? (
             <p className="text-muted" style={{ marginBottom: 8 }}>
