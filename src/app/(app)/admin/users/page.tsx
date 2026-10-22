@@ -10,8 +10,8 @@ import { singleParams } from "@/lib/query-params";
 
 const loginTime = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Moscow" });
 
-export default async function UsersPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
-  const { notice } = singleParams(await searchParams);
+export default async function UsersPage({ searchParams }: { searchParams: Promise<{ notice?: string; error?: string }> }) {
+  const { notice, error } = singleParams(await searchParams);
   const session = await getSession();
   const flash = await readFlash("tempPassword");
   const [forEmail, tempPassword] = flash ? flash.split("\n") : [null, null];
@@ -44,6 +44,11 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
         </Link>
       </div>
 
+      {error ? (
+        <p className="form-error" style={{ marginBottom: 14 }}>
+          {error}
+        </p>
+      ) : null}
       {notice ? (
         <p className="form-success" style={{ marginBottom: 14 }}>
           {notice}

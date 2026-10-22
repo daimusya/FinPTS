@@ -8,11 +8,30 @@ import { hashPassword } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import { setFlash } from "@/lib/flash";
-import { userChangeProblem } from "@/lib/user-admin-guard";
+import { userChangeProblem, userEscalationProblem } from "@/lib/user-admin-guard";
 import { loadAdminState } from "@/lib/user-admin-state";
 import { normalizeUserEmail } from "@/lib/user-email";
 import { clearLoginFailures } from "@/lib/login-throttle";
 import { isUniqueViolation } from "@/lib/dictionaries/errors";
+
+/** Может ли действующий изменить этого пользователя так (см. userEscalationProblem); null — может. */
+async function escalation(
+  session: { userId: string; permissions: string[] },
+  targetId: string | null,
+  rolesAfter: string[] | null,
+  changesOwnAccess = false,
+): Promise<string | null> {
+  const { users, roles } = await loadAdminState();
+  return userEscalationProblem({
+    actorIsAdmin: session.permissions.includes(PERMISSIONS.ADMIN_FULL),
+    actorId: session.userId,
+    targetId,
+    rolesBefore: users.find((x) => x.id === targetId)?.roleIds ?? [],
+    rolesAfter,
+    roles,
+    changesOwnAccess,
+  });
+}
 
 const EMAIL_TAKEN = "Пользователь с таким email уже существует";
 import crypto from "node:crypto";
@@ -35,6 +54,8 @@ export async function createUserAction(formData: FormData) {
   if (existing) {
     redirect(`/admin/users/new?error=${encodeURIComponent(EMAIL_TAKEN)}`);
   }
+  const createProblem = await escalation(session, null, roleIds);
+  if (createProblem) redirect(`/admin/users/new?error=${encodeURIComponent(createProblem)}`);
 
   const tempPassword = crypto.randomBytes(9).toString("base64url");
   const passwordHash = await hashPassword(tempPassword);
@@ -87,7 +108,9 @@ export async function updateUserAction(userId: string, formData: FormData) {
     redirect(`/admin/users/${userId}/edit?error=${encodeURIComponent(STALE_EDIT)}`);
   }
 
-  const problem = userChangeProblem({ actorId: session.userId, targetId: userId, change: { isActive, roleIds }, ...(await loadAdminState()) });
+  const problem =
+    (await escalation(session, userId, roleIds)) ??
+    userChangeProblem({ actorId: session.userId, targetId: userId, change: { isActive, roleIds }, ...(await loadAdminState()) });
   if (problem) redirect(`/admin/users/${userId}/edit?error=${encodeURIComponent(problem)}`);
 
   const before = await prisma.user.findUnique({ where: { id: userId }, include: { roles: true } });
@@ -119,6 +142,9 @@ export async function updateUserAction(userId: string, formData: FormData) {
 export async function updateUserAccessScopeAction(userId: string, formData: FormData) {
   const session = await requirePermission(PERMISSIONS.USERS_MANAGE);
 
+  const scopeProblem = await escalation(session, userId, null, userId === session.userId);
+  if (scopeProblem) redirect(`/admin/users/${userId}/edit?error=${encodeURIComponent(scopeProblem)}`);
+
   const organizationIds = formData.getAll("organizationIds").map(String);
   const departmentIds = formData.getAll("departmentIds").map(String);
   const projectIds = formData.getAll("projectIds").map(String);
@@ -148,6 +174,9 @@ export async function resetPasswordAction(userId: string) {
   const session = await requirePermission(PERMISSIONS.USERS_MANAGE);
   // An own password is changed knowing the current one, not reset to a temporary one.
   if (userId === session.userId) redirect("/account/password");
+  // An administrator's password is reset only by an administrator — otherwise the temporary password opens full access.
+  const resetProblem = await escalation(session, userId, null);
+  if (resetProblem) redirect(`/admin/users?error=${encodeURIComponent(resetProblem)}`);
 
   const tempPassword = crypto.randomBytes(9).toString("base64url");
   const passwordHash = await hashPassword(tempPassword);
@@ -173,6 +202,8 @@ export async function endUserSessionsAction(userId: string) {
   const session = await requirePermission(PERMISSIONS.USERS_MANAGE);
   // One's own sessions are ended on the password page, keeping the current one.
   if (userId === session.userId) redirect("/account/password");
+  const endProblem = await escalation(session, userId, null);
+  if (endProblem) redirect(`/admin/users?error=${encodeURIComponent(endProblem)}`);
   const user = await prisma.user.update({ where: { id: userId }, data: { sessionsRevokedAt: new Date() } });
   await logAudit({ userId: session.userId, entityType: "user", entityId: userId, action: "end_sessions" });
   revalidatePath("/admin/users");

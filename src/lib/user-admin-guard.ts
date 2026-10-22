@@ -54,3 +54,51 @@ export function roleChangeProblem(input: {
   const after = input.roles.map((r) => (r.id === input.roleId ? { ...r, codes: input.codes } : r));
   return countUserManagers(input.users, after) === 0 ? LOCKOUT_MESSAGE : null;
 }
+
+export const ADMIN_ONLY_MESSAGE = "Полный доступ администратора выдаёт, снимает и затрагивает только администратор";
+export const OWN_ACCESS_MESSAGE = "Свои роли, права своей роли и свою область видимости меняет другой администратор";
+
+/**
+ * Защита от повышения своих прав тем, кто управляет пользователями, но не
+ * администратор: он не выдаёт и не снимает полный доступ, не трогает учётные
+ * записи администраторов (иначе сбросил бы пароль администратору и вошёл под
+ * ним) и не меняет собственные роли. Администратор — без ограничений.
+ */
+export function userEscalationProblem(input: {
+  actorIsAdmin: boolean;
+  actorId: string;
+  targetId: string | null;
+  /** Роли пользователя сейчас (у нового — пусто). */
+  rolesBefore: readonly string[];
+  /** Роли после изменения; null — роли не меняются (сброс пароля, сеансы, область видимости). */
+  rolesAfter: readonly string[] | null;
+  roles: readonly RolePermissionState[];
+  /** Меняется ли что-то, кроме ролей, что касается доступа самого пользователя (область видимости). */
+  changesOwnAccess?: boolean;
+}): string | null {
+  if (input.actorIsAdmin) return null;
+  const adminRoles = new Set(input.roles.filter((r) => r.codes.includes(PERMISSIONS.ADMIN_FULL)).map((r) => r.id));
+  const isAdmin = (ids: readonly string[]) => ids.some((id) => adminRoles.has(id));
+  if (isAdmin(input.rolesBefore) || (input.rolesAfter && isAdmin(input.rolesAfter))) return ADMIN_ONLY_MESSAGE;
+  if (input.targetId === input.actorId) {
+    const rolesChanged =
+      input.rolesAfter !== null &&
+      (input.rolesAfter.length !== input.rolesBefore.length || input.rolesAfter.some((id) => !input.rolesBefore.includes(id)));
+    if (rolesChanged || input.changesOwnAccess) return OWN_ACCESS_MESSAGE;
+  }
+  return null;
+}
+
+/** То же для ролей: полный доступ в роль добавляет или убирает только администратор, права своей роли он не меняет. */
+export function roleEscalationProblem(input: {
+  actorIsAdmin: boolean;
+  actorHoldsRole: boolean;
+  codesBefore: readonly string[];
+  codesAfter: readonly string[];
+}): string | null {
+  if (input.actorIsAdmin) return null;
+  if (input.codesBefore.includes(PERMISSIONS.ADMIN_FULL) || input.codesAfter.includes(PERMISSIONS.ADMIN_FULL)) return ADMIN_ONLY_MESSAGE;
+  const changed = input.codesAfter.length !== input.codesBefore.length || input.codesAfter.some((c) => !input.codesBefore.includes(c));
+  if (input.actorHoldsRole && changed) return OWN_ACCESS_MESSAGE;
+  return null;
+}

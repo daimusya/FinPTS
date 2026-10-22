@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
-import { roleChangeProblem } from "@/lib/user-admin-guard";
+import { roleChangeProblem, roleEscalationProblem } from "@/lib/user-admin-guard";
 import { roleDeleteProblem, roleNameProblem, uniqueRoleCode } from "@/lib/roles";
 import { loadAdminState } from "@/lib/user-admin-state";
 
@@ -22,6 +22,13 @@ export async function createRoleAction(formData: FormData) {
 
   const code = uniqueRoleCode(name, others.map((r) => r.code));
   const permissions = await prisma.permission.findMany({ where: { code: { in: permissionCodes } } });
+  const createProblem = roleEscalationProblem({
+    actorIsAdmin: session.permissions.includes(PERMISSIONS.ADMIN_FULL),
+    actorHoldsRole: false,
+    codesBefore: [],
+    codesAfter: permissions.map((p) => p.code),
+  });
+  if (createProblem) redirect(`/admin/roles/new?error=${encodeURIComponent(createProblem)}`);
 
   const role = await prisma.role.create({
     data: {
@@ -50,13 +57,19 @@ export async function updateRolePermissionsAction(roleId: string, formData: Form
   const permissionCodes = formData.getAll("permissionCodes").map(String);
   const permissions = await prisma.permission.findMany({ where: { code: { in: permissionCodes } } });
 
-  const problem = roleChangeProblem({ roleId, codes: permissions.map((p) => p.code), ...(await loadAdminState()) });
-  if (problem) redirect(`/admin/roles/${roleId}/edit?error=${encodeURIComponent(problem)}`);
-
   const before = await prisma.role.findUnique({
     where: { id: roleId },
     include: { permissions: { include: { permission: true } } },
   });
+  const state = await loadAdminState();
+  const problem =
+    roleEscalationProblem({
+      actorIsAdmin: session.permissions.includes(PERMISSIONS.ADMIN_FULL),
+      actorHoldsRole: state.users.some((u) => u.id === session.userId && u.roleIds.includes(roleId)),
+      codesBefore: before?.permissions.map((p) => p.permission.code) ?? [],
+      codesAfter: permissions.map((p) => p.code),
+    }) ?? roleChangeProblem({ roleId, codes: permissions.map((p) => p.code), ...state });
+  if (problem) redirect(`/admin/roles/${roleId}/edit?error=${encodeURIComponent(problem)}`);
 
   await prisma.$transaction([
     prisma.rolePermission.deleteMany({ where: { roleId } }),
