@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { createSession, requireSession } from "@/lib/session";
+import { createSession, requireSessionForPasswordChange } from "@/lib/session";
 import { hashPassword, verifyPassword, getUserPermissions } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { validateNewPassword } from "@/lib/password-policy";
@@ -16,7 +16,7 @@ const back = (message: string): never => redirect(`/account/password?error=${enc
  * сессии пользователя недействительны, текущая выдаётся заново.
  */
 export async function changeOwnPasswordAction(formData: FormData) {
-  const session = await requireSession();
+  const session = await requireSessionForPasswordChange();
   const current = String(formData.get("currentPassword") ?? "");
   const password = String(formData.get("newPassword") ?? "");
   const repeat = String(formData.get("repeatPassword") ?? "");
@@ -45,7 +45,7 @@ export async function changeOwnPasswordAction(formData: FormData) {
 
 /** Завершить сеансы на других устройствах (потерян ноутбук, вход с чужого компьютера); этот сеанс остаётся. */
 export async function endOtherSessionsAction() {
-  const session = await requireSession();
+  const session = await requireSessionForPasswordChange();
   const user = await prisma.user.update({ where: { id: session.userId }, data: { sessionsRevokedAt: new Date() } });
   // A fresh session for this browser: issued after the cut-off, it stays valid.
   await createSession({ userId: user.id, email: user.email, fullName: user.fullName, permissions: await getUserPermissions(user.id) });

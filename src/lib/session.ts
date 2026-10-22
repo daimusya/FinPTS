@@ -85,6 +85,15 @@ export const getSession = cache(async (): Promise<SessionPayload | null> => {
  * на страницу входа с пояснением, а не на страницу ошибки.
  */
 export async function requireSession(): Promise<SessionPayload> {
+  const session = await requireSessionForPasswordChange();
+  // A password the administrator saw (or one that leaked on the way) opens nothing until replaced:
+  // not pages only (the layout), but every action and download too.
+  if (session.mustChangePassword) redirect("/account/password");
+  return session;
+}
+
+/** Сессия для смены собственного пароля: и с временным паролем, который как раз нужно заменить. */
+export async function requireSessionForPasswordChange(): Promise<SessionPayload> {
   const session = await getSession();
   if (!session) redirect("/login?expired=1");
   return session;

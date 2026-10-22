@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/session";
+import { NOT_VISIBLE, accountAllowed } from "@/lib/access-guard";
+import { getAccessScope } from "@/lib/access-scope";
 import { logAudit } from "@/lib/audit";
 import { PERMISSIONS } from "@/lib/permissions";
 import {
@@ -140,6 +142,8 @@ export async function removeBankConnectionAction(connectionId: string) {
 
 export async function syncBankConnectionAction(connectionId: string) {
   const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
+  const connection = await prisma.bankConnection.findUnique({ where: { id: connectionId }, select: { bankAccountId: true } });
+  if (!connection || !(await accountAllowed(session, connection.bankAccountId, null))) back("error", NOT_VISIBLE);
   const outcome = await syncConnection(connectionId, { userId: session.userId });
   revalidatePath(PAGE);
   revalidatePath("/cash/transactions");
@@ -148,7 +152,7 @@ export async function syncBankConnectionAction(connectionId: string) {
 
 export async function syncAllBankConnectionsAction() {
   const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
-  const outcomes = await syncAllConnections({ userId: session.userId });
+  const outcomes = await syncAllConnections({ userId: session.userId, organizationIds: (await getAccessScope(session)).organizationIds });
   revalidatePath(PAGE);
   revalidatePath("/cash/transactions");
   const failed = outcomes.filter((o) => o.status === "error").length;

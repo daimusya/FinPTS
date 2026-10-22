@@ -3,6 +3,8 @@ import { prisma } from "./db";
 import { PERMISSIONS } from "./permissions";
 
 const SALT_ROUNDS = 12;
+/** Хеш случайной строки: проверка пароля для несуществующего адреса идёт столько же, сколько для настоящего. */
+const DUMMY_HASH = "$2b$12$bRpm1313TRzvqAHh8v9lK.gJHKutix6svcI2nEbVkxhfPB4EW9mrK";
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, SALT_ROUNDS);
@@ -42,7 +44,11 @@ export async function authenticate(
   password: string,
 ): Promise<AuthenticatedUser | null> {
   const user = await prisma.user.findUnique({ where: { email } });
-  if (!user || !user.isActive) return null;
+  if (!user || !user.isActive) {
+    // The same time as a real check: the answer's speed must not tell which addresses have an account.
+    await verifyPassword(password, DUMMY_HASH);
+    return null;
+  }
 
   const valid = await verifyPassword(password, user.passwordHash);
   if (!valid) return null;

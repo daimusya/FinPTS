@@ -111,8 +111,14 @@ export async function syncConnection(connectionId: string, options: { http?: Htt
 }
 
 /** Все включённые подключения по очереди (для Планировщика и кнопки «Загрузить всё»). */
-export async function syncAllConnections(options: { http?: HttpClient; now?: Date; userId?: string | null } = {}): Promise<SyncOutcome[]> {
-  const connections = await prisma.bankConnection.findMany({ where: { isActive: true, bankAccount: { isArchived: false } }, select: { id: true } });
+export async function syncAllConnections(
+  options: { http?: HttpClient; now?: Date; userId?: string | null; organizationIds?: string[] | null } = {},
+): Promise<SyncOutcome[]> {
+  // A user limited to some organizations syncs (and sees the outcome of) only their accounts; the scheduler — all.
+  const connections = await prisma.bankConnection.findMany({
+    where: { isActive: true, bankAccount: { isArchived: false, ...(options.organizationIds ? { organizationId: { in: options.organizationIds } } : {}) } },
+    select: { id: true },
+  });
   const outcomes: SyncOutcome[] = [];
   for (const c of connections) outcomes.push(await syncConnection(c.id, options));
   return outcomes;
