@@ -168,7 +168,10 @@ export async function archiveDictionaryItem(slug: string, id: string) {
 export async function restoreDictionaryItem(slug: string, id: string) {
   const config = getDictionaryConfig(slug);
   const session = await requirePermission(config.permissionManage);
-  await visibleRecord(config, session, id);
+  const record = (await visibleRecord(config, session, id)) as Record<string, unknown>;
+  // A record back from the archive passes the same checks as a saved one (a duplicate counterparty, a currency not allowed…).
+  const invalid = config.validateRecord ? await config.validateRecord({ ...record, isArchived: false }, record) : null;
+  if (invalid) redirect(`/master-data/${slug}?error=${encodeURIComponent(invalid)}`);
 
   const updated = await config.delegate.update({ where: { id }, data: { isArchived: false } });
 

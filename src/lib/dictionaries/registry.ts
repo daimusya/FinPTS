@@ -3,6 +3,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import type { DictionaryConfig, DictionaryDelegate, FieldOption } from "./types";
 import { acceptsManualEntries } from "@/lib/reports/balance-lines";
 import { validateInn } from "@/lib/integrations/inn";
+import { counterpartyDuplicateProblem } from "@/lib/counterparties/duplicate";
 import { TAX_SYSTEM_OPTIONS } from "@/lib/organizations/taxes";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
 import { currencyNotAllowed } from "@/lib/foreign-currency";
@@ -398,6 +399,8 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
       { name: "status", label: "Статус организации", type: "text" },
       { name: "isIntermediary", label: "Посредник", type: "checkbox" },
     ],
+    // One counterparty — one card: the same INN and KPP twice splits debts and payments.
+    validateRecord: counterpartyDuplicateProblem,
   },
   contracts: {
     slug: "contracts",

@@ -68,10 +68,10 @@ export default async function DictionaryListPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ imported?: string; importResult?: string; innError?: string; ratesError?: string; q?: string; page?: string }>;
+  searchParams: Promise<{ imported?: string; importResult?: string; innError?: string; ratesError?: string; q?: string; page?: string; error?: string }>;
 }) {
   const { slug } = await params;
-  const { imported, importResult, innError, ratesError, q, page } = singleParams(await searchParams);
+  const { imported, importResult, innError, ratesError, q, page, error } = singleParams(await searchParams);
   if (!DICTIONARY_REGISTRY[slug]) notFound();
   const config = getDictionaryConfig(slug);
 
@@ -125,6 +125,11 @@ export default async function DictionaryListPage({
         </div>
       </div>
 
+      {error ? (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <p className="form-error">{error}</p>
+        </div>
+      ) : null}
       {slug === "counterparties" && canManage ? <CounterpartyCreateByInn error={innError} /> : null}
       {slug === "counterparties" && canManage ? <CounterpartyEnrich /> : null}
       {slug === "organizations" && canManage ? <OrganizationCreateByInn error={innError} /> : null}
