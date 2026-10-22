@@ -20,6 +20,7 @@ import { isVisible, NOT_VISIBLE, ORGANIZATION_NOT_ALLOWED, organizationAllowed }
 import { enqueueProjectResultsForDocument } from "@/lib/integrations/project-results";
 import { parseFormDate } from "@/lib/form-values";
 import { STALE_EDIT, VERSION_FIELD, editVersion, versionMatches } from "@/lib/edit-version";
+import { accrualDuplicateProblem } from "@/lib/accruals/duplicate";
 
 interface DocumentHeaderInput {
   organizationId: string;
@@ -135,6 +136,8 @@ export async function createAccrualDocumentAction(formData: FormData) {
   } catch (error) {
     redirect(`/accruals/new?error=${encodeURIComponent((error as Error).message)}`);
   }
+  const duplicate = await accrualDuplicateProblem(header);
+  if (duplicate) redirect(`/accruals/new?error=${encodeURIComponent(duplicate)}`);
 
   const created = await prisma.accrualDocument.create({
     data: {
@@ -181,6 +184,8 @@ export async function updateAccrualDocumentAction(id: string, formData: FormData
   } catch (error) {
     redirect(`/accruals/${id}/edit?error=${encodeURIComponent((error as Error).message)}`);
   }
+  const duplicate = await accrualDuplicateProblem({ ...header, id });
+  if (duplicate) redirect(`/accruals/${id}/edit?error=${encodeURIComponent(duplicate)}`);
 
   // Under a lock, re-checked: posted (or changed by someone else) meanwhile — the draft is not overwritten.
   const updated = await prisma.$transaction(async (tx) => {
