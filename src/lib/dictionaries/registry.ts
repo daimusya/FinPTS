@@ -4,6 +4,7 @@ import type { DictionaryConfig, DictionaryDelegate, FieldOption } from "./types"
 import { acceptsManualEntries } from "@/lib/reports/balance-lines";
 import { validateInn } from "@/lib/integrations/inn";
 import { counterpartyDuplicateProblem } from "@/lib/counterparties/duplicate";
+import { bankAccountDuplicateProblem, organizationDuplicateProblem, ownAccountNumberProblem } from "@/lib/dictionaries/own-duplicates";
 import { TAX_SYSTEM_OPTIONS } from "@/lib/organizations/taxes";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
 import { currencyNotAllowed } from "@/lib/foreign-currency";
@@ -214,10 +215,11 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
         type: "checkbox",
       },
     ],
-    validateRecord: async (data) => {
+    validateRecord: async (data, before) => {
       const from = data.registrationDate instanceof Date ? data.registrationDate : null;
       const to = data.closureDate instanceof Date ? data.closureDate : null;
-      return from && to && to < from ? "Дата прекращения деятельности не может быть раньше даты регистрации" : null;
+      if (from && to && to < from) return "Дата прекращения деятельности не может быть раньше даты регистрации";
+      return organizationDuplicateProblem(data, before);
     },
   },
   "bank-accounts": {
@@ -233,15 +235,15 @@ export const DICTIONARY_REGISTRY: Record<string, DictionaryConfig> = {
     fields: [
       { name: "organizationId", label: "Организация", type: "select", required: true, loadOptions: organizationOptions },
       { name: "bankName", label: "Банк", type: "text", required: true },
-      { name: "accountNumber", label: "Номер счёта", type: "text", required: true },
+      { name: "accountNumber", label: "Номер счёта", type: "text", required: true, validate: ownAccountNumberProblem },
       { name: "bik", label: "БИК", type: "text" },
       { name: "currency", label: "Валюта", type: "select", required: true, options: CURRENCY_OPTIONS, defaultValue: "RUB", feature: "foreignCurrency" },
     ],
     // An existing account keeps its currency even if the organization stopped working with currency.
     validateRecord: async (data, before) =>
-      before && before.currency === data.currency && before.organizationId === data.organizationId
+      (before && before.currency === data.currency && before.organizationId === data.organizationId
         ? null
-        : currencyNotAllowed(String(data.organizationId ?? ""), data.currency),
+        : await currencyNotAllowed(String(data.organizationId ?? ""), data.currency)) ?? bankAccountDuplicateProblem(data, before),
   },
   "cash-accounts": {
     slug: "cash-accounts",

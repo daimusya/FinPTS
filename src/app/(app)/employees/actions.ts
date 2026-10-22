@@ -16,6 +16,7 @@ import { assertPeriodOpenForDate } from "@/lib/period";
 import { STALE_EDIT, VERSION_FIELD, editVersion, versionMatches } from "@/lib/edit-version";
 import { parsePayAccount } from "@/lib/payroll/pay-account";
 import { alertPayAccountChanged } from "@/lib/payroll/pay-account-alert";
+import { employeeDuplicateProblem } from "@/lib/payroll/employee-duplicate";
 
 /** Страховой стаж до приёма: целое число месяцев 0–720 или пусто. */
 function parsePriorMonths(raw: unknown): { value: number | null } | { error: string } {
@@ -54,6 +55,8 @@ export async function hireEmployeeAction(formData: FormData) {
   if (hireSalary && "error" in hireSalary) redirect(`/employees/new?error=${encodeURIComponent(hireSalary.error)}`);
   const payAccount = parsePayAccount(bankAccount);
   if ("error" in payAccount) redirect(`/employees/new?error=${encodeURIComponent(payAccount.error)}`);
+  const duplicate = await employeeDuplicateProblem({ organizationId, fullName, personnelNumber });
+  if (duplicate) redirect(`/employees/new?error=${encodeURIComponent(duplicate)}`);
 
   const employee = await prisma.employee.create({
     data: {
@@ -113,6 +116,10 @@ export async function updateEmployeeAction(id: string, formData: FormData) {
   if ("error" in prior) redirect(`/employees/${id}/edit?error=${encodeURIComponent(prior.error)}`);
   const payAccount = parsePayAccount(bankAccount);
   if ("error" in payAccount) redirect(`/employees/${id}/edit?error=${encodeURIComponent(payAccount.error)}`);
+  if ((personnelNumber ?? "") !== (before.personnelNumber ?? "")) {
+    const duplicate = await employeeDuplicateProblem({ id, organizationId: before.organizationId, fullName: before.fullName, personnelNumber });
+    if (duplicate) redirect(`/employees/${id}/edit?error=${encodeURIComponent(duplicate)}`);
+  }
   const newPayAccount = (payAccount as { value: string | null }).value;
 
   const salaryInput = salaryRaw.trim() ? parseFormAmount(salaryRaw, "Оклад") : null;
