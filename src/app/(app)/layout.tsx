@@ -16,6 +16,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (session.mustChangePassword) {
     redirect("/account/password");
   }
+  // Signing in with a code is required for this user and not connected yet.
+  if (session.mustSetupMfa) {
+    redirect("/account/2fa");
+  }
   const [unread, foreignCurrency] = await Promise.all([unreadNotificationCount(session.userId), isForeignCurrencyEnabled()]);
 
   return (
@@ -32,7 +36,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <div>
               <div className="topbar-user-name">{session.fullName}</div>
               <div className="topbar-user-email">
-                {session.email} · <Link href="/account/password">сменить пароль</Link>
+                {session.email} · <Link href="/account/password">сменить пароль</Link> · <Link href="/account/2fa">вход с кодом</Link>
               </div>
             </div>
             <form action={logoutAction}>

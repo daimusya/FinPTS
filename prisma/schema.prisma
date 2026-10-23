@@ -36,6 +36,16 @@ model User {
   telegramLinkCode String?
   /// Когда выдан код привязки: код действует ограниченное время (TELEGRAM_LINK_TTL_MINUTES).
   telegramLinkCodeAt DateTime?
+  /// Вход с кодом из приложения (TOTP): секрет, зашифрованный AUTH_SECRET (secret-box).
+  totpSecretEnc        String?
+  /// Секрет на время подключения — до первого верного кода; потом переносится в totpSecretEnc.
+  totpPendingSecretEnc String?
+  /// Когда включён вход с кодом; null — выключен.
+  totpEnabledAt        DateTime?
+  /// Последний принятый интервал кода: тот же код нельзя ввести второй раз.
+  totpLastStep         Int?
+  /// SHA-256 неиспользованных резервных кодов (каждый — один вход без телефона).
+  totpRecoveryHashes   String[] @default([])
 
   roles              UserRole[]
   orgAccess          UserOrganizationAccess[]
@@ -1788,4 +1798,13 @@ model LoginFailure {
 
   @@index([email, createdAt])
   @@map("login_failures")
+}
+
+/// Общие настройки системы «ключ — значение» (например, кому обязателен вход с кодом).
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("app_settings")
 }

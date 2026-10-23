@@ -36,6 +36,8 @@ async function escalation(
 const EMAIL_TAKEN = "Пользователь с таким email уже существует";
 import crypto from "node:crypto";
 import { STALE_EDIT, VERSION_FIELD, editVersion, versionMatches } from "@/lib/edit-version";
+import { MFA_POLICY_LABELS, parseMfaPolicy } from "@/lib/mfa/policy";
+import { getMfaPolicy, setMfaPolicy } from "@/lib/mfa/settings";
 
 export async function createUserAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.USERS_MANAGE);
@@ -208,4 +210,35 @@ export async function endUserSessionsAction(userId: string) {
   await logAudit({ userId: session.userId, entityType: "user", entityId: userId, action: "end_sessions" });
   revalidatePath("/admin/users");
   redirect(`/admin/users?notice=${encodeURIComponent(`Сеансы пользователя ${user.fullName} завершены — ему нужно войти заново`)}`);
+}
+
+/**
+ * Сбросить вход с кодом (потерян или сменён телефон): код и резервные коды
+ * стираются, сеансы завершаются; при следующем входе хватит пароля, а если код
+ * обязателен — система сразу попросит подключить его заново.
+ */
+export async function resetUserMfaAction(userId: string) {
+  const session = await requirePermission(PERMISSIONS.USERS_MANAGE);
+  // One's own code is managed on one's own page (it asks for the current code).
+  if (userId === session.userId) redirect("/account/2fa");
+  const problem = await escalation(session, userId, null);
+  if (problem) redirect(`/admin/users?error=${encodeURIComponent(problem)}`);
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: { totpSecretEnc: null, totpPendingSecretEnc: null, totpEnabledAt: null, totpLastStep: null, totpRecoveryHashes: [], sessionsRevokedAt: new Date() },
+  });
+  await logAudit({ userId: session.userId, entityType: "user", entityId: userId, action: "mfa_reset" });
+  revalidatePath("/admin/users");
+  redirect(`/admin/users?notice=${encodeURIComponent(`Вход с кодом у пользователя ${user.fullName} сброшен, его сеансы завершены — он подключит код заново`)}`);
+}
+
+/** Кому вход с кодом обязателен — решает администратор. */
+export async function setMfaPolicyAction(formData: FormData) {
+  const session = await requirePermission(PERMISSIONS.ADMIN_FULL);
+  const policy = parseMfaPolicy(formData.get("policy"));
+  const before = await getMfaPolicy();
+  await setMfaPolicy(policy);
+  await logAudit({ userId: session.userId, entityType: "app_setting", entityId: "mfa_policy", action: "update", before: { policy: before } as never, after: { policy } as never });
+  revalidatePath("/admin/users");
+  redirect(`/admin/users?notice=${encodeURIComponent(`Вход с кодом: ${MFA_POLICY_LABELS[policy]}`)}`);
 }

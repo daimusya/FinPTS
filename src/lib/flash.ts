@@ -8,7 +8,7 @@ import { requestIsHttps } from "./request-security";
  * логи доступа и заголовок Referer. Значение показывается один раз: страница
  * после показа удаляет куку (компонент FlashConsumed → DELETE /api/flash).
  */
-export const FLASH_NAMES = ["tempPassword"] as const;
+export const FLASH_NAMES = ["tempPassword", "recoveryCodes"] as const;
 export type FlashName = (typeof FLASH_NAMES)[number];
 
 export function isFlashName(name: string): name is FlashName {

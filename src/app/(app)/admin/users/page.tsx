@@ -5,8 +5,11 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { readFlash } from "@/lib/flash";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { FlashConsumed } from "@/components/flash-consumed";
-import { endUserSessionsAction, resetPasswordAction } from "./actions";
+import { endUserSessionsAction, resetPasswordAction, resetUserMfaAction, setMfaPolicyAction } from "./actions";
 import { singleParams } from "@/lib/query-params";
+import { MFA_POLICY_LABELS, type MfaPolicy } from "@/lib/mfa/policy";
+import { getMfaPolicy } from "@/lib/mfa/settings";
+import { SubmitButton } from "@/components/submit-button";
 
 const loginTime = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Moscow" });
 
@@ -31,6 +34,8 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
     prisma.auditLog.groupBy({ by: ["userId"], where: { entityType: "session", action: "login" }, _max: { createdAt: true } }),
   ]);
   const lastLogin = new Map(logins.map((l) => [l.userId, l._max.createdAt]));
+  const mfaPolicy = await getMfaPolicy();
+  const canSetPolicy = hasPermission(session, PERMISSIONS.ADMIN_FULL);
 
   return (
     <div className="page">
@@ -49,6 +54,30 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
           {error}
         </p>
       ) : null}
+      <div className="card" style={{ marginBottom: 16 }}>
+        {canSetPolicy ? (
+          <form action={setMfaPolicyAction} style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <label className="field" style={{ minWidth: 320 }}>
+              <span>Вход с кодом из приложения на телефоне</span>
+              <select name="policy" id="mfa-policy" defaultValue={mfaPolicy}>
+                {(Object.keys(MFA_POLICY_LABELS) as MfaPolicy[]).map((p) => (
+                  <option key={p} value={p}>
+                    {MFA_POLICY_LABELS[p]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <SubmitButton className="btn btn-secondary">Сохранить</SubmitButton>
+          </form>
+        ) : (
+          <p style={{ margin: 0 }}>Вход с кодом из приложения: {MFA_POLICY_LABELS[mfaPolicy]}.</p>
+        )}
+        <p className="text-muted" style={{ fontSize: 12, margin: "8px 0 0" }}>
+          С обязательным входом пользователь без подключённого кода при следующем входе сначала подключит приложение-генератор
+          (Яндекс Ключ, Google Authenticator и т. п.). Каждый подключает и управляет кодом на своей странице «Вход с кодом».
+        </p>
+      </div>
+
       {notice ? (
         <p className="form-success" style={{ marginBottom: 14 }}>
           {notice}
@@ -95,6 +124,11 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
                   <span className={`badge ${user.isActive ? "badge-active" : "badge-archived"}`}>
                     {user.isActive ? "Активен" : "Отключён"}
                   </span>
+                  {user.totpEnabledAt ? (
+                    <span className="badge badge-active" style={{ marginLeft: 6 }} title="При входе после пароля нужен код из приложения">
+                      Вход с кодом
+                    </span>
+                  ) : null}
                   {user.mustChangePassword ? (
                     <span className="badge badge-orange" style={{ marginLeft: 6 }} title="Пароль выдан администратором; пользователь сменит его при входе">
                       Временный пароль
@@ -121,6 +155,16 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
                         </ConfirmSubmitButton>
                       </form>
                     )}
+                    {user.totpEnabledAt && user.id !== session.userId ? (
+                      <form action={resetUserMfaAction.bind(null, user.id)}>
+                        <ConfirmSubmitButton
+                          className="btn btn-ghost btn-sm"
+                          message={`Сбросить вход с кодом у пользователя ${user.fullName}? Делайте это, только если он потерял или сменил телефон и попросил сам. Его сеансы завершатся.`}
+                        >
+                          Сбросить вход с кодом
+                        </ConfirmSubmitButton>
+                      </form>
+                    ) : null}
                     {user.id === session.userId ? null : (
                       <form action={resetPasswordAction.bind(null, user.id)}>
                         <ConfirmSubmitButton

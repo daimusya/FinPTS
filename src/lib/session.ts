@@ -8,6 +8,8 @@ import { PERMISSIONS, type PermissionCode } from "./permissions";
 import { prisma } from "./db";
 import { getUserPermissions } from "./auth";
 import { sessionCutoff, sessionIssuedBeforePasswordChange } from "./password-policy";
+import { mfaRequiredFor } from "./mfa/policy";
+import { getMfaPolicy } from "./mfa/settings";
 
 const COOKIE_NAME = "pts_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
@@ -23,6 +25,8 @@ export interface SessionPayload {
   permissions: string[];
   /** Пароль выдан администратором — пользователь должен сменить его на свой. */
   mustChangePassword?: boolean;
+  /** Вход с кодом обязателен для этого пользователя, а он его ещё не подключил. */
+  mustSetupMfa?: boolean;
 }
 
 export async function createSession(payload: SessionPayload) {
@@ -66,17 +70,19 @@ export const getSession = cache(async (): Promise<SessionPayload | null> => {
   }
   const user = await prisma.user.findUnique({
     where: { id: payload.userId },
-    select: { id: true, email: true, fullName: true, isActive: true, mustChangePassword: true, passwordChangedAt: true, sessionsRevokedAt: true },
+    select: { id: true, email: true, fullName: true, isActive: true, mustChangePassword: true, passwordChangedAt: true, sessionsRevokedAt: true, totpEnabledAt: true },
   });
   if (!user || !user.isActive) return null;
   // A password change or reset, or an explicit end of sessions, ends every session issued before it.
   if (sessionIssuedBeforePasswordChange(payload.iat, sessionCutoff(user.passwordChangedAt, user.sessionsRevokedAt))) return null;
+  const permissions = await getUserPermissions(user.id);
   return {
     userId: user.id,
     email: user.email,
     fullName: user.fullName,
-    permissions: await getUserPermissions(user.id),
+    permissions,
     mustChangePassword: user.mustChangePassword,
+    mustSetupMfa: !user.totpEnabledAt && mfaRequiredFor(await getMfaPolicy(), permissions),
   };
 });
 
@@ -85,15 +91,16 @@ export const getSession = cache(async (): Promise<SessionPayload | null> => {
  * на страницу входа с пояснением, а не на страницу ошибки.
  */
 export async function requireSession(): Promise<SessionPayload> {
-  const session = await requireSessionForPasswordChange();
-  // A password the administrator saw (or one that leaked on the way) opens nothing until replaced:
-  // not pages only (the layout), but every action and download too.
+  const session = await requireSessionForAccountSetup();
+  // A password the administrator saw (or one that leaked on the way) opens nothing until replaced,
+  // and a required sign-in code nothing until connected: not pages only (the layout), but every action and download too.
   if (session.mustChangePassword) redirect("/account/password");
+  if (session.mustSetupMfa) redirect("/account/2fa");
   return session;
 }
 
-/** Сессия для смены собственного пароля: и с временным паролем, который как раз нужно заменить. */
-export async function requireSessionForPasswordChange(): Promise<SessionPayload> {
+/** Сессия для настройки своего входа (смена пароля, подключение кода): и пока это ещё обязательно сделать. */
+export async function requireSessionForAccountSetup(): Promise<SessionPayload> {
   const session = await getSession();
   if (!session) redirect("/login?expired=1");
   return session;
