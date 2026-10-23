@@ -51,33 +51,28 @@
 
 ## Развёртывание через Docker
 
-Есть `Dockerfile` (многоступенчатая сборка, standalone-режим Next.js) и
-`docker-compose.yml` (приложение + PostgreSQL). **Написано, но не
-запускалось** в этой среде разработки — Docker здесь не установлен (сборка
-и тесты приложения проверялись напрямую через Node.js/PostgreSQL на
-хосте). Перед реальным использованием проверьте `docker compose up --build`
-на своей машине.
+**Пошаговая инструкция для сервера — [deploy/УСТАНОВКА.md](deploy/УСТАНОВКА.md)**, установка одной командой:
+`bash deploy/install.sh [--restore копия.dump]`. Состав (`docker-compose.yml`):
 
-Порядок:
+- `postgres` — PostgreSQL 17, наружу не открыт; приложение работает под отдельным пользователем `pts_app`
+  без прав суперпользователя (`deploy/postgres-init`);
+- `app` — приложение (standalone-сборка Next.js), доступно только через `caddy`;
+- `caddy` — порты 80/443, автоматический сертификат https для `DOMAIN` (`deploy/Caddyfile`);
+- `scheduler` — выписки банков по API, курсы ЦБ, доставка уведомлений, мониторинг (каждые 30 минут);
+- `backup` — копия раз в сутки с пробным восстановлением в `./backups`;
+- `tools` — разовые команды: миграции, начальное заполнение, `reset-password`, `reset-2fa`, `rekey-secrets`.
 
-```bash
-export AUTH_SECRET=$(openssl rand -base64 48)
-# пароль базы — только буквы и цифры: он входит в адрес подключения
-export POSTGRES_PASSWORD=$(openssl rand -hex 24)
-docker compose up -d postgres
-# примените миграции и заполните справочники с хоста, указав на
-# опубликованный порт контейнера (localhost:5432) — сознательно не
-# выполняется автоматически при старте контейнера приложения, см. раздел
-# «Правила выполнения задачи», п.8 ТЗ
-DATABASE_URL="postgresql://promtehnosfera:$POSTGRES_PASSWORD@localhost:5432/promtehnosfera" npm run db:migrate
-DATABASE_URL="postgresql://promtehnosfera:$POSTGRES_PASSWORD@localhost:5432/promtehnosfera" npm run db:seed
-docker compose up -d app
-```
+`install.sh` создаёт `.env` со случайными паролями и `AUTH_SECRET`, собирает образы, при `--restore`
+загружает копию (`pg_dump` custom из `npm run db:backup`) и перешифровывает ключи интеграций и входа с кодом с
+прежнего `AUTH_SECRET` на новый (`npm run rekey-secrets`), применяет миграции (`prisma migrate deploy`), заполняет
+справочники и запускает всё. `deploy/update.sh` — обновление (копия → `git pull` → сборка → миграции),
+`deploy/restore.sh` — восстановление из копии.
 
-Сохраните `AUTH_SECRET` и `POSTGRES_PASSWORD` в надёжном месте (например, в файле
-`.env` рядом с `docker-compose.yml`, который compose читает сам): без пароля
-базы `docker compose` не запустится — пароля по умолчанию нет. PostgreSQL
-доступен только с самого сервера (`127.0.0.1:5432`), не с других машин сети.
+Проверено: путь установки без Docker на временной базе — загрузка копии пользователем без прав суперпользователя,
+миграции, заполнение, перешифровка ключей, рабочая сборка с новым `AUTH_SECRET` (страницы, заголовки, ключ
+DaData читается), резервная копия с пробным восстановлением под тем же пользователем. Сами контейнеры здесь не
+запускались — Docker на машине разработки не установлен; первый запуск на сервере покажет, если что-то в
+`docker-compose.yml` нужно поправить.
 
 Обязательные переменные окружения для продакшена: `DATABASE_URL`,
 `AUTH_SECRET` (длинная случайная строка — используется и для подписи

@@ -3,8 +3,12 @@ import { usableSecret } from "@/lib/auth-secret";
 
 const ALGORITHM = "aes-256-gcm";
 
+function keyOf(secret: string): Buffer {
+  return crypto.createHash("sha256").update(secret).digest();
+}
+
 function getKey(): Buffer {
-  return crypto.createHash("sha256").update(usableSecret()).digest();
+  return keyOf(usableSecret());
 }
 
 /**
@@ -14,19 +18,36 @@ function getKey(): Buffer {
  * не лежит в базе открытым текстом.
  */
 export function encryptSecret(plainText: string): string {
+  return encryptWithKey(plainText, getKey());
+}
+
+function encryptWithKey(plainText: string, key: Buffer): string {
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv(ALGORITHM, getKey(), iv);
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
   const encrypted = Buffer.concat([cipher.update(plainText, "utf8"), cipher.final()]);
   const authTag = cipher.getAuthTag();
   return Buffer.concat([iv, authTag, encrypted]).toString("base64");
 }
 
 export function decryptSecret(payload: string): string {
+  return decryptWithKey(payload, getKey());
+}
+
+/**
+ * Перешифровать значение с одного AUTH_SECRET на другой — при переезде на
+ * сервер с новым секретом (scripts/rekey-secrets.ts). Старый секрет может
+ * быть и заготовкой: он нужен только чтобы расшифровать.
+ */
+export function reencryptSecret(payload: string, fromSecret: string, toSecret: string): string {
+  return encryptWithKey(decryptWithKey(payload, keyOf(fromSecret)), keyOf(toSecret));
+}
+
+function decryptWithKey(payload: string, key: Buffer): string {
   const raw = Buffer.from(payload, "base64");
   const iv = raw.subarray(0, 12);
   const authTag = raw.subarray(12, 28);
   const encrypted = raw.subarray(28);
-  const decipher = crypto.createDecipheriv(ALGORITHM, getKey(), iv);
+  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(authTag);
   return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
 }

@@ -1,0 +1,11 @@
+# Caddy: автоматический сертификат https (Let's Encrypt) для DOMAIN и передача запросов приложению.
+# Сам выставляет X-Forwarded-For (адрес посетителя) и X-Forwarded-Proto (https),
+# чужие X-Forwarded-* от посетителей отбрасывает.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:3000
+}

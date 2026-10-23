@@ -1,52 +1,119 @@
+# ПРОМТЕХНОСФЕРА — установка на сервер (Linux с Docker или Windows с Docker Desktop).
+# Ставится скриптом deploy/install.sh; инструкция — deploy/УСТАНОВКА.md.
+# Значения ${...} берутся из файла .env рядом с этим файлом (его создаёт install.sh).
+#
+# Наружу открыт только Caddy (80/443): он сам получает сертификат https для DOMAIN
+# и передаёт запросы приложению. Приложение и база снаружи недоступны.
+
 services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: promtehnosfera
-      # No default: a known password plus an open port would give away the whole database.
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - generate one with: openssl rand -hex 24}"
-      POSTGRES_DB: promtehnosfera
-    ports:
-      # Only this server can reach PostgreSQL (migrations and seeding run from the host); not other machines.
-      - "127.0.0.1:5432:5432"
+      # Суперпользователь базы — только для первичной настройки и восстановления из копии.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${POSTGRES_SUPERUSER_PASSWORD:?нет POSTGRES_SUPERUSER_PASSWORD — запустите deploy/install.sh}"
+      POSTGRES_DB: postgres
+      # Отдельный пользователь приложения без прав суперпользователя (создаётся при первом запуске).
+      APP_DB_PASSWORD: "${APP_DB_PASSWORD:?нет APP_DB_PASSWORD — запустите deploy/install.sh}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./deploy/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U promtehnosfera"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d promtehnosfera"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
   app:
-    build: .
+    build:
+      context: .
+      target: runner
+    image: promtehnosfera-app
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://promtehnosfera:${POSTGRES_PASSWORD}@postgres:5432/promtehnosfera?schema=public
-      AUTH_SECRET: "${AUTH_SECRET:?AUTH_SECRET is required - generate one with: openssl rand -base64 48}"
+    environment: &app_env
+      DATABASE_URL: "postgresql://pts_app:${APP_DB_PASSWORD}@postgres:5432/promtehnosfera?schema=public"
+      AUTH_SECRET: "${AUTH_SECRET:?нет AUTH_SECRET — запустите deploy/install.sh}"
       NODE_ENV: production
-    ports:
-      - "3000:3000"
+      TZ: Europe/Moscow
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: "${DOMAIN:?нет DOMAIN — запустите deploy/install.sh}"
+      ACME_EMAIL: "${ACME_EMAIL:?нет ACME_EMAIL — запустите deploy/install.sh}"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # Выписки банков по API, курсы ЦБ, доставка уведомлений и мониторинг — каждые SYNC_INTERVAL_SECONDS (по умолчанию 30 минут).
+  scheduler:
+    build:
+      context: .
+      target: tools
+    image: promtehnosfera-tools
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *app_env
+    command: ["sh", "-c", "while true; do npx tsx --tsconfig tsconfig.json scripts/bank-sync.ts; sleep ${SYNC_INTERVAL_SECONDS:-1800}; done"]
+
+  # Резервная копия с пробным восстановлением при старте и затем раз в сутки; хранится BACKUP_KEEP копий.
   backup:
     build:
       context: .
       dockerfile: Dockerfile.backup
+    image: promtehnosfera-backup
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://promtehnosfera:${POSTGRES_PASSWORD}@postgres:5432/promtehnosfera?schema=public
+      DATABASE_URL: "postgresql://pts_app:${APP_DB_PASSWORD}@postgres:5432/promtehnosfera?schema=public"
       BACKUP_DIR: /backups
       BACKUP_KEEP: ${BACKUP_KEEP:-14}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      TZ: Europe/Moscow
     volumes:
-      - backups:/backups
+      - ./backups:/backups
+
+  # Разовые команды: миграции, начальное заполнение, аварийный доступ. Не запускается вместе с остальными:
+  #   docker compose run --rm tools npm run reset-password -- адрес@почты
+  tools:
+    build:
+      context: .
+      target: tools
+    image: promtehnosfera-tools
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *app_env
+      SEED_ADMIN_EMAIL: "${SEED_ADMIN_EMAIL:-}"
+      OLD_AUTH_SECRET: "${OLD_AUTH_SECRET:-}"
 
 volumes:
   postgres_data:
-  backups:
+  caddy_data:
+  caddy_config:

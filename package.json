@@ -16,6 +16,7 @@
     "bank:sync": "tsx --tsconfig tsconfig.json scripts/bank-sync.ts",
     "reset-password": "tsx --tsconfig tsconfig.json scripts/reset-password.ts",
     "reset-2fa": "tsx --tsconfig tsconfig.json scripts/reset-2fa.ts",
+    "rekey-secrets": "tsx --tsconfig tsconfig.json scripts/rekey-secrets.ts",
     "monitor": "tsx --tsconfig tsconfig.json scripts/monitor.ts",
     "db:studio": "prisma studio"
   },
