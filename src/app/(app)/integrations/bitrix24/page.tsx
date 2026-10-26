@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
-import { decryptSecret, maskSecret } from "@/lib/crypto/secret-box";
+import { UNREADABLE_SECRET, maskSecret, tryDecryptSecret } from "@/lib/crypto/secret-box";
 import { enqueueAllProjectResultsAction, saveBitrix24ProfileAction, sendOutboxEventAction } from "./actions";
 import Link from "next/link";
 import { formatMoney } from "@/lib/money";
@@ -67,7 +67,8 @@ export default async function Bitrix24IntegrationPage({
   }
 
   const webhookUrlEnc = (profile?.config as { webhookUrlEnc?: string } | null)?.webhookUrlEnc;
-  const webhookMasked = webhookUrlEnc ? maskSecret(decryptSecret(webhookUrlEnc)) : null;
+  const webhookPlain = webhookUrlEnc ? tryDecryptSecret(webhookUrlEnc) : null;
+  const webhookMasked = webhookUrlEnc ? (webhookPlain ? maskSecret(webhookPlain) : `не читается — ${UNREADABLE_SECRET.toLowerCase()}`) : null;
 
   return (
     <div className="page">

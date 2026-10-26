@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
-import { decryptSecret, maskSecret } from "@/lib/crypto/secret-box";
+import { UNREADABLE_SECRET, maskSecret, tryDecryptSecret } from "@/lib/crypto/secret-box";
 import { INN_PROFILE_SYSTEM, lookupRequisitesByInn } from "@/lib/integrations/inn-service";
 import { saveInnLookupSettingsAction } from "./actions";
 import { singleParams } from "@/lib/query-params";
@@ -41,7 +41,8 @@ export default async function InnLookupSettingsPage({
   const profile = await prisma.integrationProfile.findFirst({ where: { system: INN_PROFILE_SYSTEM } });
   const config = (profile?.config ?? {}) as { apiKeyEnc?: string; autoCreate?: boolean };
   const apiKeyEnc = config.apiKeyEnc;
-  const keyMasked = apiKeyEnc ? maskSecret(decryptSecret(apiKeyEnc)) : null;
+  const keyPlain = apiKeyEnc ? tryDecryptSecret(apiKeyEnc) : null;
+  const keyMasked = apiKeyEnc ? (keyPlain ? maskSecret(keyPlain) : `не читается — ${UNREADABLE_SECRET.toLowerCase()}`) : null;
   const test = sp.testInn ? await lookupRequisitesByInn(sp.testInn) : null;
 
   return (

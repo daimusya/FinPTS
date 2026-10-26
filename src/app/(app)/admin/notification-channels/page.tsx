@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
-import { decryptSecret, maskSecret } from "@/lib/crypto/secret-box";
+import { UNREADABLE_SECRET, maskSecret, tryDecryptSecret } from "@/lib/crypto/secret-box";
 import { loadChannelSettings } from "@/lib/notify-channels/deliver";
 import { retryDeliveryAction, saveChannelSettingsAction, sendTestEmailAction, sendTestTelegramAction } from "./actions";
 import { singleParams } from "@/lib/query-params";
@@ -30,7 +30,8 @@ export default async function NotificationChannelsPage({ searchParams }: { searc
     prisma.user.findMany({ where: { isActive: true, OR: [{ notifyEmail: true }, { notifyTelegram: true }] }, select: { fullName: true, notifyEmail: true, notifyTelegram: true, telegramChatId: true } }),
     prisma.notification.findMany({ where: { deliveryState: "failed" }, orderBy: { createdAt: "desc" }, take: 5, include: { user: { select: { fullName: true } } } }),
   ]);
-  const tokenMask = settings.telegram.tokenEnc ? maskSecret(decryptSecret(settings.telegram.tokenEnc)) : null;
+  const tokenPlain = settings.telegram.tokenEnc ? tryDecryptSecret(settings.telegram.tokenEnc) : null;
+  const tokenMask = settings.telegram.tokenEnc ? (tokenPlain ? maskSecret(tokenPlain) : `не читается — ${UNREADABLE_SECRET.toLowerCase()}`) : null;
 
   return (
     <div className="page">

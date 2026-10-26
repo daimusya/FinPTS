@@ -39,6 +39,12 @@ export async function verifyLoginCodeAction(_prev: CodeState, formData: FormData
   if (locked > 0) return { error: `Слишком много неверных кодов. Попробуйте через ${locked} мин.` };
 
   const result = await checkSecondFactor(user!, code);
+  if (!result.ok && result.unreadable) {
+    return {
+      error:
+        "Вход с кодом нужно подключить заново: его ключ сохранён при другом AUTH_SECRET. Войдите по резервному коду или попросите администратора сбросить вход с кодом",
+    };
+  }
   if (!result.ok) {
     await recordLoginFailure(mfaKey(user!.id));
     if (ip) await recordLoginFailure(ipKey(ip));

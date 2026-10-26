@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { decryptSecret, encryptSecret, reencryptSecret } from "./secret-box";
+import { UNREADABLE_SECRET, decryptSecret, encryptSecret, reencryptSecret, tryDecryptSecret } from "./secret-box";
 import { rekeyConfig } from "./rekey";
 
 const OLD = "old-secret-old-secret-old-secret-0123456789";
@@ -28,5 +28,18 @@ describe("re-encryption for a new AUTH_SECRET", () => {
     expect(v.smtp.host).toBe("smtp.ru");
     expect(v.isEnabled).toBe(true);
     expect(v.emptyEnc).toBe("");
+  });
+});
+
+describe("a value stored under another AUTH_SECRET", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it("reads as null for display and fails with a message a person can act on", () => {
+    vi.stubEnv("AUTH_SECRET", OLD);
+    const payload = encryptSecret("telegram-token");
+    vi.stubEnv("AUTH_SECRET", NEW);
+    expect(tryDecryptSecret(payload)).toBeNull();
+    expect(() => decryptSecret(payload)).toThrow(UNREADABLE_SECRET);
+    vi.stubEnv("AUTH_SECRET", OLD);
+    expect(tryDecryptSecret(payload)).toBe("telegram-token");
   });
 });

@@ -29,8 +29,25 @@ function encryptWithKey(plainText: string, key: Buffer): string {
   return Buffer.concat([iv, authTag, encrypted]).toString("base64");
 }
 
+/** Значение зашифровано при другом AUTH_SECRET (сменили без перешифровки) или повреждено. */
+export const UNREADABLE_SECRET = "Ключ сохранён при другом AUTH_SECRET и не читается — введите его заново";
+
 export function decryptSecret(payload: string): string {
-  return decryptWithKey(payload, getKey());
+  try {
+    return decryptWithKey(payload, getKey());
+  } catch {
+    // The cipher's own text ("unable to authenticate data") says nothing to the person who must fix it.
+    throw new Error(UNREADABLE_SECRET);
+  }
+}
+
+/** Расшифровать для показа: null, если значение не читается (страница показывает подсказку, а не падает). */
+export function tryDecryptSecret(payload: string): string | null {
+  try {
+    return decryptWithKey(payload, getKey());
+  } catch {
+    return null;
+  }
 }
 
 /**

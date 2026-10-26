@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { singleParams } from "@/lib/query-params";
 import { readFlash } from "@/lib/flash";
-import { decryptSecret } from "@/lib/crypto/secret-box";
+import { tryDecryptSecret } from "@/lib/crypto/secret-box";
 import { formatSecretForHumans, otpauthUrl } from "@/lib/mfa/totp";
 import { FlashConsumed } from "@/components/flash-consumed";
 import { SubmitButton } from "@/components/submit-button";
@@ -26,7 +26,8 @@ export default async function TwoFactorPage({ searchParams }: { searchParams: Pr
   const required = mfaRequiredFor(await getMfaPolicy(), session.permissions);
   const recoveryCodes = enabled ? await readFlash("recoveryCodes") : null;
 
-  const pendingSecret = !user.totpEnabledAt && user.totpPendingSecretEnc ? decryptSecret(user.totpPendingSecretEnc) : null;
+  // An unreadable pending secret (AUTH_SECRET changed) simply means: start the connection again.
+  const pendingSecret = !user.totpEnabledAt && user.totpPendingSecretEnc ? tryDecryptSecret(user.totpPendingSecretEnc) : null;
   const qr = pendingSecret
     ? `data:image/svg+xml;utf8,${encodeURIComponent(
         await QRCode.toString(otpauthUrl({ issuer: ISSUER, account: user.email, secret: pendingSecret }), { type: "svg", margin: 1, errorCorrectionLevel: "M" }),

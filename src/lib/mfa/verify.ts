@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { decryptSecret } from "@/lib/crypto/secret-box";
+import { tryDecryptSecret } from "@/lib/crypto/secret-box";
 import { verifyTotp } from "@/lib/mfa/totp";
 import { consumeRecoveryCode, looksLikeRecoveryCode } from "@/lib/mfa/recovery";
 
@@ -13,7 +13,7 @@ export async function checkSecondFactor(
   user: { id: string; totpSecretEnc: string | null; totpLastStep: number | null; totpRecoveryHashes: string[] },
   code: string,
   now: Date = new Date(),
-): Promise<{ ok: true; method: "totp" | "recovery"; recoveryLeft: number } | { ok: false }> {
+): Promise<{ ok: true; method: "totp" | "recovery"; recoveryLeft: number } | { ok: false; unreadable?: true }> {
   if (!user.totpSecretEnc) return { ok: false };
   if (looksLikeRecoveryCode(code)) {
     const left = consumeRecoveryCode(user.totpRecoveryHashes, code);
@@ -24,7 +24,10 @@ export async function checkSecondFactor(
     });
     return saved.count === 1 ? { ok: true, method: "recovery", recoveryLeft: left.length } : { ok: false };
   }
-  const step = verifyTotp(decryptSecret(user.totpSecretEnc), code, now, user.totpLastStep);
+  // Stored under another AUTH_SECRET (changed without re-encryption): no code can match — say so instead of failing.
+  const secret = tryDecryptSecret(user.totpSecretEnc);
+  if (secret === null) return { ok: false, unreadable: true };
+  const step = verifyTotp(secret, code, now, user.totpLastStep);
   if (step === null) return { ok: false };
   const saved = await prisma.user.updateMany({
     where: { id: user.id, OR: [{ totpLastStep: null }, { totpLastStep: { lt: step } }] },

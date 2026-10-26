@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireSessionForAccountSetup } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { setFlash } from "@/lib/flash";
-import { decryptSecret, encryptSecret } from "@/lib/crypto/secret-box";
+import { encryptSecret, tryDecryptSecret } from "@/lib/crypto/secret-box";
 import { generateTotpSecret, verifyTotp } from "@/lib/mfa/totp";
 import { generateRecoveryCodes, hashRecoveryCode } from "@/lib/mfa/recovery";
 import { checkSecondFactor } from "@/lib/mfa/verify";
@@ -54,8 +54,9 @@ export async function confirmMfaSetupAction(formData: FormData) {
   if (user.totpEnabledAt) back("notice", "Вход с кодом уже подключён");
   if (!user.totpPendingSecretEnc) back("error", "Начните подключение заново");
   await guardGuessing(user.id);
-  const secret = decryptSecret(user.totpPendingSecretEnc!);
-  const step = verifyTotp(secret, String(formData.get("code") ?? ""), new Date(), null);
+  const secret = tryDecryptSecret(user.totpPendingSecretEnc!);
+  if (secret === null) back("error", "Начните подключение заново");
+  const step = verifyTotp(secret!, String(formData.get("code") ?? ""), new Date(), null);
   if (step === null) {
     await recordLoginFailure(mfaKey(user.id));
     back("error", "Код не подошёл. Проверьте, что время на телефоне установлено автоматически, и введите текущий код");
