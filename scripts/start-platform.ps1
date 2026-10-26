@@ -42,4 +42,5 @@ Write-Host ""
 $env:NODE_ENV = "production"
 $env:PORT = "3000"
 $env:HOSTNAME = "127.0.0.1"
-node $server
+# Runs from its own copy (.platform): a new build in .next does not disturb the running platform.
+node (Join-Path $root ".platform\server.js")

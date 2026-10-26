@@ -15,6 +15,9 @@
 
 # next.js
 /.next/
+/.next-check/
+# the copy of the build the platform runs from on this computer (scripts/start-platform.ps1)
+/.platform/
 /out/
 
 # production
