@@ -19,6 +19,7 @@ import {
   type CheckResult,
 } from "./checks";
 import { secretWeakness } from "@/lib/auth-secret";
+import { checkSignIns, summarizeSignIns } from "@/lib/monitoring/sign-ins";
 
 const DAY = 86_400_000;
 const MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
@@ -71,6 +72,15 @@ export async function runChecks(now: Date = new Date()): Promise<CheckResult[]> 
     }),
     prisma.notification.count({ where: { deliveryState: "pending", createdAt: { lt: new Date(now.getTime() - DAY / 24) } } }),
   ]);
+  // Failed sign-ins of the last day (the table keeps a day): names only for real accounts.
+  const failures = await prisma.loginFailure.findMany({ where: { createdAt: { gte: new Date(now.getTime() - DAY) } }, select: { email: true, createdAt: true } });
+  const accounts = failures.length
+    ? await prisma.user.findMany({ select: { id: true, email: true, fullName: true } })
+    : [];
+  const signIns = summarizeSignIns(failures, now, {
+    byEmail: new Map(accounts.map((u) => [u.email.toLowerCase(), u.fullName])),
+    byId: new Map(accounts.map((u) => [u.id, u.fullName])),
+  });
   const rates = await loadRateLookup();
   const latestRates = await Promise.all(
     currencies.map(async (currency) => ({
@@ -103,6 +113,7 @@ export async function runChecks(now: Date = new Date()): Promise<CheckResult[]> 
     checkPayments({ overdue: overdue.length, overdueSum: formatMoney(sumMoney(overdue.map((r) => amountInRub(r.amount.toString(), r.currency, rates, now) ?? r.amount))), stuck }),
     checkUnmatched(unmatched),
     checkDelivery({ failedLastDay: failedDelivery.length, stuck: stuckDelivery, lastError: failedDelivery[0]?.deliveryError ?? null }),
+    checkSignIns(signIns),
   ];
 }
 
