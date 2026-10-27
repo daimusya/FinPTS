@@ -10,6 +10,7 @@ import { getUserPermissions } from "./auth";
 import { sessionCutoff, sessionIssuedBeforePasswordChange } from "./password-policy";
 import { mfaRequiredFor } from "./mfa/policy";
 import { getMfaPolicy } from "./mfa/settings";
+import { ACTIVITY_COOKIE, activityStamp } from "./idle-timeout";
 
 const COOKIE_NAME = "pts_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
@@ -37,19 +38,23 @@ export async function createSession(payload: SessionPayload) {
     .sign(getSecret());
 
   const store = await cookies();
-  store.set(COOKIE_NAME, token, {
+  const options = {
     httpOnly: true,
     // By the actual protocol: over plain http (a LAN server) a Secure cookie would be silently dropped.
     secure: await requestIsHttps(),
-    sameSite: "lax",
+    sameSite: "lax" as const,
     path: "/",
     maxAge: SESSION_TTL_SECONDS,
-  });
+  };
+  store.set(COOKIE_NAME, token, options);
+  // The idle clock starts now; src/proxy.ts moves it on with every request.
+  store.set(ACTIVITY_COOKIE, activityStamp(Date.now(), token, usableSecret()), options);
 }
 
 export async function destroySession() {
   const store = await cookies();
   store.delete(COOKIE_NAME);
+  store.delete(ACTIVITY_COOKIE);
 }
 
 /**

@@ -4,9 +4,10 @@ import { insecureRemoteLogin, requestIsHttps } from "@/lib/request-security";
 import { getSession } from "@/lib/session";
 import { LoginForm } from "./login-form";
 import { singleParams } from "@/lib/query-params";
+import { IDLE_MINUTES } from "@/lib/idle-timeout";
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ expired?: string }> }) {
-  const { expired } = singleParams(await searchParams);
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ expired?: string; idle?: string }> }) {
+  const { expired, idle } = singleParams(await searchParams);
   const session = await getSession();
   if (session) {
     redirect("/dashboard");
@@ -28,7 +29,11 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             HTTPS.
           </p>
         ) : null}
-        {expired ? (
+        {idle ? (
+          <p className="text-muted" style={{ marginBottom: 12, fontSize: 13 }}>
+            В системе не работали больше {IDLE_MINUTES} минут — для защиты данных сеанс завершён. Войдите снова.
+          </p>
+        ) : expired ? (
           <p className="text-muted" style={{ marginBottom: 12, fontSize: 13 }}>
             Сеанс завершён — войдите снова. Несохранённые изменения последнего действия не записаны.
           </p>
