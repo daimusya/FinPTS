@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
+import { prisma } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import { changeOwnPasswordAction, endOtherSessionsAction } from "./actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
@@ -12,6 +13,7 @@ export default async function ChangePasswordPage({ searchParams }: { searchParam
   const session = await getSession();
   if (!session) redirect("/login");
   const { error, done, sessions } = singleParams(await searchParams);
+  const devices = await prisma.knownDevice.findMany({ where: { userId: session.userId }, orderBy: { lastSeenAt: "desc" }, take: 20 });
 
   return (
     <div className="login-page">
@@ -76,6 +78,26 @@ export default async function ChangePasswordPage({ searchParams }: { searchParam
               Завершить сеансы на других устройствах
             </ConfirmSubmitButton>
           </form>
+        ) : null}
+
+        {!session.mustChangePassword && devices.length > 0 ? (
+          <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--color-graphite-150)" }}>
+            <p className="text-muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
+              Устройства, с которых вы входили. Незнакомое — смените пароль и завершите сеансы на других устройствах.
+            </p>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: "grid", gap: 4 }}>
+              {devices.map((d) => (
+                <li key={d.id}>
+                  {d.label}
+                  {d.lastIp ? <span className="text-muted"> · {d.lastIp}</span> : null}
+                  <span className="text-muted">
+                    {" "}
+                    · последний вход {d.lastSeenAt.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", dateStyle: "short", timeStyle: "short" })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : null}
 
         {!session.mustChangePassword ? (

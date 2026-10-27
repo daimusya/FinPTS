@@ -47,6 +47,7 @@ model User {
   /// SHA-256 неиспользованных резервных кодов (каждый — один вход без телефона).
   totpRecoveryHashes   String[] @default([])
 
+  knownDevices       KnownDevice[]
   roles              UserRole[]
   orgAccess          UserOrganizationAccess[]
   departmentAccess   UserDepartmentAccess[]
@@ -1807,4 +1808,22 @@ model AppSetting {
   updatedAt DateTime @updatedAt
 
   @@map("app_settings")
+}
+
+/// Браузеры, с которых пользователь уже входил: вход с незнакомого — уведомление
+/// владельцу (src/lib/known-devices.ts). Хранится отпечаток метки устройства, не сама метка.
+model KnownDevice {
+  id          String   @id @default(cuid())
+  userId      String
+  deviceHash  String
+  /// «Chrome, Windows» — для уведомления и списка.
+  label       String
+  lastIp      String?
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceHash])
+  @@map("known_devices")
 }

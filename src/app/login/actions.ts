@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/db";
 import { startPendingLogin } from "@/lib/mfa/pending-login";
+import { rememberSignInDevice } from "@/lib/known-devices";
 import { authenticate } from "@/lib/auth";
 import { createSession } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
@@ -53,6 +54,7 @@ export async function loginAction(
     fullName: user.fullName,
     permissions: user.permissions,
   });
+  await rememberSignInDevice(user.id);
 
   await logAudit({
     userId: user.id,

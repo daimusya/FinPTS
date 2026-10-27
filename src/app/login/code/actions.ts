@@ -10,6 +10,7 @@ import { clearPendingLogin, readPendingLogin } from "@/lib/mfa/pending-login";
 import { checkSecondFactor } from "@/lib/mfa/verify";
 import { clearLoginFailures, clientIp, ipKey, ipLockedMinutes, lockedMinutesFor, recordLoginFailure, MAX_FAILURES } from "@/lib/login-throttle";
 import { prisma } from "@/lib/db";
+import { rememberSignInDevice } from "@/lib/known-devices";
 
 export interface CodeState {
   error?: string;
@@ -54,6 +55,7 @@ export async function verifyLoginCodeAction(_prev: CodeState, formData: FormData
   await clearLoginFailures(mfaKey(user!.id));
   await clearPendingLogin();
   await createSession({ userId: user!.id, email: user!.email, fullName: user!.fullName, permissions: await getUserPermissions(user!.id) });
+  await rememberSignInDevice(user!.id);
   await logAudit({ userId: user!.id, entityType: "session", entityId: user!.id, action: "login", after: { secondFactor: result.method } as never });
   if (result.method === "recovery") {
     await notify([user!.id], {
