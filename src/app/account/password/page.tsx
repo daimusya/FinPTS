@@ -7,6 +7,7 @@ import { changeOwnPasswordAction, endOtherSessionsAction } from "./actions";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
+import { currentDeviceHash } from "@/lib/known-devices";
 
 /** Смена собственного пароля; при пароле, выданном администратором, — обязательна. */
 export default async function ChangePasswordPage({ searchParams }: { searchParams: Promise<{ error?: string; done?: string; sessions?: string }> }) {
@@ -14,6 +15,7 @@ export default async function ChangePasswordPage({ searchParams }: { searchParam
   if (!session) redirect("/login");
   const { error, done, sessions } = singleParams(await searchParams);
   const devices = await prisma.knownDevice.findMany({ where: { userId: session.userId }, orderBy: { lastSeenAt: "desc" }, take: 20 });
+  const thisDevice = await currentDeviceHash();
 
   return (
     <div className="login-page">
@@ -38,7 +40,8 @@ export default async function ChangePasswordPage({ searchParams }: { searchParam
         ) : null}
         {sessions ? (
           <p className="form-success" style={{ marginBottom: 12 }}>
-            Сеансы на других устройствах завершены. Здесь вы остаётесь в системе.
+            Сеансы на других устройствах завершены, а сами устройства забыты: вход с любого из них снова придёт уведомлением. Здесь
+            вы остаётесь в системе.
           </p>
         ) : null}
         {error ? (
@@ -89,6 +92,7 @@ export default async function ChangePasswordPage({ searchParams }: { searchParam
               {devices.map((d) => (
                 <li key={d.id}>
                   {d.label}
+                  {d.deviceHash === thisDevice ? <strong> — это устройство</strong> : null}
                   {d.lastIp ? <span className="text-muted"> · {d.lastIp}</span> : null}
                   <span className="text-muted">
                     {" "}

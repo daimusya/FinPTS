@@ -47,12 +47,20 @@ export function describeUserAgent(ua: string | null): string {
   return os ? `${browser}, ${os}` : browser;
 }
 
-/** Запомнить браузер после успешного входа; с незнакомого — уведомить владельца. */
-export async function rememberSignInDevice(userId: string, now: Date = new Date()): Promise<{ newDevice: boolean }> {
+const validToken = (value: string | undefined) => (value && /^[a-f0-9]{64}$/.test(value) ? value : null);
+
+/** Отпечаток метки этого браузера (null — метки нет): отметить «это устройство» в списке. */
+export async function currentDeviceHash(): Promise<string | null> {
+  const token = validToken((await cookies()).get(DEVICE_COOKIE)?.value);
+  return token ? hashOf(token) : null;
+}
+
+/** Метка этого браузера (выдаётся, если её ещё нет), название и адрес. */
+async function thisDevice() {
   const store = await cookies();
   const head = await headers();
-  let token = store.get(DEVICE_COOKIE)?.value;
-  if (!token || !/^[a-f0-9]{64}$/.test(token)) {
+  let token = validToken(store.get(DEVICE_COOKIE)?.value);
+  if (!token) {
     token = crypto.randomBytes(32).toString("hex");
     store.set(DEVICE_COOKIE, token, {
       httpOnly: true,
@@ -62,9 +70,16 @@ export async function rememberSignInDevice(userId: string, now: Date = new Date(
       maxAge: DEVICE_COOKIE_DAYS * 24 * 3600,
     });
   }
-  const deviceHash = hashOf(token);
-  const label = describeUserAgent(head.get("user-agent"));
-  const ip = clientIp(head.get("x-forwarded-for"), head.get("x-real-ip"));
+  return {
+    deviceHash: hashOf(token),
+    label: describeUserAgent(head.get("user-agent")),
+    ip: clientIp(head.get("x-forwarded-for"), head.get("x-real-ip")),
+  };
+}
+
+/** Запомнить браузер после успешного входа; с незнакомого — уведомить владельца. */
+export async function rememberSignInDevice(userId: string, now: Date = new Date()): Promise<{ newDevice: boolean }> {
+  const { deviceHash, label, ip } = await thisDevice();
 
   const known = await prisma.knownDevice.findUnique({ where: { userId_deviceHash: { userId, deviceHash } } });
   if (known) {
@@ -82,4 +97,20 @@ export async function rememberSignInDevice(userId: string, now: Date = new Date(
     });
   }
   return { newDevice: before > 0 };
+}
+
+/**
+ * После «завершить сеансы» или смены пароля прочие браузеры перестают быть
+ * знакомыми: если посторонний снова войдёт с них, владелец получит
+ * уведомление. Этот браузер (человек знает пароль) остаётся запомненным.
+ */
+export async function forgetOtherDevices(userId: string, now: Date = new Date()): Promise<number> {
+  const { deviceHash, label, ip } = await thisDevice();
+  await prisma.knownDevice.upsert({
+    where: { userId_deviceHash: { userId, deviceHash } },
+    update: { lastSeenAt: now, lastIp: ip, label },
+    create: { userId, deviceHash, label, lastIp: ip, firstSeenAt: now, lastSeenAt: now },
+  });
+  const { count } = await prisma.knownDevice.deleteMany({ where: { userId, deviceHash: { not: deviceHash } } });
+  return count;
 }

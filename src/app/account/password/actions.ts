@@ -7,6 +7,7 @@ import { hashPassword, verifyPassword, getUserPermissions } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { validateNewPassword } from "@/lib/password-policy";
 import { clearLoginFailures, loginLockedMinutes, recordLoginFailure } from "@/lib/login-throttle";
+import { forgetOtherDevices } from "@/lib/known-devices";
 
 const back = (message: string): never => redirect(`/account/password?error=${encodeURIComponent(message)}`);
 
@@ -39,6 +40,7 @@ export async function changeOwnPasswordAction(formData: FormData) {
   await clearLoginFailures(user.email);
   // A fresh session for this browser; all others were issued before the change and stop working.
   await createSession({ userId: user.id, email: user.email, fullName: user.fullName, permissions: await getUserPermissions(user.id) });
+  await forgetOtherDevices(user.id, changedAt);
   await logAudit({ userId: user.id, entityType: "user", entityId: user.id, action: "change_own_password" });
   redirect(session.mustChangePassword ? "/dashboard" : "/account/password?done=1");
 }
@@ -46,9 +48,11 @@ export async function changeOwnPasswordAction(formData: FormData) {
 /** Завершить сеансы на других устройствах (потерян ноутбук, вход с чужого компьютера); этот сеанс остаётся. */
 export async function endOtherSessionsAction() {
   const session = await requireSessionForAccountSetup();
-  const user = await prisma.user.update({ where: { id: session.userId }, data: { sessionsRevokedAt: new Date() } });
+  const revokedAt = new Date();
+  const user = await prisma.user.update({ where: { id: session.userId }, data: { sessionsRevokedAt: revokedAt } });
   // A fresh session for this browser: issued after the cut-off, it stays valid.
   await createSession({ userId: user.id, email: user.email, fullName: user.fullName, permissions: await getUserPermissions(user.id) });
+  await forgetOtherDevices(user.id, revokedAt);
   await logAudit({ userId: user.id, entityType: "user", entityId: user.id, action: "end_other_sessions" });
   redirect("/account/password?sessions=1");
 }
