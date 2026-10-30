@@ -4,6 +4,8 @@ import { getAccessScope } from "@/lib/access-scope";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { ImportWizard } from "./import-wizard";
+import { ClientBankUpload } from "@/components/client-bank-upload";
+import { organizationsForNewAccounts } from "@/lib/bank-import/client-bank-import";
 
 export default async function CashImportPage() {
   const session = await getSession();
@@ -16,7 +18,7 @@ export default async function CashImportPage() {
   }
 
   const scope = await getAccessScope(session);
-  const [bankAccounts, batches] = await Promise.all([
+  const [bankAccounts, batches, organizations] = await Promise.all([
     prisma.bankAccount.findMany({
       where: { isArchived: false },
       orderBy: { bankName: "asc" },
@@ -27,6 +29,7 @@ export default async function CashImportPage() {
       take: 50,
       include: { bankAccount: true, importedBy: { select: { fullName: true, email: true } } },
     }),
+    organizationsForNewAccounts(session),
   ]);
 
   return (
@@ -35,15 +38,20 @@ export default async function CashImportPage() {
         <div>
           <h1>Загрузка банковской выписки</h1>
           <p>
-            Поддерживаются файлы XLSX, XLS, CSV, TXT произвольного формата — колонки сопоставляются вручную.
-            Повторно загруженные строки автоматически пропускаются.
+            Выписка в формате 1С загружается сразу, счёт определяется по файлу. Файлы XLSX, XLS, CSV, TXT
+            произвольного формата — с ручным сопоставлением колонок. Повторно загруженные строки автоматически пропускаются.
           </p>
         </div>
       </div>
 
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Выписка 1С (Альфа-Бизнес и др.)</h2>
+        <ClientBankUpload organizations={organizations} />
+      </div>
+
       {bankAccounts.length === 0 ? (
         <div className="card">
-          Сначала добавьте хотя бы один банковский счёт в разделе «Справочники → Банковские счета».
+          Для выписки в другом формате сначала добавьте банковский счёт в разделе «Справочники → Банковские счета».
         </div>
       ) : (
         <ImportWizard bankAccounts={bankAccounts.map((a) => ({ value: a.id, label: `${a.bankName} · ${a.accountNumber}` }))} />

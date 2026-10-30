@@ -1275,3 +1275,314 @@ tbody tr:hover {
     overflow-wrap: anywhere;
   }
 }
+
+/* ---------- Выписка 1С в один шаг ---------- */
+
+.client-bank-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.client-bank-results {
+  list-style: none;
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+/* ---------- Комиссии посредников ---------- */
+
+.section-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.section-head .section-title {
+  margin-bottom: 0;
+}
+
+.month-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.month-nav__form {
+  display: flex;
+  gap: 6px;
+}
+
+.period-filter {
+  margin-bottom: 12px;
+}
+
+.period-filter__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.month-nav input[type="month"] {
+  padding: 6px 8px;
+  border: 1px solid var(--color-graphite-150);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
+.stat-card--accent {
+  border-color: var(--color-orange);
+  box-shadow: inset 3px 0 0 var(--color-orange), var(--shadow-card);
+}
+
+.intermediary-details summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.nested-table {
+  margin-top: 8px;
+  min-width: 420px;
+}
+
+.nested-table td {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+tr.total-row td {
+  font-weight: 700;
+  background: var(--color-graphite-50);
+  border-top: 1px solid var(--color-graphite-150);
+}
+
+.bind-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.bind-form select {
+  padding: 5px 8px;
+  border: 1px solid var(--color-graphite-150);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 12px;
+  max-width: 220px;
+}
+
+.trend {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 6px;
+  height: 180px;
+}
+
+.trend__col {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+
+.trend__col:hover {
+  background: var(--color-graphite-50);
+}
+
+.trend__value {
+  font-size: 11px;
+  color: var(--color-graphite-500);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  min-height: 15px;
+}
+
+.trend__track {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-bottom: 1px solid var(--color-graphite-150);
+}
+
+.trend__bar {
+  width: min(28px, 70%);
+  background: var(--color-graphite-300);
+  border-radius: 4px 4px 0 0;
+}
+
+.trend__col--selected .trend__bar {
+  background: var(--color-orange);
+}
+
+.trend__col--selected .trend__value,
+.trend__col--selected .trend__label {
+  color: var(--color-graphite-900);
+  font-weight: 700;
+}
+
+.trend__label {
+  font-size: 11px;
+  color: var(--color-graphite-500);
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .trend__value {
+    display: none;
+  }
+}
+
+/* ---------- Печатная форма отчёта посредника (по шаблону 1С) ---------- */
+
+.print-report {
+  background: var(--color-white);
+  color: #000;
+  font-family: Arial, sans-serif;
+  font-size: 10pt;
+  padding: 24px 28px;
+  max-width: 820px;
+  border: 1px solid var(--color-graphite-100);
+  border-radius: var(--radius-md);
+}
+
+.print-report + .print-report {
+  margin-top: 16px;
+}
+
+.print-report h2 {
+  font-size: 13pt;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.print-report .print-report__article {
+  font-size: 10pt;
+  margin-bottom: 12px;
+}
+
+.print-report table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 9pt;
+}
+
+.print-report th,
+.print-report td {
+  border: 1px solid #000;
+  padding: 3px 6px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #000;
+  background: none;
+  font-size: 9pt;
+}
+
+.print-report th {
+  background: #f2f2f2;
+  font-weight: 700;
+  text-align: center;
+}
+
+.print-report tbody tr:hover {
+  background: none;
+}
+
+.print-report tbody tr:last-child td {
+  border-bottom: 1px solid #000;
+}
+
+.print-report td.num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.print-report tr.print-report__total td {
+  font-weight: 700;
+  background: #f2f2f2;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 14mm 12mm;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .sidebar,
+  .topbar,
+  .no-print {
+    display: none !important;
+  }
+
+  .app-shell,
+  .main,
+  .page {
+    display: block;
+    padding: 0;
+    margin: 0;
+  }
+
+  .print-report {
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    max-width: none;
+    break-inside: avoid-page;
+  }
+
+  .print-report + .print-report {
+    margin-top: 0;
+    break-before: page;
+  }
+
+  .print-report tr {
+    break-inside: avoid;
+  }
+}
+
+.client-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--color-graphite-150);
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--color-graphite-50);
+}
+
+.client-list__remove {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--color-graphite-500);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.client-list__remove:hover {
+  color: var(--color-danger);
+}

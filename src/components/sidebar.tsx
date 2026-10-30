@@ -33,6 +33,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/master-data/directions", label: "Направления" },
       { href: "/master-data/products-services", label: "Продукты и услуги" },
       { href: "/master-data/counterparties", label: "Контрагенты" },
+      { href: "/master-data/intermediaries", label: "Посредники" },
       { href: "/master-data/contracts", label: "Договоры" },
       { href: "/master-data/cash-flow-articles", label: "Статьи ДДС" },
       { href: "/master-data/pnl-articles", label: "Статьи ОПиУ" },
@@ -82,6 +83,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/reports/balance", label: "Управленческий баланс" },
       { href: "/reports/margin", label: "Маржинальность и ТБУ" },
       { href: "/reports/debts", label: "Дебиторка и кредиторка" },
+      { href: "/intermediaries", label: "Комиссии посредников" },
     ],
   },
   {

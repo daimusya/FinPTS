@@ -177,12 +177,13 @@ export function toOperation(fields: {
   amount: unknown;
   purpose: unknown;
   counterpartyInn: unknown;
+  counterpartyName?: unknown;
 }): StatementOperation | null {
   const date = operationDay(fields.date);
   const amount = positiveAmount(fields.amount);
   if (!date || !amount || !fields.direction) return null;
   const inn = text(fields.counterpartyInn);
-  return { date, direction: fields.direction, amount, purpose: text(fields.purpose), counterpartyInn: inn && /^\d{10}(\d{2})?$/.test(inn) ? inn : null };
+  return { date, direction: fields.direction, amount, purpose: text(fields.purpose), counterpartyInn: inn && /^\d{10}(\d{2})?$/.test(inn) ? inn : null, counterpartyName: text(fields.counterpartyName) };
 }
 
 /** Дни от from до to включительно (ГГГГ-ММ-ДД). */

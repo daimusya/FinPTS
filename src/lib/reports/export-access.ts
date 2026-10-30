@@ -14,6 +14,7 @@ const VIEW_PERMISSION: Record<string, PermissionCode> = {
   balance: PERMISSIONS.REPORTS_VIEW,
   "payroll-summary": PERMISSIONS.PAYROLL_VIEW,
   "scenario-forecast": PERMISSIONS.FINANCIAL_MODEL_VIEW,
+  intermediaries: PERMISSIONS.CASH_VIEW,
 };
 
 export function exportViewPermission(type: string | undefined): PermissionCode | null {

@@ -814,6 +814,8 @@ model BankTransaction {
   purpose          String?
   counterpartyId   String?
   counterpartyInn  String?
+  /// Наименование плательщика или получателя, как в выписке банка.
+  counterpartyName String?
   cashFlowArticleId String?
   departmentId     String?
   costCenterId     String?
@@ -1826,4 +1828,82 @@ model KnownDevice {
 
   @@unique([userId, deviceHash])
   @@map("known_devices")
+}
+
+// =========================================================================
+// INTERMEDIARIES (комиссии посредников)
+// =========================================================================
+
+/// Категория посредника: ВИП — ставка по согласованию (commissionPct и
+/// изменения с даты); Стандарт — по общей шкале от оборота накопительным итогом.
+enum IntermediaryCategory {
+  VIP
+  STANDARD
+}
+
+/// Посредник: получает комиссию с поступлений от «своих» организаций
+/// (раздел «Комиссии посредников», src/lib/intermediaries).
+model Intermediary {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  /// Заведённые до появления категорий — со своими ставками, то есть ВИП.
+  category      IntermediaryCategory @default(VIP)
+  /// «Стандарт»: с какого дня копится оборот; null — с первой оплаты.
+  turnoverFrom  DateTime? @db.Date
+  /// Как назван в отчёте: «Статья движения денег: Харламова Светлана».
+  reportName    String?
+  /// Комиссия, % от поступлений; null — не задана, комиссия не считается.
+  /// Если ставку меняли (IntermediaryRate) — это ставка до первого изменения.
+  commissionPct Decimal? @db.Decimal(5, 2)
+  isArchived    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  clients IntermediaryClient[]
+  payers  IntermediaryPayer[]
+  rates   IntermediaryRate[]
+
+  @@map("intermediaries")
+}
+
+/// Изменение ставки посредника с даты: действует для поступлений с этого дня
+/// до следующего изменения. До первого изменения — Intermediary.commissionPct.
+model IntermediaryRate {
+  id             String   @id @default(cuid())
+  intermediaryId String
+  validFrom      DateTime @db.Date
+  commissionPct  Decimal  @db.Decimal(5, 2)
+  createdAt      DateTime @default(now())
+
+  intermediary Intermediary @relation(fields: [intermediaryId], references: [id], onDelete: Cascade)
+
+  @@unique([intermediaryId, validFrom])
+  @@map("intermediary_rates")
+}
+
+/// Организация из списка посредника — находится в выписке по названию.
+model IntermediaryClient {
+  id             String @id @default(cuid())
+  intermediaryId String
+  name           String
+
+  intermediary Intermediary @relation(fields: [intermediaryId], references: [id], onDelete: Cascade)
+
+  @@unique([intermediaryId, name])
+  @@map("intermediary_clients")
+}
+
+/// ИНН плательщика, закреплённый вручную: за посредником или «без посредника»
+/// (intermediaryId null). Главнее совпадения по названию.
+model IntermediaryPayer {
+  inn            String   @id
+  intermediaryId String?
+  /// Наименование плательщика на момент закрепления — для списка.
+  payerName      String?
+  updatedAt      DateTime @updatedAt
+
+  intermediary Intermediary? @relation(fields: [intermediaryId], references: [id], onDelete: Cascade)
+
+  @@index([intermediaryId])
+  @@map("intermediary_payers")
 }

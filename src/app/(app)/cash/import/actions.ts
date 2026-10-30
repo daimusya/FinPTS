@@ -8,6 +8,8 @@ import { parseSpreadsheet, type ParsedSheet } from "@/lib/bank-import/parser";
 import { extractRow, type ColumnMapping, type ExtractedRow, type MappingTarget } from "@/lib/bank-import/mapping";
 import { importStatementOperations } from "@/lib/bank-import/import-operations";
 import { ORGANIZATION_NOT_ALLOWED, accountAllowed } from "@/lib/access-guard";
+import { isClientBankExchange } from "@/lib/bank-import/client-bank";
+import { importClientBankFiles, type ClientBankFileResult } from "@/lib/bank-import/client-bank-import";
 
 const MAX_ROWS = 5000;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
@@ -38,6 +40,9 @@ export async function parseStatementAction(_prev: ParseState, formData: FormData
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
+  if (isClientBankExchange(buffer)) {
+    return { error: "Это выписка в формате 1С — загрузите её формой «Выписка 1С (Альфа-Бизнес и др.)» выше: колонки сопоставлять не нужно", bankAccountId };
+  }
   let parsed: ParsedSheet;
   try {
     parsed = parseSpreadsheet(buffer, file.name);
@@ -138,6 +143,7 @@ export async function importBankStatementAction(_prev: ImportState, formData: Fo
       amount: extracted.amount,
       purpose: extracted.purpose,
       counterpartyInn: extracted.counterpartyInn,
+      counterpartyName: extracted.counterpartyName,
       externalRef: extracted.externalRef,
     })),
     fileName,
@@ -159,4 +165,23 @@ export async function importBankStatementAction(_prev: ImportState, formData: Fo
   revalidatePath("/cash/transactions");
 
   return { done: true, imported, duplicates, errors, autoClassified, repeatedImported, counterpartiesCreated, closedPeriodRows, closedMonths, errorSamples };
+}
+
+export interface ClientBankImportState {
+  results?: ClientBankFileResult[];
+  error?: string;
+}
+
+/** Выписки 1С «Клиент-банк» (Альфа-Бизнес Онлайн и др.): один или несколько файлов, без сопоставления колонок. */
+export async function importClientBankAction(_prev: ClientBankImportState, formData: FormData): Promise<ClientBankImportState> {
+  const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
+  const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
+  if (files.length === 0) return { error: "Выберите файлы выписки" };
+  if (files.length > 24) return { error: "За раз — не больше 24 файлов" };
+  const organizationId = String(formData.get("organizationId") ?? "") || null;
+  const results = await importClientBankFiles(session, files, organizationId);
+  revalidatePath("/cash/transactions");
+  revalidatePath("/cash/import");
+  revalidatePath("/intermediaries");
+  return { results };
 }

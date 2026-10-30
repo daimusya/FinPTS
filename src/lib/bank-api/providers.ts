@@ -45,6 +45,7 @@ export function mapTbankOperation(o: Json): StatementOperation | null {
     amount: o.accountAmount ?? o.operationAmount ?? o.amount,
     purpose: o.payPurpose ?? o.description,
     counterpartyInn: counterParty.inn,
+    counterpartyName: counterParty.name,
   });
 }
 
@@ -82,6 +83,7 @@ export function mapTochkaTransaction(t: Json): StatementOperation | null {
     amount: obj(t.Amount).amount ?? t.amount,
     purpose: t.description,
     counterpartyInn: party.inn,
+    counterpartyName: party.name,
   });
 }
 
@@ -151,6 +153,7 @@ export function mapStatementTransaction(t: Json): StatementOperation | null {
     amount: obj(t.amountRub).amount ?? obj(t.amount).amount ?? t.amount,
     purpose: t.paymentPurpose ?? t.purpose,
     counterpartyInn: inflow ? transfer.payerInn : transfer.payeeInn,
+    counterpartyName: inflow ? transfer.payerName : transfer.payeeName,
   });
 }
 

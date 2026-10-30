@@ -14,6 +14,8 @@ export interface StatementOperation {
   amount: Decimal | number;
   purpose: string | null;
   counterpartyInn: string | null;
+  /** Наименование плательщика или получателя, как в выписке. */
+  counterpartyName?: string | null;
   /** Номер операции банка из файла; у операций из API не задаётся — см. importStatementOperations. */
   externalRef?: string | null;
 }
@@ -164,6 +166,7 @@ export async function importStatementOperations(params: {
         purpose: op.purpose,
         counterpartyId,
         counterpartyInn: op.counterpartyInn,
+        counterpartyName: op.counterpartyName ?? null,
         fingerprint,
         cashFlowArticleId: classification?.cashFlowArticleId ?? null,
         departmentId: classification?.departmentId ?? null,
