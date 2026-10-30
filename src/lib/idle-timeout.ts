@@ -9,7 +9,15 @@ import crypto from "node:crypto";
  * Чистые функции — проверяются тестами; применяет их src/proxy.ts.
  */
 export const ACTIVITY_COOKIE = "pts_active";
-export const IDLE_MINUTES = 60;
+export const IDLE_MINUTES = 240;
+
+/** «4 часов», «часа», «90 минут» — после «больше» в пояснении на странице входа. */
+export function idleLimitText(minutes = IDLE_MINUTES): string {
+  if (minutes % 60 !== 0) return `${minutes} минут`;
+  const hours = minutes / 60;
+  return hours === 1 ? "часа" : `${hours} ${hours % 10 === 1 && hours % 100 !== 11 ? "часа" : "часов"}`;
+}
+
 /** Чаще раза в минуту отметку не обновляем — лишние Set-Cookie ни к чему. */
 const REFRESH_AFTER_MS = 60_000;
 

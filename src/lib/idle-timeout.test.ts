@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityStamp, idleVerdict, readActivityStamp, IDLE_MINUTES } from "./idle-timeout";
+import { activityStamp, idleLimitText, idleVerdict, readActivityStamp, IDLE_MINUTES } from "./idle-timeout";
 
 const secret = "x".repeat(16) + "0123456789abcdef";
 const t0 = Date.UTC(2026, 9, 27, 9, 0, 0);
@@ -23,6 +23,12 @@ describe("idle timeout", () => {
     expect(idleVerdict(t0, t0 + 5 * min)).toBe("refresh");
     expect(idleVerdict(t0, t0 + IDLE_MINUTES * min)).toBe("refresh");
     expect(idleVerdict(t0, t0 + IDLE_MINUTES * min + 1)).toBe("expired");
+  });
+  it("the limit reads naturally on the sign-in page", () => {
+    expect(idleLimitText(240)).toBe("4 часов");
+    expect(idleLimitText(60)).toBe("часа");
+    expect(idleLimitText(90)).toBe("90 минут");
+    expect(idleLimitText(21 * 60)).toBe("21 часа");
   });
   it("no stamp, or one from the future, ends the session", () => {
     expect(idleVerdict(null, t0)).toBe("expired");
