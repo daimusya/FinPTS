@@ -58,9 +58,14 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: "Начисления и деньги",
+    title: "Начисления",
     items: [
       { href: "/accruals", label: "Документы начисления" },
+    ],
+  },
+  {
+    title: "Деньги",
+    items: [
       { href: "/cash/transactions", label: "Банк и касса" },
       { href: "/cash/import", label: "Загрузка выписки" },
       { href: "/cash/classification-rules", label: "Правила классификации" },
