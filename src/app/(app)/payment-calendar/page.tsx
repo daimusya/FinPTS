@@ -82,6 +82,9 @@ export default async function PaymentCalendarPage({
 
   const params = singleParams(await searchParams);
   const todayKey = localDateKey();
+  const todayDate = new Date(`${todayKey}T00:00:00Z`);
+  const tomorrow = new Date(todayDate);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(params.month ?? "") ? params.month! : todayKey.slice(0, 7);
   const includePending = params.pending !== "0";
   const { prev, next } = adjacentMonths(month);
@@ -94,7 +97,11 @@ export default async function PaymentCalendarPage({
     prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(access) }, orderBy: { name: "asc" } }),
     prisma.bankAccount.findMany({ where: orgScope, include: { organization: true }, orderBy: { bankName: "asc" } }),
     prisma.cashAccount.findMany({ where: orgScope, include: { organization: true }, orderBy: { name: "asc" } }),
-    prisma.bankTransaction.groupBy({ by: ["bankAccountId", "cashAccountId", "direction"], where: bankTransactionScopeWhere(access), _sum: { amount: true } }),
+    prisma.bankTransaction.groupBy({
+      by: ["bankAccountId", "cashAccountId", "direction"],
+      where: { ...bankTransactionScopeWhere(access), operationDate: { lt: tomorrow } },
+      _sum: { amount: true },
+    }),
     prisma.accrualDocument.findMany({
       where: { status: "POSTED", paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID"] }, ...accrualScopeWhere(access) },
       include: { lines: true, allocations: { where: { cancelledAt: null } }, counterparty: true, organization: true },
@@ -138,7 +145,6 @@ export default async function PaymentCalendarPage({
     const amount = new Decimal(f._sum.amount?.toString() ?? 0);
     nativeBalances.set(key, (nativeBalances.get(key) ?? new Decimal(0)).plus(f.direction === "INFLOW" ? amount : amount.negated()));
   }
-  const todayDate = new Date(`${todayKey}T00:00:00Z`);
   const balances = new Map<string, Decimal>();
   for (const [key, native] of nativeBalances) balances.set(key, rates.toRub(native, accountInfo.get(key)?.currency ?? "RUB", todayDate));
 
