@@ -8,13 +8,15 @@ import { requirePermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { parseIntermediaryListDocx } from "@/lib/intermediaries/docx-list";
 import { isInternalPath } from "@/lib/internal-path";
-import { getAccessScope } from "@/lib/access-scope";
+import { bankTransactionScopeWhere, getAccessScope, isScopeRestricted, organizationScopeWhere } from "@/lib/access-scope";
 import { buildCommissionMonth, rateOn } from "@/lib/intermediaries/commissions";
 import { parseDateParam } from "@/lib/date-param";
 import Decimal from "decimal.js";
 import { SCALE_SETTING_KEY, serializeScale, validateScale } from "@/lib/intermediaries/standard-scale";
 import { loadStandardScale } from "@/lib/intermediaries/load";
-import { loadCommissionContext, loadInflows, monthParam, parseMonthParam } from "@/lib/intermediaries/load";
+import { loadCommissionContext, loadCommissionPeriod, loadInflows, monthParam, parseMonthParam } from "@/lib/intermediaries/load";
+import { parsePeriod, periodEndExclusive } from "@/lib/intermediaries/period";
+import { calculateCommissionCorrection, calculateIntermediaryReports, commissionMonthDate, commissionReportFingerprint, serializeCommissionReport } from "@/lib/intermediaries/report";
 
 const MAX_DOCX_BYTES = 4 * 1024 * 1024;
 
@@ -34,6 +36,205 @@ function parsePct(value: FormDataEntryValue | null): number | null | "invalid" {
   if (!text) return null;
   const pct = Number(text);
   return Number.isFinite(pct) && pct >= 0 && pct <= 100 ? pct : "invalid";
+}
+
+export async function fixIntermediaryCommissionAction(
+  intermediaryId: string, month: string, fingerprint: string, allReports: boolean, expectedVersion: number, formData: FormData,
+) {
+  const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
+  const scope = await getAccessScope(session);
+  const ym = parseMonthParam(month);
+  if (!ym || isScopeRestricted(scope)) redirect("/intermediaries");
+  const query = new URLSearchParams({ month: monthParam(ym), id: allReports ? "all" : intermediaryId });
+  const reportUrl = "/intermediaries/report";
+  const key = { intermediaryId, month: commissionMonthDate(ym) };
+  const existing = await prisma.intermediaryCommissionClosing.findFirst({
+    where: key, orderBy: { version: "desc" }, select: { version: true },
+  });
+  if ((existing?.version ?? 0) !== expectedVersion) {
+    query.set("versionChanged", "1");
+    redirect(`${reportUrl}?${query}`);
+  }
+  const correction = expectedVersion > 0;
+  const reason = correction ? String(formData.get("correctionReason") ?? "").trim() : null;
+  if (correction && (!reason || reason.length > 1000)) {
+    query.set("correct", "1");
+    query.set("reasonError", "1");
+    redirect(`${reportUrl}?${query}`);
+  }
+  const report = correction
+    ? await calculateCommissionCorrection(scope, ym, intermediaryId)
+    : (await calculateIntermediaryReports(scope, ym, intermediaryId))[0];
+  if (!report?.commission || (!correction && !report.lines.length) || commissionReportFingerprint(report) !== fingerprint) {
+    if (correction) query.set("correct", "1");
+    query.set("fixChanged", "1");
+    redirect(`${reportUrl}?${query}`);
+  }
+  const version = expectedVersion + 1;
+  const created = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.intermediaryCommissionClosing.createMany({
+      data: { ...key, version, correctionReason: reason, report: serializeCommissionReport(report), fixedById: session.userId },
+      skipDuplicates: true,
+    });
+    if (count) {
+      await tx.auditLog.create({ data: {
+        userId: session.userId, entityType: "intermediary_commission_closing",
+        entityId: `${intermediaryId}/${monthParam(ym)}`, action: correction ? "correct" : "fix",
+        afterJson: { intermediaryId, month: monthParam(ym), version, correctionReason: reason, commission: report.commission!.toString() },
+      } });
+    }
+    return count > 0;
+  });
+  if (!created) query.set("versionChanged", "1");
+  refresh();
+  redirect(`${reportUrl}?${query}`);
+}
+
+export async function confirmIntermediaryReceiptsAction(intermediaryId: string, periodQuery: string, formData: FormData) {
+  const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
+  const scope = await getAccessScope(session);
+  const query = new URLSearchParams(periodQuery);
+  const period = parsePeriod(Object.fromEntries(query));
+  const back = `/intermediaries/${encodeURIComponent(intermediaryId)}?${query}#operations`;
+  const selected = new Set(formData.getAll("operationId").map(String));
+  if (!selected.size) redirect(back);
+  const { period: data } = await loadCommissionPeriod(scope, period.from, periodEndExclusive(period));
+  const row = data.rows.find((item) => item.intermediary.id === intermediaryId);
+  const operationIds = row?.inflows.filter((op) => !op.confirmed && selected.has(op.id)).map((op) => op.id);
+  if (!operationIds?.length) redirect(back);
+
+  await prisma.$transaction(async (tx) => {
+    const confirmed = await tx.bankTransaction.updateManyAndReturn({
+      where: {
+        id: { in: operationIds }, direction: "INFLOW", isTransfer: false, commissionIntermediaryId: null,
+        operationDate: { ...(period.from ? { gte: period.from } : {}), lt: periodEndExclusive(period) },
+        ...bankTransactionScopeWhere(scope),
+      },
+      data: { commissionIntermediaryId: intermediaryId },
+      select: { id: true },
+    });
+    if (confirmed.length) {
+      await tx.auditLog.createMany({ data: confirmed.map(({ id }) => ({
+        userId: session.userId, entityType: "bank_transaction", entityId: id, action: "confirm_intermediary",
+        afterJson: { commissionIntermediaryId: intermediaryId },
+      })) });
+    }
+  });
+  refresh();
+  redirect(back);
+}
+
+export async function undoIntermediaryReceiptConfirmationAction(intermediaryId: string, operationId: string, periodQuery: string) {
+  const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
+  const scope = await getAccessScope(session);
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.bankTransaction.updateMany({
+      where: { id: operationId, commissionIntermediaryId: intermediaryId, ...bankTransactionScopeWhere(scope) },
+      data: { commissionIntermediaryId: null },
+    });
+    if (count) {
+      await tx.auditLog.create({ data: {
+        userId: session.userId, entityType: "bank_transaction", entityId: operationId, action: "undo_confirm_intermediary",
+        beforeJson: { commissionIntermediaryId: intermediaryId },
+        afterJson: { commissionIntermediaryId: null },
+      } });
+    }
+  });
+  refresh();
+  redirect(`/intermediaries/${encodeURIComponent(intermediaryId)}?${new URLSearchParams(periodQuery)}#operations`);
+}
+
+export async function saveManualReceiptAction(
+  intermediaryId: string,
+  receiptId: string,
+  returnTo: string,
+  editing: boolean,
+  _previous: { error?: string },
+  formData: FormData,
+): Promise<{ error?: string }> {
+  const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
+  const scope = await getAccessScope(session);
+  if (scope.departmentIds || scope.projectIds) return { error: "Недостаточно прав для ручного ввода по организации." };
+  const organizationId = String(formData.get("organizationId") ?? "");
+  const date = parseDateParam(String(formData.get("date") ?? ""));
+  const amount = String(formData.get("amount") ?? "").trim().replace(",", ".");
+  const payerName = String(formData.get("payerName") ?? "").trim();
+  const purpose = String(formData.get("purpose") ?? "").trim() || null;
+  if (!date || !payerName || payerName.length > 250 || (purpose?.length ?? 0) > 1000) {
+    return { error: "Проверьте дату, название плательщика и назначение платежа." };
+  }
+  if (!/^\d{1,16}(\.\d{1,2})?$/.test(amount) || !new Decimal(amount).gt(0)) {
+    return { error: "Введите положительную сумму в рублях с точностью до копеек." };
+  }
+  const receiptWhere = { id: receiptId, intermediaryId, ...(scope.organizationIds ? { organizationId: { in: scope.organizationIds } } : {}) };
+  const [intermediary, organization, existing] = await Promise.all([
+    prisma.intermediary.findFirst({ where: { id: intermediaryId, isArchived: false }, select: { id: true } }),
+    prisma.organization.findFirst({ where: { AND: [{ id: organizationId, isArchived: false }, organizationScopeWhere(scope)] }, select: { id: true } }),
+    editing ? prisma.intermediaryReceipt.findFirst({ where: receiptWhere }) : null,
+  ]);
+  if (editing && !existing) return { error: "Ручное поступление недоступно или уже удалено." };
+  if (!intermediary || (!organization && existing?.organizationId !== organizationId)) {
+    return { error: "Посредник или организация недоступны." };
+  }
+
+  const data = { organizationId, date, amount, payerName, purpose };
+  const saved = await prisma.$transaction(async (tx) => {
+    const { count } = existing
+      ? await tx.intermediaryReceipt.updateMany({ where: existing, data })
+      : await tx.intermediaryReceipt.createMany({ data: { id: receiptId, intermediaryId, ...data }, skipDuplicates: true });
+    if (count) {
+      await tx.auditLog.create({ data: {
+        userId: session.userId, entityType: "intermediary_receipt", entityId: receiptId, action: existing ? "update" : "create",
+        beforeJson: existing ? manualReceiptAudit(existing) : undefined,
+        afterJson: { intermediaryId, organizationId, date: date.toISOString(), amount, payerName, purpose },
+      } });
+    }
+    return count > 0 || !editing;
+  });
+  if (!saved) return { error: "Поступление уже изменено или удалено. Обновите страницу." };
+  refresh();
+  const query = new URLSearchParams(returnTo);
+  const day = date.toISOString().slice(0, 10);
+  if ((query.get("from") && day < query.get("from")!) || (query.get("to") && day > query.get("to")!)) {
+    query.delete("all");
+    query.set("from", day);
+    query.set("to", day);
+  }
+  query.set(editing ? "receiptUpdated" : "receiptAdded", "1");
+  redirect(`/intermediaries/${intermediaryId}?${query}#receipts`);
+}
+
+function manualReceiptAudit(receipt: {
+  intermediaryId: string; organizationId: string; date: Date; amount: { toString(): string }; payerName: string; purpose: string | null;
+}) {
+  return {
+    intermediaryId: receipt.intermediaryId, organizationId: receipt.organizationId,
+    date: receipt.date.toISOString(), amount: receipt.amount.toString(), payerName: receipt.payerName, purpose: receipt.purpose,
+  };
+}
+
+export async function deleteManualReceiptAction(intermediaryId: string, receiptId: string, periodQuery: string) {
+  const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
+  const scope = await getAccessScope(session);
+  const query = new URLSearchParams(periodQuery);
+  const back = `/intermediaries/${encodeURIComponent(intermediaryId)}`;
+  if (scope.departmentIds || scope.projectIds) redirect(`${back}?${query}#operations`);
+  const removed = await prisma.$transaction(async (tx) => {
+    const receipt = await tx.intermediaryReceipt.findFirst({
+      where: { id: receiptId, intermediaryId, intermediary: { isArchived: false }, ...(scope.organizationIds ? { organizationId: { in: scope.organizationIds } } : {}) },
+    });
+    if (!receipt) return false;
+    const { count } = await tx.intermediaryReceipt.deleteMany({ where: receipt });
+    if (!count) return false;
+    await tx.auditLog.create({ data: {
+      userId: session.userId, entityType: "intermediary_receipt", entityId: receiptId,
+      action: "delete", beforeJson: manualReceiptAudit(receipt),
+    } });
+    return true;
+  });
+  query.set(removed ? "receiptDeleted" : "receiptDeleteFailed", "1");
+  refresh();
+  redirect(`${back}?${query}#operations`);
 }
 
 export interface ListImportState {

@@ -7,10 +7,9 @@ import { formatMoney } from "@/lib/money";
 import { singleParams } from "@/lib/query-params";
 import { canExportReport } from "@/lib/reports/export-access";
 import { SubmitButton } from "@/components/submit-button";
-import { ClientBankUpload } from "@/components/client-bank-upload";
-import { organizationsForNewAccounts } from "@/lib/bank-import/client-bank-import";
 import { defaultMonth, loadCommissionDashboard, monthParam, parseMonthParam, shiftMonth } from "@/lib/intermediaries/load";
 import { hasRateOn, monthLabel, rateOn, type IntermediaryInfo, type IntermediaryMonth, type PayerGroup } from "@/lib/intermediaries/commissions";
+import { loadFixedCommissionReports } from "@/lib/intermediaries/report";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { addClientAction, bindPayerAction, confirmAllMatchesAction } from "./actions";
 import { IntermediaryListUpload } from "./forms";
@@ -33,9 +32,9 @@ export default async function IntermediariesPage({ searchParams }: { searchParam
   const ym = parseMonthParam(sp.month) ?? (await defaultMonth(scope));
   const canManage = hasPermission(session, PERMISSIONS.CASH_MANAGE);
   const canExport = canExportReport(session.permissions, "intermediaries");
-  const [{ context, current, trend }, organizations] = await Promise.all([
+  const [{ context, current, trend }, fixedReports] = await Promise.all([
     loadCommissionDashboard(scope, ym),
-    canManage ? organizationsForNewAccounts(session) : Promise.resolve([]),
+    loadFixedCommissionReports(scope, ym),
   ]);
   const month = monthParam(ym);
   const returnTo = `/intermediaries?month=${month}`;
@@ -53,8 +52,8 @@ export default async function IntermediariesPage({ searchParams }: { searchParam
         <div>
           <h1>Комиссии посредников</h1>
           <p>
-            Поступления из загруженных выписок относятся к посредникам по списку их организаций; комиссия — процент от
-            поступлений за месяц.
+            Поступления со всех доступных банковских счетов и касс берутся из раздела «Банк и касса».
+            Комиссия к выплате рассчитывается по подтверждённым поступлениям за месяц.
           </p>
         </div>
         <div className="month-nav">
@@ -70,13 +69,21 @@ export default async function IntermediariesPage({ searchParams }: { searchParam
           <Link className="btn btn-ghost btn-sm" href={`/intermediaries?month=${monthParam(shiftMonth(ym, 1))}`} aria-label="Следующий месяц">
             →
           </Link>
+          {canManage ? <Link href="/cash/import" className="btn btn-secondary btn-sm">Загрузить выписку</Link> : null}
         </div>
       </div>
 
-      {canManage ? (
+      {fixedReports.length ? (
         <div className="card" style={{ marginBottom: 16 }}>
-          <h2 className="section-title">Загрузить выписку Альфа-Банка</h2>
-          <ClientBankUpload organizations={organizations} />
+          <h2 className="section-title">Зафиксированные комиссии · {monthLabel(ym.year, ym.month)}</h2>
+          <ul>
+            {fixedReports.map((r) => (
+              <li key={r.id}>
+                <Link href={`/intermediaries/report?month=${month}&id=${r.id}`}>{r.name}</Link>
+                {r.commission !== null ? ` · ${formatMoney(r.commission)}` : ""}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 
@@ -108,8 +115,9 @@ export default async function IntermediariesPage({ searchParams }: { searchParam
               </div>
             </div>
             <div className="stat-card stat-card--accent">
-              <div className="stat-label">Комиссия к выплате</div>
+              <div className="stat-label">{fixedReports.length ? "Комиссия по текущему расчёту" : "Комиссия к выплате"}</div>
               <div className="stat-value">{formatMoney(current.totalCommission)}</div>
+              {current.toReview.length ? <div className="text-muted">Предварительно по неподтверждённым: {current.pendingCommission ? formatMoney(current.pendingCommission) : "—"}</div> : null}
               <div className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
                 {missingPct.length ? `без ставки: ${missingPct.map((r) => r.intermediary.name).join(", ")}` : "по всем посредникам"}
               </div>
@@ -175,7 +183,7 @@ export default async function IntermediariesPage({ searchParams }: { searchParam
                     <th>Ставка</th>
                     <th style={{ textAlign: "right" }}>Оплат</th>
                     <th style={{ textAlign: "right" }}>Поступления</th>
-                    <th style={{ textAlign: "right" }}>Комиссия</th>
+                    <th style={{ textAlign: "right" }}>{fixedReports.length ? "Текущий расчёт" : "К выплате"}</th>
                     <th />
                   </tr>
                 </thead>
@@ -198,7 +206,7 @@ export default async function IntermediariesPage({ searchParams }: { searchParam
                                       {op.payerName}
                                       <div className="text-muted" style={{ fontSize: 12 }}>
                                         ИНН {op.payerInn ?? "—"}
-                                        {op.confirmed ? " · закреплён" : ` · по названию «${op.clientName}»`}
+                                        {op.manualIntermediaryId ? " · ручное поступление" : op.confirmed ? " · закреплён" : ` · по названию «${op.clientName}»`}
                                       </div>
                                     </td>
                                     <td className="mono" style={{ textAlign: "right" }}>
@@ -226,15 +234,16 @@ export default async function IntermediariesPage({ searchParams }: { searchParam
                       </td>
                       <td className="mono" style={{ textAlign: "right", fontWeight: 700 }}>
                         {r.commission ? formatMoney(r.commission) : "—"}
+                        {r.unconfirmed ? <div className="text-muted">Предварительно: {r.pendingCommission ? formatMoney(r.pendingCommission) : "—"}</div> : null}
                       </td>
                       <td>
                         <div className="row-actions" style={{ justifyContent: "flex-end" }}>
-                          {r.inflows.length ? (
+                          {r.inflows.some((op) => op.confirmed) ? (
                             <Link href={`/intermediaries/report?month=${month}&id=${r.intermediary.id}`} className="btn btn-secondary btn-sm">
                               Отчёт
                             </Link>
                           ) : null}
-                          {r.inflows.length && canExport ? (
+                          {r.inflows.some((op) => op.confirmed) && canExport ? (
                             <a href={`/api/intermediaries/export?month=${month}&id=${r.intermediary.id}`} className="btn btn-ghost btn-sm">
                               Excel
                             </a>
@@ -270,6 +279,7 @@ export default async function IntermediariesPage({ searchParams }: { searchParam
                   <span key={r.intermediary.id}>
                     {i ? ", " : ""}
                     <Link href={`/intermediaries/${r.intermediary.id}`}>{r.intermediary.name}</Link>
+                    {r.intermediary.category === "STANDARD" && !r.intermediary.turnoverFrom ? " (Оборот с первой оплаты)" : ""}
                   </span>
                 ))}
               </p>
@@ -397,11 +407,12 @@ export default async function IntermediariesPage({ searchParams }: { searchParam
 /** Ставка месяца; если менялась внутри месяца — все с датой смены. «Стандарт» помечен. */
 function RateCell({ row, monthEnd }: { row: IntermediaryMonth; monthEnd: Date }) {
   const standard = row.intermediary.category === "STANDARD";
-  const note = standard ? <div className="text-muted" style={{ fontSize: 12 }}>стандарт, по обороту</div> : null;
+  const standardNote = row.intermediary.turnoverFrom ? "стандарт, по обороту" : "Оборот с первой оплаты";
+  const note = standard ? <div className="text-muted" style={{ fontSize: 12 }}>{standardNote}</div> : null;
   if (row.parts.length > 1) {
     return (
       <>
-        {row.parts.map((p) => (p.pct === null ? (standard ? "без комиссии" : "не задана") : pctText(p.pct))).join(" → ")}
+        {row.parts.map((p) => (p.pct === null ? (standard ? "без комиссии" : "Ставка не задана") : pctText(p.pct))).join(" → ")}
         <div className="text-muted" style={{ fontSize: 12 }}>
           {row.parts.slice(1).map((p) => `с ${day(p.from)}`).join(", ")}
         </div>
@@ -409,11 +420,11 @@ function RateCell({ row, monthEnd }: { row: IntermediaryMonth; monthEnd: Date })
       </>
     );
   }
-  if (standard && row.parts.length === 0) return <span className="text-muted">стандарт, по обороту</span>;
+  if (standard && row.parts.length === 0) return note;
   const pct = row.parts.length ? row.parts[0].pct : rateOn(row.intermediary, monthEnd);
   if (pct === null && standard) return <span className="text-muted">до начала оборота</span>;
   return pct === null ? (
-    <span className="badge badge-danger">не задана</span>
+    <span className="badge badge-danger">Ставка не задана</span>
   ) : (
     <>
       {pctText(pct)}

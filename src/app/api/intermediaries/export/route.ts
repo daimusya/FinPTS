@@ -4,7 +4,7 @@ import { requireSession } from "@/lib/session";
 import { getAccessScope } from "@/lib/access-scope";
 import { canExportReport } from "@/lib/reports/export-access";
 import { parseMonthParam } from "@/lib/intermediaries/load";
-import { loadIntermediaryReports, type IntermediaryReport } from "@/lib/intermediaries/report";
+import { loadIntermediaryReports, parseCommissionVersion, type IntermediaryReport } from "@/lib/intermediaries/report";
 
 const NUMBER_FORMAT = "#,##0 ;[Red](#,##0)";
 const day = (d: Date) => d.toISOString().slice(0, 10).split("-").reverse().join(".");
@@ -22,7 +22,7 @@ function reportSheet(report: IntermediaryReport): XLSX.WorkSheet {
     [],
     [null, "Дата", "Содержание операции", "Поступления"],
     [],
-    ...report.lines.map((l) => [null, day(l.date), l.text, l.amount.toNumber()]),
+    ...report.lines.map((l) => [null, day(l.date), l.text.replace("\nНазначение платежа:", " — Назначение платежа:"), l.amount.toNumber()]),
     [null, "Итого", null, report.total.toNumber()],
     ...report.commissionLines.map((c) => [null, c.label, null, c.amount ? c.amount.toNumber() : null]),
   ];
@@ -67,7 +67,10 @@ export async function GET(request: NextRequest) {
   const ym = parseMonthParam(request.nextUrl.searchParams.get("month"));
   if (!ym) return new Response("Укажите месяц", { status: 400 });
   const id = request.nextUrl.searchParams.get("id") || "all";
-  const reports = await loadIntermediaryReports(await getAccessScope(session), ym, id);
+  const versionParam = request.nextUrl.searchParams.get("version");
+  const version = versionParam === null ? undefined : parseCommissionVersion(versionParam);
+  if (version === null || (version !== undefined && id === "all")) return new Response("Некорректная версия отчёта", { status: 400 });
+  const reports = await loadIntermediaryReports(await getAccessScope(session), ym, id, version);
   if (reports.length === 0) return new Response("За этот месяц поступлений через посредников нет", { status: 404 });
 
   const workbook = XLSX.utils.book_new();
@@ -77,7 +80,8 @@ export async function GET(request: NextRequest) {
 
   // Как у шаблона: «ХАРЛАМОВА 0926.xlsx» — фамилия и ММГГ.
   const period = `${String(ym.month).padStart(2, "0")}${String(ym.year).slice(2)}`;
-  const fileName = `${id === "all" ? "ПОСРЕДНИКИ" : reports[0].name.toUpperCase()} ${period}.xlsx`;
+  const versionSuffix = version !== undefined ? ` (версия ${version})` : "";
+  const fileName = `${id === "all" ? "ПОСРЕДНИКИ" : reports[0].name.toUpperCase()} ${period}${versionSuffix}.xlsx`;
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

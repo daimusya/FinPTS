@@ -1,20 +1,22 @@
 import Link from "next/link";
+import { randomUUID } from "node:crypto";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
 import { SubmitButton } from "@/components/submit-button";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
-import { addClientAction, addRateChangeAction, archiveIntermediaryAction, bindPayerAction, removeClientAction, removeRateChangeAction } from "../actions";
-import { IntermediaryForm } from "../forms";
+import { addClientAction, addRateChangeAction, archiveIntermediaryAction, bindPayerAction, confirmIntermediaryReceiptsAction, deleteManualReceiptAction, removeClientAction, removeRateChangeAction, undoIntermediaryReceiptConfirmationAction } from "../actions";
+import { SelectAllCheckbox } from "@/components/select-all-checkbox";
+import { IntermediaryForm, ManualReceiptForm } from "../forms";
 import { PeriodFilter } from "../period-filter";
 import { singleParams } from "@/lib/query-params";
-import { getAccessScope } from "@/lib/access-scope";
+import { getAccessScope, organizationScopeWhere } from "@/lib/access-scope";
 import { formatMoney } from "@/lib/money";
 import { loadCommissionPeriod, loadPriorTurnover } from "@/lib/intermediaries/load";
 import { scalePct, tierLabel } from "@/lib/intermediaries/standard-scale";
 import { BEFORE_TURNOVER, rateOn } from "@/lib/intermediaries/commissions";
-import { parsePeriod, periodEndExclusive, periodLabel } from "@/lib/intermediaries/period";
+import { dateParam, parsePeriod, periodEndExclusive, periodLabel, periodQuery } from "@/lib/intermediaries/period";
 
 const day = (d: Date) => d.toISOString().slice(0, 10).split("-").reverse().join(".");
 const pctText = (pct: { toString(): string } | null) => (pct === null ? "не задана" : `${pct.toString().replace(".", ",")}%`);
@@ -50,8 +52,28 @@ export default async function IntermediaryPage({
   const canManage = hasPermission(session, PERMISSIONS.CASH_MANAGE);
   const returnTo = `/intermediaries/${id}`;
   const period = parsePeriod(sp);
-  const { context, period: data } = await loadCommissionPeriod(await getAccessScope(session), period.from, periodEndExclusive(period));
+  const selectedPeriodQuery = new URLSearchParams(periodQuery(period)).toString();
+  const isMonthPeriod = period.from !== null && dateParam(period.from).slice(0, 7) === dateParam(period.to).slice(0, 7);
+  const scope = await getAccessScope(session);
+  const canManageReceipts = canManage && !intermediary.isArchived && !scope.departmentIds && !scope.projectIds;
+  const [{ context, period: data }, activeOrganizations] = await Promise.all([
+    loadCommissionPeriod(scope, period.from, periodEndExclusive(period)),
+    canManageReceipts
+      ? prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(scope) }, select: { id: true, name: true }, orderBy: { name: "asc" } })
+      : [],
+  ]);
   const row = data.rows.find((r) => r.intermediary.id === id);
+  const editingReceipt = canManageReceipts ? row?.inflows.find((op) => op.id === sp.editReceipt && op.manualIntermediaryId === id) : undefined;
+  const editingOrganizationId = editingReceipt?.manualOrganizationId;
+  const organizations = [...activeOrganizations];
+  if (editingOrganizationId && !organizations.some((org) => org.id === editingOrganizationId)) {
+    const currentOrganization = await prisma.organization.findUnique({ where: { id: editingOrganizationId }, select: { id: true, name: true } });
+    if (currentOrganization) organizations.push(currentOrganization);
+  }
+  const visibleInflows = row?.inflows.slice(0, MAX_ROWS) ?? [];
+  const showBatchConfirmation = canManage && isMonthPeriod && visibleInflows.some((op) => !op.confirmed);
+  const batchFormId = "confirm-month-receipts";
+  const confirmReceipts = confirmIntermediaryReceiptsAction.bind(null, id, selectedPeriodQuery);
   const today = new Date();
   const standard = intermediary.category === "STANDARD";
   const turnoverNow = standard && row ? ((await loadPriorTurnover(context, new Date(today.getTime() + 24 * 3600_000))).get(id) ?? null) : null;
@@ -215,7 +237,26 @@ export default async function IntermediaryPage({
         </div>
       )}
 
+      {organizations.length ? (
+        <div className="card" id="receipts">
+          <h2 className="section-title">{editingReceipt ? "Редактирование ручного поступления" : "Ручное поступление"}</h2>
+          {sp.receiptAdded === "1" ? <p role="status">Поступление добавлено.</p> : null}
+          {sp.receiptUpdated === "1" ? <p role="status">Поступление исправлено.</p> : null}
+          <ManualReceiptForm
+            key={editingReceipt?.id ?? "new"}
+            intermediaryId={id} receiptId={editingReceipt?.id ?? randomUUID()}
+            period={selectedPeriodQuery} today={dateParam(today)} organizations={organizations}
+            initial={editingReceipt && editingOrganizationId ? {
+              organizationId: editingOrganizationId, date: dateParam(editingReceipt.date), amount: editingReceipt.amount.toFixed(2),
+              payerName: editingReceipt.payerName ?? "", purpose: editingReceipt.purpose,
+            } : undefined}
+          />
+          {editingReceipt ? <Link href={`${returnTo}?${selectedPeriodQuery}#operations`}>Отменить редактирование</Link> : null}
+        </div>
+      ) : null}
       <div className="card" id="operations">
+        {sp.receiptDeleted === "1" ? <p role="status">Ручное поступление удалено.</p> : null}
+        {sp.receiptDeleteFailed === "1" ? <p role="alert">Поступление недоступно или уже изменено. Обновите страницу.</p> : null}
         <h2 className="section-title">Поступления · {periodLabel(period)}</h2>
         <PeriodFilter path={returnTo} period={period} anchor="operations" />
         {!row ? (
@@ -234,17 +275,26 @@ export default async function IntermediaryPage({
                 </div>
               </div>
               <div className="stat-card stat-card--accent">
-                <div className="stat-label">Комиссия за период</div>
+                <div className="stat-label">Комиссия к выплате</div>
                 <div className="stat-value">{row.commission ? formatMoney(row.commission) : "—"}</div>
+                {row.unconfirmed ? <div className="text-muted">Предварительно по неподтверждённым: {row.pendingCommission ? formatMoney(row.pendingCommission) : "—"}</div> : null}
                 <div className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
                   {row.parts.map((p) => `${p.basis === BEFORE_TURNOVER ? BEFORE_TURNOVER : pctText(p.pct)} от ${formatMoney(p.total)}`).join("; ")}
                 </div>
               </div>
             </div>
+            {showBatchConfirmation ? (
+              <form id={batchFormId} action={confirmReceipts}>
+                <SubmitButton className="btn btn-primary">Подтвердить отмеченные</SubmitButton>
+              </form>
+            ) : canManage && row.unconfirmed && !isMonthPeriod ? (
+              <p className="text-muted">Выберите даты в пределах одного месяца, чтобы подтвердить несколько поступлений сразу.</p>
+            ) : null}
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
+                    {showBatchConfirmation ? <th><SelectAllCheckbox formId={batchFormId} name="operationId" label="Отметить все неподтверждённые поступления в таблице" /></th> : null}
                     <th>Дата</th>
                     <th>Плательщик</th>
                     <th>Назначение платежа</th>
@@ -253,17 +303,39 @@ export default async function IntermediaryPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {row.inflows.slice(0, MAX_ROWS).map((op) => (
+                  {visibleInflows.map((op) => (
                     <tr key={op.id}>
+                      {showBatchConfirmation ? (
+                        <td>{!op.confirmed ? <input type="checkbox" form={batchFormId} name="operationId" value={op.id} aria-label={`Отметить поступление от ${op.payerName ?? "плательщика"} за ${day(op.date)} на ${formatMoney(op.amount)}`} /> : null}</td>
+                      ) : null}
                       <td className="mono">
-                        <Link href={`/cash/transactions/${op.id}`}>{day(op.date)}</Link>
+                        {op.manualIntermediaryId ? day(op.date) : <Link href={`/cash/transactions/${op.id}`}>{day(op.date)}</Link>}
                       </td>
                       <td>
                         {op.payerName ?? "без наименования"}
                         <div className="text-muted" style={{ fontSize: 12 }}>
                           ИНН {op.payerInn ?? "—"}
-                          {op.confirmed ? " · закреплён" : ` · по названию «${op.clientName}»`}
+                          {op.manualIntermediaryId ? " · ручное поступление" : op.confirmed ? " · подтверждено" : ` · по названию «${op.clientName}», предварительно`}
                         </div>
+                        {canManage && !op.confirmed && !showBatchConfirmation ? (
+                          <form action={confirmReceipts}>
+                            <input type="hidden" name="operationId" value={op.id} />
+                            <SubmitButton className="btn btn-secondary btn-sm">Подтвердить поступление</SubmitButton>
+                          </form>
+                        ) : null}
+                        {canManage && op.confirmedIntermediaryId === id ? (
+                          <form action={undoIntermediaryReceiptConfirmationAction.bind(null, id, op.id, selectedPeriodQuery)}>
+                            <SubmitButton className="btn btn-secondary btn-sm">Отменить подтверждение</SubmitButton>
+                          </form>
+                        ) : null}
+                        {canManageReceipts && op.manualIntermediaryId === id ? (
+                          <div className="form-row">
+                            <Link className="btn btn-secondary btn-sm" href={`${returnTo}?${selectedPeriodQuery}&editReceipt=${encodeURIComponent(op.id)}#receipts`}>Редактировать</Link>
+                            <form action={deleteManualReceiptAction.bind(null, id, op.id, selectedPeriodQuery)}>
+                              <ConfirmSubmitButton className="btn btn-secondary btn-sm" message="Удалить ручное поступление и пересчитать комиссию?">Удалить</ConfirmSubmitButton>
+                            </form>
+                          </div>
+                        ) : null}
                       </td>
                       <td className="text-muted" style={{ fontSize: 12, maxWidth: 360 }}>
                         {op.purpose ?? ""}
@@ -277,7 +349,7 @@ export default async function IntermediaryPage({
                     </tr>
                   ))}
                   <tr className="total-row">
-                    <td colSpan={4}>Итого</td>
+                    <td colSpan={showBatchConfirmation ? 5 : 4}>Итого</td>
                     <td className="mono" style={{ textAlign: "right" }}>
                       {formatMoney(row.total)}
                     </td>

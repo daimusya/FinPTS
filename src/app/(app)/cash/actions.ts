@@ -217,6 +217,8 @@ export async function createBankTransactionAction(formData: FormData) {
   });
 
   revalidatePath("/cash/transactions");
+  revalidatePath("/intermediaries", "layout");
+  revalidatePath("/master-data/intermediaries");
   redirect(`/cash/transactions/${created.id}`);
 }
 
@@ -399,6 +401,8 @@ export async function updateBankTransactionAction(id: string, formData: FormData
   }
 
   revalidatePath("/cash/transactions");
+  revalidatePath("/intermediaries", "layout");
+  revalidatePath("/master-data/intermediaries");
   for (const legId of ownIds) revalidatePath(`/cash/transactions/${legId}`);
   redirect(`/cash/transactions/${id}?notice=${encodeURIComponent(pair ? "Перевод исправлен — обе операции" : "Операция исправлена")}`);
 }
@@ -433,6 +437,8 @@ export async function deleteBankTransactionAction(id: string, formData: FormData
   }
 
   revalidatePath("/cash/transactions");
+  revalidatePath("/intermediaries", "layout");
+  revalidatePath("/master-data/intermediaries");
   const date = tx.operationDate.toLocaleDateString("ru-RU");
   redirect(
     `/cash/transactions?notice=${encodeURIComponent(
@@ -511,6 +517,8 @@ export async function deleteBankTransactionsAction(formData: FormData) {
 
   revalidatePath("/cash/transactions");
   revalidatePath("/cash/import");
+  revalidatePath("/intermediaries", "layout");
+  revalidatePath("/master-data/intermediaries");
   const parts = [`Удалено операций: ${toDelete.length}${plan.transfers ? ` (в том числе переводов целиком: ${plan.transfers})` : ""}`];
   const invisible = ids.length - selected.length;
   if (invisible > 0) parts.push(`Не найдено или вне вашей зоны видимости: ${invisible}`);

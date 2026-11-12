@@ -31,15 +31,45 @@ describe("buildCommissionMonth", () => {
     const month = buildCommissionMonth([harlamova, noRate], [{ inn: "7814776596", intermediaryId: "kh" }], inflows, new Set());
     const kh = month.rows.find((r) => r.intermediary.id === "kh")!;
     expect(kh.total.toNumber()).toBe(73920);
-    expect(kh.commission?.toNumber()).toBe(14784);
+    expect(kh.confirmedTotal.toNumber()).toBe(33850);
+    expect(kh.commission?.toNumber()).toBe(6770);
+    expect(kh.pendingCommission?.toNumber()).toBe(8014);
     expect(kh.unconfirmed).toBe(3);
     const tt = month.rows.find((r) => r.intermediary.id === "tt")!;
     expect(tt.total.toNumber()).toBe(5000);
     expect(tt.commission).toBeNull();
-    expect(month.totalCommission.toNumber()).toBe(14784);
+    expect(month.totalCommission.toNumber()).toBe(6770);
     expect(month.toReview.map((g) => g.inn)).toEqual(["7805068406", "7801507557", "7805818426"]);
     // Свой перевод не попадает даже в «без посредника».
     expect(month.unassigned.map((g) => g.inn)).toEqual(["7800000000"]);
+  });
+
+  it("не повышает ступень Стандарта из-за неподтверждённой оплаты и учитывает ручное поступление", () => {
+    const standard = { ...harlamova, category: "STANDARD" as const };
+    const manual = { ...op("2026-09-03", 10000, "Ручной плательщик", null), manualIntermediaryId: standard.id };
+    const month = buildCommissionMonth([standard], [{ inn: "7801507557", intermediaryId: standard.id }], [
+      op("2026-09-01", 25000, "ООО Трейд", "7801507557"),
+      op("2026-09-02", 100000, "ООО ПТФ КонСис", "7805068406"),
+      manual,
+    ], new Set());
+    const row = month.rows[0];
+    expect(row.confirmedTotal.toNumber()).toBe(35000);
+    expect(row.commission?.toNumber()).toBe(1750);
+    expect(row.pendingCommission?.toNumber()).toBe(5000);
+    expect(month.turnoverAfter.get(standard.id)?.toNumber()).toBe(35000);
+    expect(row.inflows.find((inflow) => inflow.id === manual.id)?.confirmed).toBe(true);
+  });
+
+  it("подтверждает отдельное поступление без ИНН и оставляет остальные оплаты плательщика на проверке", () => {
+    const first = op("2026-09-01", 10000, "ООО Трейд", null);
+    const second = op("2026-09-02", 20000, "ООО Трейд", null);
+    const month = buildCommissionMonth([harlamova], [], [
+      { ...first, confirmedIntermediaryId: harlamova.id },
+      second,
+    ], new Set());
+    expect(month.totalCommission.toNumber()).toBe(2000);
+    expect(month.pendingCommission?.toNumber()).toBe(4000);
+    expect(month.toReview[0]?.count).toBe(1);
   });
 });
 
@@ -67,7 +97,7 @@ describe("ставка с даты", () => {
   it("в месяце со сменой ставки комиссия считается по частям", () => {
     const month = buildCommissionMonth(
       [m],
-      [],
+      [{ inn: "7801507557", intermediaryId: m.id }],
       [op("2026-09-03", 10000, 'ООО "ТРЕЙД"', "7801507557"), op("2026-09-14", 5000, 'ООО "ТРЕЙД"', "7801507557"), op("2026-09-20", 20000, 'ООО "ТРЕЙД"', "7801507557")],
       new Set(),
     );
@@ -91,10 +121,12 @@ describe("печатная форма", () => {
       op("2026-09-22", 13800, 'ООО "ПТФ "КОНСИС"', "7805068406"),
       op("2026-09-17", 33850, 'ООО "ДЕЖАНЕЙРО"', "7814776596"),
       op("2026-09-22", 18270, 'ООО "ПТФ "КОНСИС"', "7805068406"),
+      op("2026-09-22", 1000, 'ООО "ПТФ "КОНСИС"', "7805068406", "Счёт № 123"),
     ]);
     expect(lines.map((l) => [l.date.toISOString().slice(0, 10), l.text, l.amount.toNumber()])).toEqual([
-      ["2026-09-17", "Покупатель: ДЕЖАНЕЙРО ООО", 33850],
-      ["2026-09-22", "Покупатель: ПТФ КОНСИС ООО", 32070],
+      ["2026-09-17", "Покупатель: ДЕЖАНЕЙРО ООО\nНазначение платежа: Оплата по счёту", 33850],
+      ["2026-09-22", "Покупатель: ПТФ КОНСИС ООО\nНазначение платежа: Оплата по счёту", 32070],
+      ["2026-09-22", "Покупатель: ПТФ КОНСИС ООО\nНазначение платежа: Счёт № 123", 1000],
     ]);
     expect(reportTitle(2026, 9)).toBe("Анализ поступлений и платежей за Сентябрь 2026 г.");
   });

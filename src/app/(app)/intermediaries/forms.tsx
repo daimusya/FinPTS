@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import {
+  saveManualReceiptAction,
   importIntermediaryListAction,
   saveIntermediaryAction,
   saveStandardScaleAction,
@@ -9,6 +10,36 @@ import {
   type ListImportState,
   type ScaleFormState,
 } from "./actions";
+
+export function ManualReceiptForm({ intermediaryId, receiptId, period, today, organizations, initial }: {
+  intermediaryId: string;
+  receiptId: string;
+  period: string;
+  today: string;
+  organizations: Array<{ id: string; name: string }>;
+  initial?: { organizationId: string; date: string; amount: string; payerName: string; purpose: string | null };
+}) {
+  const [state, action, pending] = useActionState(saveManualReceiptAction.bind(null, intermediaryId, receiptId, period, Boolean(initial)), {});
+  return (
+    <form action={action}>
+      {!initial ? <p className="text-muted">Вносите здесь поступления, которых нет в загруженной выписке. Запись сразу подтверждается для расчёта комиссии.</p> : null}
+      <div className="form-row">
+        <label>Организация
+          <select name="organizationId" required defaultValue={initial?.organizationId ?? (organizations.length === 1 ? organizations[0].id : "")}>
+            <option value="" disabled>Выберите организацию</option>
+            {organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
+          </select>
+        </label>
+        <label>Дата поступления <input type="date" name="date" defaultValue={initial?.date ?? today} required /></label>
+        <label>Сумма, ₽ <input name="amount" inputMode="decimal" defaultValue={initial?.amount} required /></label>
+        <label>Плательщик <input name="payerName" defaultValue={initial?.payerName} maxLength={250} required /></label>
+        <label>Назначение платежа <input name="purpose" defaultValue={initial?.purpose ?? ""} maxLength={1000} /></label>
+      </div>
+      {state.error ? <p role="alert">{state.error}</p> : null}
+      <button type="submit" className="btn btn-primary" disabled={pending}>{pending ? "Сохранение…" : initial ? "Сохранить изменения" : "Добавить поступление"}</button>
+    </form>
+  );
+}
 
 export function IntermediaryListUpload() {
   const [state, action, pending] = useActionState(importIntermediaryListAction, {} as ListImportState);

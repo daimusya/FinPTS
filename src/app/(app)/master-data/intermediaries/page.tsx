@@ -126,11 +126,12 @@ export default async function IntermediariesDirectoryPage({ searchParams }: { se
                       </td>
                       <td>{standard ? "Стандарт" : <span className="badge badge-orange">ВИП</span>}</td>
                       <td>
-                        {current === null ? <span className="badge badge-danger">не задана</span> : pctText(current)}
+                        {current === null ? <span className="badge badge-danger">Ставка не задана</span> : pctText(current)}
                         {standard ? (
                           <div className="text-muted" style={{ fontSize: 12 }}>
                             накоплено {formatMoney(accumulated)}
                             {m.turnoverFrom ? ` с ${day(m.turnoverFrom)}` : ""}
+                            {!m.turnoverFrom ? <div>Оборот с первой оплаты</div> : null}
                           </div>
                         ) : lastChange || nextChange ? (
                           <div className="text-muted" style={{ fontSize: 12 }}>

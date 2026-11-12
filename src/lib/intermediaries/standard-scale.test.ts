@@ -25,6 +25,7 @@ const standard = (turnoverFrom: Date | null = null) => ({
   rateChanges: [],
   clients: [{ id: "c1", name: "ООО Трейд" }],
 });
+const bindings = [{ inn: "7801507557", intermediaryId: "st" }];
 
 describe("шкала «Стандарт»", () => {
   it("ступень включает свою границу", () => {
@@ -54,7 +55,7 @@ describe("шкала «Стандарт»", () => {
 
   it("оплата целиком идёт по ступени, куда попал накопленный итог вместе с ней", () => {
     // Накоплено 40 000, приходит 30 000 — итог 70 000, ступень 10%: 3 000.
-    const month = buildCommissionMonth([standard()], [], [pay("2026-09-05", 30000), pay("2026-09-20", 100000)], new Set(), {
+    const month = buildCommissionMonth([standard()], bindings, [pay("2026-09-05", 30000), pay("2026-09-20", 100000)], new Set(), {
       priorTurnover: new Map([["st", new Decimal(40000)]]),
     });
     const row = month.rows[0];
@@ -68,7 +69,7 @@ describe("шкала «Стандарт»", () => {
   });
 
   it("оплаты до даты начала оборота в него не входят и комиссии по шкале не дают", () => {
-    const month = buildCommissionMonth([standard(d("2026-09-10"))], [], [pay("2026-09-01", 60000), pay("2026-09-15", 60000)], new Set());
+    const month = buildCommissionMonth([standard(d("2026-09-10"))], bindings, [pay("2026-09-01", 60000), pay("2026-09-15", 60000)], new Set());
     const row = month.rows[0];
     expect(row.parts.map((p) => [p.pct?.toNumber() ?? null, p.commission?.toNumber() ?? null])).toEqual([
       [null, null],

@@ -10,6 +10,9 @@ export interface InflowRow {
   purpose: string | null;
   payerInn: string | null;
   payerName: string | null;
+  manualIntermediaryId?: string;
+  manualOrganizationId?: string;
+  confirmedIntermediaryId?: string;
 }
 
 export interface IntermediaryInfo extends MatcherIntermediary {
@@ -56,7 +59,7 @@ export const hasRateOn = (m: Pick<IntermediaryInfo, "category" | "turnoverFrom" 
   m.category === "STANDARD" ? !m.turnoverFrom || m.turnoverFrom <= date : rateOn(m, date) !== null;
 
 export interface MatchedInflow extends InflowRow {
-  /** true — ИНН закреплён вручную; false — найдено по названию, нужно проверить. */
+  /** Подтверждено привязкой ИНН или ручным вводом поступления. */
   confirmed: boolean;
   clientName: string | null;
   /** Ставка, по которой посчитана эта оплата (null — без комиссии). */
@@ -69,6 +72,8 @@ export interface IntermediaryMonth {
   intermediary: IntermediaryInfo;
   inflows: MatchedInflow[];
   total: Decimal;
+  confirmedTotal: Decimal;
+  pendingCommission: Decimal | null;
   /** null — ставка не задана. */
   commission: Decimal | null;
   /** Ставки за период: одна часть, если ставка не менялась. */
@@ -96,6 +101,7 @@ export interface CommissionMonth {
   unassigned: PayerGroup[];
   totalInflow: Decimal;
   totalCommission: Decimal;
+  pendingCommission: Decimal | null;
   /** «Стандарт»: накопленный оборот после последней оплаты — начало для следующего периода. */
   turnoverAfter: Map<string, Decimal>;
 }
@@ -123,17 +129,27 @@ export function buildCommissionMonth(
   options: CommissionOptions = {},
 ): CommissionMonth {
   const scale = options.scale ?? DEFAULT_SCALE;
-  const relevant = inflows.filter((op) => !(op.payerInn && ownInns.has(op.payerInn)) && !OWN_TRANSFER.test(op.purpose ?? ""));
+  const relevant = inflows.filter((op) => op.manualIntermediaryId || (!(op.payerInn && ownInns.has(op.payerInn)) && !OWN_TRANSFER.test(op.purpose ?? "")));
   const matches = resolvePayers(intermediaries, bindings, relevant.map((op) => ({ inn: op.payerInn, name: op.payerName })));
 
   const rows = new Map<string, IntermediaryMonth>(
-    intermediaries.map((m) => [m.id, { intermediary: m, inflows: [], total: new Decimal(0), commission: null, parts: [], unconfirmed: 0 }]),
+    intermediaries.map((m) => [m.id, { intermediary: m, inflows: [], total: new Decimal(0), confirmedTotal: new Decimal(0), commission: null, pendingCommission: null, parts: [], unconfirmed: 0 }]),
   );
   const groups = new Map<string, PayerGroup>();
   let totalInflow = new Decimal(0);
   const turnoverAfter = new Map<string, Decimal>();
 
   for (const op of relevant) {
+    const directIntermediaryId = op.manualIntermediaryId ?? op.confirmedIntermediaryId;
+    if (directIntermediaryId) {
+      const row = rows.get(directIntermediaryId);
+      if (row) {
+        row.inflows.push({ ...op, confirmed: true, clientName: null });
+        row.total = row.total.plus(op.amount);
+        totalInflow = totalInflow.plus(op.amount);
+      }
+      continue;
+    }
     const key = payerKey({ inn: op.payerInn, name: op.payerName });
     const match = matches.get(key) ?? { kind: "none" };
     if (match.kind === "inn" || match.kind === "name") {
@@ -152,19 +168,37 @@ export function buildCommissionMonth(
   }
 
   let totalCommission = new Decimal(0);
+  let pendingCommission: Decimal | null = null;
   for (const row of rows.values()) {
     row.inflows.sort((a, b) => a.date.getTime() - b.date.getTime() || (a.payerName ?? "").localeCompare(b.payerName ?? "", "ru"));
+    const confirmed = row.inflows.filter((op) => op.confirmed);
+    const pending = row.inflows.filter((op) => !op.confirmed);
+    row.confirmedTotal = confirmed.reduce((total, op) => total.plus(op.amount), new Decimal(0));
+    let pendingParts: RatePart[];
     if (row.intermediary.category === "STANDARD") {
       const prior = options.priorTurnover?.get(row.intermediary.id) ?? new Decimal(0);
-      const { parts, turnover } = standardParts(row.intermediary, row.inflows, scale, prior);
+      const { parts, turnover } = standardParts(row.intermediary, confirmed, scale, prior);
       row.parts = parts;
       turnoverAfter.set(row.intermediary.id, turnover);
+      let running = prior;
+      let index = 0;
+      const ordered = [...confirmed].sort(cumulativeOrder);
+      // Предварительная ставка опирается на подтверждённый оборот на момент оплаты.
+      pendingParts = partsByRate([...pending].sort(cumulativeOrder), (op) => {
+        while (index < ordered.length && cumulativeOrder(ordered[index], op) < 0) {
+          const payment = ordered[index++];
+          if (payment.appliedPct != null) running = running.plus(payment.amount);
+        }
+        return row.intermediary.turnoverFrom && op.date < row.intermediary.turnoverFrom ? null : scalePct(scale, running);
+      });
     } else {
-      row.parts = rateParts(row.intermediary, row.inflows);
+      row.parts = rateParts(row.intermediary, confirmed);
+      pendingParts = rateParts(row.intermediary, pending);
     }
-    const rated = row.parts.filter((p) => p.commission !== null);
-    row.commission = rated.length ? rated.reduce((sum, p) => sum.plus(p.commission!), new Decimal(0)) : null;
+    row.commission = sumCommission(row.parts);
+    row.pendingCommission = sumCommission(pendingParts);
     if (row.commission) totalCommission = totalCommission.plus(row.commission);
+    if (row.pendingCommission) pendingCommission = (pendingCommission ?? new Decimal(0)).plus(row.pendingCommission);
   }
 
   const byTotal = (a: PayerGroup, b: PayerGroup) => b.total.comparedTo(a.total);
@@ -176,8 +210,13 @@ export function buildCommissionMonth(
     unassigned: all.filter((g) => g.match.kind === "none").sort(byTotal),
     totalInflow,
     totalCommission,
+    pendingCommission,
     turnoverAfter,
   };
+}
+
+function sumCommission(parts: RatePart[]): Decimal | null {
+  return parts.reduce<Decimal | null>((sum, part) => part.commission === null ? sum : (sum ?? new Decimal(0)).plus(part.commission), null);
 }
 
 /** Подпись оплат «Стандарта» до даты начала оборота. */
@@ -222,9 +261,13 @@ export function standardParts(
  * каждой части — при одной ставке это та же «итог × ставка», что в шаблоне.
  */
 export function rateParts(m: Pick<IntermediaryInfo, "commissionPct" | "rateChanges">, inflows: RatedInflow[]): RatePart[] {
+  return partsByRate(inflows, (op) => rateOn(m, op.date));
+}
+
+function partsByRate(inflows: RatedInflow[], getRate: (op: RatedInflow) => Decimal | null): RatePart[] {
   const parts: RatePart[] = [];
   for (const op of inflows) {
-    const pct = rateOn(m, op.date);
+    const pct = getRate(op);
     op.appliedPct = pct;
     const last = parts[parts.length - 1];
     if (last && (last.pct === null ? pct === null : pct !== null && last.pct.equals(pct))) {
@@ -277,8 +320,10 @@ export interface ReportLine {
 export function reportLines(inflows: InflowRow[]): ReportLine[] {
   const lines = new Map<string, ReportLine>();
   for (const op of inflows) {
-    const text = `Покупатель: ${reportPayerName(op.payerName)}`;
-    const key = `${op.date.toISOString().slice(0, 10)}|${op.payerInn ?? text}`;
+    const buyer = `Покупатель: ${reportPayerName(op.payerName)}`;
+    const purpose = op.purpose?.trim() || null;
+    const text = purpose ? `${buyer}\nНазначение платежа: ${purpose}` : buyer;
+    const key = JSON.stringify([op.date.toISOString().slice(0, 10), op.payerInn ?? buyer, purpose]);
     const line = lines.get(key);
     if (line) line.amount = line.amount.plus(op.amount);
     else lines.set(key, { date: op.date, text, amount: op.amount });

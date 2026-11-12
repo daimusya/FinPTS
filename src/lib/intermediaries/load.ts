@@ -30,12 +30,21 @@ const monthStart = (ym: YearMonth) => new Date(Date.UTC(ym.year, ym.month - 1, 1
 /** Месяц по умолчанию — последний, за который загружены поступления (не позже текущего). */
 export async function defaultMonth(scope: AccessScope, now = new Date()): Promise<YearMonth> {
   const current = { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 };
-  const latest = await prisma.bankTransaction.findFirst({
-    where: { direction: "INFLOW", isTransfer: false, operationDate: { lt: monthStart(shiftMonth(current, 1)) }, ...bankTransactionScopeWhere(scope) },
-    orderBy: { operationDate: "desc" },
-    select: { operationDate: true },
-  });
-  return latest ? { year: latest.operationDate.getUTCFullYear(), month: latest.operationDate.getUTCMonth() + 1 } : current;
+  const before = monthStart(shiftMonth(current, 1));
+  const [bank, manual] = await Promise.all([
+    prisma.bankTransaction.findFirst({
+      where: { direction: "INFLOW", isTransfer: false, operationDate: { lt: before }, ...bankTransactionScopeWhere(scope) },
+      orderBy: { operationDate: "desc" },
+      select: { operationDate: true },
+    }),
+    scope.departmentIds || scope.projectIds ? null : prisma.intermediaryReceipt.findFirst({
+      where: { date: { lt: before }, intermediary: { isArchived: false }, ...(scope.organizationIds ? { organizationId: { in: scope.organizationIds } } : {}) },
+      orderBy: { date: "desc" },
+      select: { date: true },
+    }),
+  ]);
+  const latest = manual && (!bank || manual.date > bank.operationDate) ? manual.date : bank?.operationDate;
+  return latest ? { year: latest.getUTCFullYear(), month: latest.getUTCMonth() + 1 } : current;
 }
 
 export interface CommissionContext {
@@ -89,11 +98,12 @@ export function loadInflows(scope: AccessScope, from: YearMonth, to: YearMonth):
 
 /** Поступления с даты from (null — с самого начала) до даты before (не включая её). */
 export async function loadInflowsBetween(scope: AccessScope, from: Date | null, before: Date): Promise<InflowRow[]> {
-  const rows = await prisma.bankTransaction.findMany({
+  const dates = { ...(from ? { gte: from } : {}), lt: before };
+  const [rows, manual] = await Promise.all([prisma.bankTransaction.findMany({
     where: {
       direction: "INFLOW",
       isTransfer: false,
-      operationDate: { ...(from ? { gte: from } : {}), lt: before },
+      operationDate: dates,
       ...bankTransactionScopeWhere(scope),
     },
     orderBy: { operationDate: "asc" },
@@ -104,18 +114,26 @@ export async function loadInflowsBetween(scope: AccessScope, from: Date | null, 
       purpose: true,
       counterpartyInn: true,
       counterpartyName: true,
-      counterparty: { select: { shortName: true, fullName: true } },
+      commissionIntermediaryId: true,
+      counterparty: { select: { inn: true, shortName: true, fullName: true } },
     },
-  });
-  return rows.map((r) => ({
+  }), scope.departmentIds || scope.projectIds ? [] : prisma.intermediaryReceipt.findMany({
+    where: { date: dates, ...(scope.organizationIds ? { organizationId: { in: scope.organizationIds } } : {}) },
+    select: { id: true, date: true, amount: true, payerName: true, purpose: true, intermediaryId: true, organizationId: true },
+  })]);
+  const imported = rows.map((r) => ({
     id: r.id,
     date: r.operationDate,
     amount: new Decimal(r.amount.toString()),
     purpose: r.purpose,
-    payerInn: r.counterpartyInn,
+    payerInn: r.counterpartyInn ?? r.counterparty?.inn ?? null,
+    confirmedIntermediaryId: r.commissionIntermediaryId ?? undefined,
     // Операции, загруженные до того, как стали хранить наименование, — по контрагенту из справочника.
     payerName: r.counterpartyName ?? r.counterparty?.shortName ?? r.counterparty?.fullName ?? null,
   }));
+  return [...imported, ...manual.map(({ intermediaryId, organizationId, ...r }) => ({
+    ...r, amount: new Decimal(r.amount.toString()), payerInn: null, manualIntermediaryId: intermediaryId, manualOrganizationId: organizationId,
+  }))];
 }
 
 export const sameMonth = (date: Date, ym: YearMonth) => date.getUTCFullYear() === ym.year && date.getUTCMonth() + 1 === ym.month;
@@ -142,7 +160,7 @@ export async function loadPriorTurnover(context: CommissionContext, before: Date
   const earliest = starts.includes(null) ? null : new Date(Math.min(...starts.map((d) => d!.getTime())));
   if (earliest && earliest >= before) return new Map();
   const inflows = await loadInflowsBetween(UNRESTRICTED_SCOPE, earliest, before);
-  return buildCommissionMonth(standard, context.bindings, inflows, context.ownInns, { scale: context.scale }).turnoverAfter;
+  return buildCommissionMonth(context.intermediaries, context.bindings, inflows, context.ownInns, { scale: context.scale }).turnoverAfter;
 }
 
 /** Расчёт за месяц и помесячная динамика комиссий за 12 месяцев до него включительно. */

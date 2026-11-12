@@ -19,6 +19,7 @@ model User {
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  intermediaryCommissionClosings IntermediaryCommissionClosing[]
 
   /// Пароль выдан администратором (новый пользователь или сброс) — при входе нужно сменить на свой.
   mustChangePassword Boolean @default(false)
@@ -243,6 +244,7 @@ model Organization {
   approvalRoutes    PaymentApprovalRoute[]
   budgetEntries     BudgetEntry[]
   balanceEntries    BalanceEntry[]
+  intermediaryReceipts IntermediaryReceipt[]
 
   fixedAssets      FixedAsset[]
   creditAgreements CreditAgreement[]
@@ -805,6 +807,8 @@ enum BankTransactionMatchStatus {
 
 model BankTransaction {
   id               String                      @id @default(cuid())
+  commissionIntermediaryId String?
+  commissionIntermediary Intermediary? @relation(fields: [commissionIntermediaryId], references: [id])
   bankAccountId    String?
   cashAccountId    String?
   batchId          String?
@@ -1862,8 +1866,48 @@ model Intermediary {
   clients IntermediaryClient[]
   payers  IntermediaryPayer[]
   rates   IntermediaryRate[]
+  receipts IntermediaryReceipt[]
+  confirmedTransactions BankTransaction[]
+  commissionClosings IntermediaryCommissionClosing[]
 
   @@map("intermediaries")
+}
+
+/// Сохранённый расчёт комиссии посредника за месяц.
+model IntermediaryCommissionClosing {
+  intermediaryId String
+  month          DateTime @db.Date
+  version        Int @default(1)
+  correctionReason String?
+  report         Json
+  fixedAt        DateTime @default(now())
+  fixedById      String?
+  intermediary   Intermediary @relation(fields: [intermediaryId], references: [id], onDelete: Restrict)
+  fixedBy        User? @relation(fields: [fixedById], references: [id], onDelete: SetNull)
+
+  @@id([intermediaryId, month, version])
+  @@index([month])
+  @@map("intermediary_commission_closings")
+}
+
+/// Ручное поступление для расчёта комиссии.
+model IntermediaryReceipt {
+  id             String   @id
+  intermediaryId String
+  organizationId String
+  date           DateTime @db.Date
+  amount         Decimal  @db.Decimal(18, 2)
+  payerName      String
+  purpose        String?
+  createdAt      DateTime @default(now())
+
+  intermediary Intermediary @relation(fields: [intermediaryId], references: [id])
+  organization  Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([date])
+  @@index([intermediaryId])
+  @@index([organizationId])
+  @@map("intermediary_receipts")
 }
 
 /// Изменение ставки посредника с даты: действует для поступлений с этого дня

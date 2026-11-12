@@ -163,6 +163,8 @@ export async function importBankStatementAction(_prev: ImportState, formData: Fo
   });
 
   revalidatePath("/cash/transactions");
+  revalidatePath("/intermediaries", "layout");
+  revalidatePath("/master-data/intermediaries");
 
   return { done: true, imported, duplicates, errors, autoClassified, repeatedImported, counterpartiesCreated, closedPeriodRows, closedMonths, errorSamples };
 }
@@ -182,6 +184,7 @@ export async function importClientBankAction(_prev: ClientBankImportState, formD
   const results = await importClientBankFiles(session, files, organizationId);
   revalidatePath("/cash/transactions");
   revalidatePath("/cash/import");
-  revalidatePath("/intermediaries");
+  revalidatePath("/intermediaries", "layout");
+  revalidatePath("/master-data/intermediaries");
   return { results };
 }
