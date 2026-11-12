@@ -483,7 +483,7 @@ export default async function PaymentCalendarPage({
         <div className="pc-toolbar__filter" role="group" aria-label="Какие заявки учитывать в прогнозе">
           <span className="text-muted">Заявки в прогнозе:</span>
           <Link href={href({ pending: null })} className={includePending ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"} aria-current={includePending}>
-            согласованные и на согласовании
+            согласованные, на согласовании и черновики
           </Link>
           <Link href={href({ pending: "0" })} className={!includePending ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"} aria-current={!includePending}>
             только согласованные
