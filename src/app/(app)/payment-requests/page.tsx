@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
+import { canViewPaymentRequests } from "@/lib/payment-requests/access";
 import { prisma } from "@/lib/db";
 import { getSession, hasPermission } from "@/lib/session";
 import { PERMISSIONS } from "@/lib/permissions";
@@ -29,7 +31,7 @@ export default async function PaymentRequestsPage({
   searchParams: Promise<{ error?: string; view?: string; page?: string; q?: string }>;
 }) {
   const session = await getSession();
-  if (!session) return null;
+  if (!session || !canViewPaymentRequests(session)) notFound();
   const { error, view, page, q } = singleParams(await searchParams);
   const showDone = view === "done";
   const canApprove = hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE);

@@ -6,6 +6,7 @@ import { unreadNotificationCount } from "@/lib/notifications";
 import { isForeignCurrencyEnabled } from "@/lib/foreign-currency";
 import { logoutAction } from "./actions";
 import { SubmitButton } from "@/components/submit-button";
+import { canViewPaymentRequests } from "@/lib/payment-requests/access";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
@@ -24,7 +25,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="app-shell">
-      <Sidebar foreignCurrency={foreignCurrency} />
+      <Sidebar foreignCurrency={foreignCurrency} showPaymentRequests={canViewPaymentRequests(session)} />
       <div className="main">
         <header className="topbar">
           <div />

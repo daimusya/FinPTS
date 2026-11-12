@@ -115,7 +115,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-export function Sidebar({ foreignCurrency = false }: { foreignCurrency?: boolean }) {
+export function Sidebar({ foreignCurrency = false, showPaymentRequests }: { foreignCurrency?: boolean; showPaymentRequests: boolean }) {
   const pathname = usePathname();
 
   return (
@@ -131,7 +131,7 @@ export function Sidebar({ foreignCurrency = false }: { foreignCurrency?: boolean
       {NAV_GROUPS.map((group) => (
         <div className="sidebar-group" key={group.title}>
           <div className="sidebar-group-title">{group.title}</div>
-          {group.items.filter((item) => !item.foreignCurrency || foreignCurrency).map((item) => {
+          {group.items.filter((item) => (!item.foreignCurrency || foreignCurrency) && (item.href !== "/payment-requests" || showPaymentRequests)).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link

@@ -44,6 +44,7 @@ import { payeeChangedSince } from "@/lib/payment-requests/payee-change";
 import { findPossibleDuplicates } from "@/lib/payment-requests/find-duplicates";
 import { getAccessScope, paymentRequestScopeWhere } from "@/lib/access-scope";
 import { listLinkableAccruals } from "@/lib/payment-requests/accrual-link";
+import { canViewPaymentRequests } from "@/lib/payment-requests/access";
 
 const STATE_LABELS: Record<TimelineState, string> = {
   approved: "Согласовано",
@@ -76,9 +77,10 @@ export default async function PaymentRequestPage({
   searchParams: Promise<{ error?: string; notice?: string }>;
 }) {
   const session = await getSession();
-  if (!session) return null;
+  if (!session || !canViewPaymentRequests(session)) notFound();
   const { id } = await params;
   const { error, notice } = singleParams(await searchParams);
+  if (!(await isVisible(session, "request", id))) notFound();
 
   const request = await prisma.paymentRequest.findUnique({
     where: { id },
@@ -96,7 +98,6 @@ export default async function PaymentRequestPage({
     },
   });
   if (!request) notFound();
-  if (!(await isVisible(session, "request", id))) notFound();
 
   const isAdmin = hasPermission(session, PERMISSIONS.ADMIN_FULL);
   const canApprove = hasPermission(session, PERMISSIONS.PAYMENT_REQUEST_APPROVE);
