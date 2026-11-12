@@ -118,6 +118,22 @@ export interface CommissionOptions {
   scale?: ScaleTier[];
   /** «Стандарт»: оборот, накопленный до первой оплаты этих поступлений (по id посредника). */
   priorTurnover?: Map<string, Decimal>;
+  turnoverCheckpoints?: Map<string, TurnoverCheckpoint[]>;
+}
+
+export interface TurnoverCheckpoint {
+  from: Date;
+  turnover: Decimal;
+}
+
+function turnoverReset(checkpoints: TurnoverCheckpoint[]) {
+  let next = 0;
+  return (turnover: Decimal, date?: Date) => {
+    while (next < checkpoints.length && (!date || checkpoints[next].from <= date)) {
+      turnover = checkpoints[next++].turnover;
+    }
+    return turnover;
+  };
 }
 
 /** Расчёт за месяц или любой период: inflows — поступления этого периода. */
@@ -177,18 +193,22 @@ export function buildCommissionMonth(
     let pendingParts: RatePart[];
     if (row.intermediary.category === "STANDARD") {
       const prior = options.priorTurnover?.get(row.intermediary.id) ?? new Decimal(0);
-      const { parts, turnover } = standardParts(row.intermediary, confirmed, scale, prior);
+      const checkpoints = options.turnoverCheckpoints?.get(row.intermediary.id) ?? [];
+      const { parts, turnover } = standardParts(row.intermediary, confirmed, scale, prior, checkpoints);
       row.parts = parts;
       turnoverAfter.set(row.intermediary.id, turnover);
       let running = prior;
       let index = 0;
       const ordered = [...confirmed].sort(cumulativeOrder);
+      const reset = turnoverReset(checkpoints);
       // Предварительная ставка опирается на подтверждённый оборот на момент оплаты.
       pendingParts = partsByRate([...pending].sort(cumulativeOrder), (op) => {
         while (index < ordered.length && cumulativeOrder(ordered[index], op) < 0) {
           const payment = ordered[index++];
+          running = reset(running, payment.date);
           if (payment.appliedPct != null) running = running.plus(payment.amount);
         }
+        running = reset(running, op.date);
         return row.intermediary.turnoverFrom && op.date < row.intermediary.turnoverFrom ? null : scalePct(scale, running);
       });
     } else {
@@ -235,10 +255,13 @@ export function standardParts(
   inflows: RatedInflow[],
   scale: ScaleTier[],
   prior: Decimal,
+  checkpoints: TurnoverCheckpoint[] = [],
 ): { parts: RatePart[]; turnover: Decimal } {
   let turnover = prior;
+  const reset = turnoverReset(checkpoints);
   const parts: RatePart[] = [];
   for (const op of [...inflows].sort(cumulativeOrder)) {
+    turnover = reset(turnover, op.date);
     const counted = !m.turnoverFrom || op.date >= m.turnoverFrom;
     if (counted) turnover = turnover.plus(op.amount);
     const pct = counted ? scalePct(scale, turnover) : null;
@@ -253,7 +276,7 @@ export function standardParts(
     parts[parts.length - 1].basis = counted ? scaleBasis(scale, turnover, op.date) : BEFORE_TURNOVER;
   }
   for (const part of parts) part.commission = commissionOf(part.total, part.pct);
-  return { parts, turnover };
+  return { parts, turnover: reset(turnover) };
 }
 
 /**

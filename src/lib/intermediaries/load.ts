@@ -1,7 +1,7 @@
 import Decimal from "decimal.js";
 import { prisma } from "@/lib/db";
 import { bankTransactionScopeWhere, UNRESTRICTED_SCOPE, type AccessScope } from "@/lib/access-scope";
-import { buildCommissionMonth, type CommissionMonth, type InflowRow, type IntermediaryInfo } from "./commissions";
+import { buildCommissionMonth, type CommissionMonth, type InflowRow, type IntermediaryInfo, type TurnoverCheckpoint } from "./commissions";
 import { parseStoredScale, SCALE_SETTING_KEY, type ScaleTier } from "./standard-scale";
 import type { MatcherBinding } from "./matching";
 
@@ -144,8 +144,37 @@ export const sameMonth = (date: Date, ym: YearMonth) => date.getUTCFullYear() ==
  */
 export async function loadCommissionPeriod(scope: AccessScope, from: Date | null, before: Date) {
   const context = await loadCommissionContext();
-  const [inflows, priorTurnover] = await Promise.all([loadInflowsBetween(scope, from, before), loadPriorTurnover(context, from)]);
-  return { context, period: buildCommissionMonth(context.intermediaries, context.bindings, inflows, context.ownInns, { scale: context.scale, priorTurnover }) };
+  const [inflows, priorTurnover, turnoverCheckpoints] = await Promise.all([
+    loadInflowsBetween(scope, from, before),
+    loadPriorTurnover(context, from),
+    loadTurnoverCheckpoints(context, from, before),
+  ]);
+  return { context, period: buildCommissionMonth(context.intermediaries, context.bindings, inflows, context.ownInns, { scale: context.scale, priorTurnover, turnoverCheckpoints }) };
+}
+
+/** Конечный оборот актуальной версии действует с первого дня следующего месяца. */
+async function loadTurnoverCheckpoints(context: CommissionContext, after: Date | null, through: Date) {
+  const ids = context.intermediaries.filter((m) => m.category === "STANDARD").map((m) => m.id);
+  const checkpoints = new Map<string, TurnoverCheckpoint[]>();
+  if (!ids.length) return checkpoints;
+  const upper = new Date(Date.UTC(through.getUTCFullYear(), through.getUTCMonth(), 1));
+  const lower = after ? new Date(Date.UTC(after.getUTCFullYear(), after.getUTCMonth() - 1, 1)) : undefined;
+  const rows = await prisma.intermediaryCommissionClosing.findMany({
+    where: { intermediaryId: { in: ids }, month: { gte: lower, lt: upper } },
+    orderBy: [{ month: "asc" }, { version: "desc" }],
+    distinct: ["intermediaryId", "month"],
+    select: { intermediaryId: true, month: true, report: true },
+  });
+  for (const row of rows) {
+    const from = new Date(Date.UTC(row.month.getUTCFullYear(), row.month.getUTCMonth() + 1, 1));
+    if (after && from <= after) continue;
+    const turnover = (row.report as { basis?: { closingTurnover?: string | null } }).basis?.closingTurnover;
+    if (typeof turnover !== "string") continue;
+    const entries = checkpoints.get(row.intermediaryId) ?? [];
+    entries.push({ from, turnover: new Decimal(turnover) });
+    checkpoints.set(row.intermediaryId, entries);
+  }
+  return checkpoints;
 }
 
 /**
@@ -158,22 +187,35 @@ export async function loadPriorTurnover(context: CommissionContext, before: Date
   if (!before || standard.length === 0) return new Map();
   const starts = standard.map((m) => m.turnoverFrom);
   const earliest = starts.includes(null) ? null : new Date(Math.min(...starts.map((d) => d!.getTime())));
-  if (earliest && earliest >= before) return new Map();
-  const inflows = await loadInflowsBetween(UNRESTRICTED_SCOPE, earliest, before);
-  return buildCommissionMonth(context.intermediaries, context.bindings, inflows, context.ownInns, { scale: context.scale }).turnoverAfter;
+  const [inflows, turnoverCheckpoints] = await Promise.all([
+    earliest && earliest >= before ? [] : loadInflowsBetween(UNRESTRICTED_SCOPE, earliest, before),
+    loadTurnoverCheckpoints(context, null, before),
+  ]);
+  return buildCommissionMonth(context.intermediaries, context.bindings, inflows, context.ownInns, { scale: context.scale, turnoverCheckpoints }).turnoverAfter;
 }
 
 /** Расчёт за месяц и помесячная динамика комиссий за 12 месяцев до него включительно. */
 export async function loadCommissionDashboard(scope: AccessScope, ym: YearMonth) {
   const context = await loadCommissionContext();
   const firstMonth = shiftMonth(ym, -11);
-  const [inflows, prior] = await Promise.all([loadInflows(scope, firstMonth, ym), loadPriorTurnover(context, monthStart(firstMonth))]);
+  const [inflows, prior, checkpoints] = await Promise.all([
+    loadInflows(scope, firstMonth, ym),
+    loadPriorTurnover(context, monthStart(firstMonth)),
+    loadTurnoverCheckpoints(context, monthStart(firstMonth), monthStart(shiftMonth(ym, 1))),
+  ]);
   const months = Array.from({ length: 12 }, (_, i) => shiftMonth(firstMonth, i));
   let priorTurnover = prior;
   const perMonth: Array<{ ym: YearMonth; data: CommissionMonth }> = months.map((m) => {
+    const nextStart = monthStart(shiftMonth(m, 1));
+    const turnoverCheckpoints = new Map<string, TurnoverCheckpoint[]>();
+    for (const [id, entries] of checkpoints) {
+      const entry = entries.find((checkpoint) => checkpoint.from.getTime() === nextStart.getTime());
+      if (entry) turnoverCheckpoints.set(id, [entry]);
+    }
     const data = buildCommissionMonth(context.intermediaries, context.bindings, inflows.filter((op) => sameMonth(op.date, m)), context.ownInns, {
       scale: context.scale,
       priorTurnover,
+      turnoverCheckpoints,
     });
     priorTurnover = new Map([...priorTurnover, ...data.turnoverAfter]);
     return { ym: m, data };
