@@ -8,6 +8,8 @@ import { createPaymentRequestAction } from "../actions";
 import { getAccessScope, organizationIdScopeWhere, organizationScopeWhere } from "@/lib/access-scope";
 import { singleParams } from "@/lib/query-params";
 import { SubmitButton } from "@/components/submit-button";
+import { listLinkableAccruals } from "@/lib/payment-requests/accrual-link";
+import { showDueDate } from "@/lib/payment-calendar";
 
 export default async function NewPaymentRequestPage({
   searchParams,
@@ -24,12 +26,15 @@ export default async function NewPaymentRequestPage({
     );
   }
 
-  const [organizations, counterparties, cashFlowArticles, bankAccounts, cashAccounts] = await Promise.all([
-    prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(await getAccessScope(session)) }, orderBy: { name: "asc" } }),
+  const scope = await getAccessScope(session);
+  const canViewAccruals = hasPermission(session, PERMISSIONS.ACCRUALS_VIEW);
+  const [organizations, counterparties, cashFlowArticles, bankAccounts, cashAccounts, accruals] = await Promise.all([
+    prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(scope) }, orderBy: { name: "asc" } }),
     prisma.counterparty.findMany({ where: { isArchived: false }, orderBy: { fullName: "asc" } }),
     prisma.cashFlowArticle.findMany({ where: { isArchived: false, direction: "OUTFLOW" }, orderBy: { name: "asc" } }),
-    prisma.bankAccount.findMany({ where: { isArchived: false, ...organizationIdScopeWhere(await getAccessScope(session)) }, include: { organization: true }, orderBy: { bankName: "asc" } }),
-    prisma.cashAccount.findMany({ where: { isArchived: false, ...organizationIdScopeWhere(await getAccessScope(session)) }, include: { organization: true }, orderBy: { name: "asc" } }),
+    prisma.bankAccount.findMany({ where: { isArchived: false, ...organizationIdScopeWhere(scope) }, include: { organization: true }, orderBy: { bankName: "asc" } }),
+    prisma.cashAccount.findMany({ where: { isArchived: false, ...organizationIdScopeWhere(scope) }, include: { organization: true }, orderBy: { name: "asc" } }),
+    canViewAccruals ? listLinkableAccruals(scope) : [],
   ]);
   const orgName = (o: { name: string; shortName: string | null }) => o.shortName || o.name;
 
@@ -80,6 +85,17 @@ export default async function NewPaymentRequestPage({
                 ))}
               </select>
             </label>
+            {canViewAccruals ? (
+              <label className="field">
+                <span>Документ начисления (необязательно)</span>
+                <select name="accrualDocumentId">
+                  <option value="">Без начисления</option>
+                  {accruals.map((doc) => (
+                    <option key={doc.id} value={doc.id}>{orgName(doc.organization)} · № {doc.number} от {showDueDate(doc.date)} · {doc.counterparty.shortName || doc.counterparty.fullName}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label className="field">
               <span>Сумма *</span>
               <input type="number" step="0.01" name="amount" required />

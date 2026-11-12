@@ -161,8 +161,11 @@ export default async function PaymentCalendarPage({
 
   // Every planned payment: requests (or their parts) and unpaid documents.
   const items: Item[] = [];
+  const documentsById = new Map(unpaidDocuments.map((doc) => [doc.id, doc]));
+  const coverageByDocument = new Map<string, Decimal>();
   for (const r of requests) {
     const placement = requestPlacement(r.status, includePending);
+    const linked = r.accrualDocumentId ? documentsById.get(r.accrualDocumentId) : undefined;
     const statusLabel = PAYMENT_REQUEST_STATUS_LABELS[r.status];
     const base = {
       href: `/payment-requests/${r.id}`,
@@ -177,6 +180,13 @@ export default async function PaymentCalendarPage({
     // A request in a foreign currency: roubles at today's rate (the forecast is in roubles).
     const toRub = (value: { toString(): string }) =>
       r.currency === "RUB" ? new Decimal(value.toString()) : (amountInRub(value.toString(), r.currency, rates, todayDate) ?? new Decimal(value.toString()));
+    if (placement.counted && linked?.direction === "EXPENSE" && linked.organizationId === r.organizationId
+      && (!r.counterpartyId || linked.counterpartyId === r.counterpartyId)) {
+      const scheduled = r.parts.length
+        ? sumMoney(r.parts.filter((part) => !part.paidAt).map((part) => toRub(part.amount)))
+        : toRub(r.amount);
+      coverageByDocument.set(linked.id, (coverageByDocument.get(linked.id) ?? new Decimal(0)).plus(scheduled));
+    }
     const inCurrency = (value: { toString(): string }) => (r.currency === "RUB" ? "" : ` · ${formatMoneyIn(value.toString(), r.currency)}`);
     if (r.parts.length === 0) {
       const amount = toRub(r.amount);
@@ -224,9 +234,12 @@ export default async function PaymentCalendarPage({
     // A document in a foreign currency: the remainder at today's rate (the forecast is in roubles).
     const foreignDoc = isForeign(doc.currency);
     const left = outstanding(doc, foreignDoc ? rates.rateOn(doc.currency, todayDate) : null);
-    const remaining = left.rub;
     if (left.native.lessThanOrEqualTo(0)) continue;
+    const covered = coverageByDocument.get(doc.id);
+    const remaining = covered ? left.rub.minus(covered) : left.rub;
+    if (remaining.lessThanOrEqualTo(0)) continue;
     const income = doc.direction === "INCOME";
+    const nativeRemaining = covered && foreignDoc ? left.native.times(remaining).div(left.rub) : left.native;
     items.push({
       kind: "document",
       id: doc.id,
@@ -238,7 +251,7 @@ export default async function PaymentCalendarPage({
       amountFull: formatMoney(remaining),
       amountValue: remaining,
       title: doc.counterparty.shortName || doc.counterparty.fullName,
-      subtitle: `${ACCRUAL_DOCUMENT_TYPE_LABELS[doc.documentType]} № ${doc.number} · ${income ? "к получению" : "к оплате"}${doc.paymentStatus === "PARTIALLY_PAID" ? " (остаток)" : ""}${foreignDoc ? ` · ${formatMoneyIn(left.native, doc.currency)}` : ""}`,
+      subtitle: `${ACCRUAL_DOCUMENT_TYPE_LABELS[doc.documentType]} № ${doc.number} · ${income ? "к получению" : "к оплате"}${covered ? " (остаток сверх заявок)" : doc.paymentStatus === "PARTIALLY_PAID" ? " (остаток)" : ""}${foreignDoc ? ` · ${formatMoneyIn(nativeRemaining, doc.currency)}` : ""}`,
       organizationId: doc.organizationId,
       organization: doc.organization.shortName || doc.organization.name,
       article: null,

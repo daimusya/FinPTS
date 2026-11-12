@@ -12,6 +12,7 @@ import { parseAccountKey, parseDueTime } from "@/lib/payment-calendar";
 import { readScheduleRows } from "@/lib/payment-requests/parts";
 import {
   assignPaymentAccount,
+  canPlanRequests,
   markPartPaid,
   markRemainingPartsPaid,
   removePaymentSchedule,
@@ -37,6 +38,8 @@ import { parseFormAmount, parseFormDate } from "@/lib/form-values";
 import { yearProblem } from "@/lib/form-values";
 import { approvalSeparationProblem } from "@/lib/payment-requests/separation";
 import { findPossibleDuplicates } from "@/lib/payment-requests/find-duplicates";
+import { getAccessScope, paymentRequestScopeWhere } from "@/lib/access-scope";
+import { linkableAccrualWhere } from "@/lib/payment-requests/accrual-link";
 
 async function loadActiveRoutes(): Promise<ApprovalRouteCandidate[]> {
   const routes = await prisma.paymentApprovalRoute.findMany({
@@ -53,12 +56,21 @@ async function loadActiveRoutes(): Promise<ApprovalRouteCandidate[]> {
   }));
 }
 
+async function accrualLinkAllowed(session: Awaited<ReturnType<typeof requireSession>>, id: string, organizationId: string, counterpartyId: string | null) {
+  if (!hasPermission(session, PERMISSIONS.ACCRUALS_VIEW)) return false;
+  return Boolean(await prisma.accrualDocument.findFirst({
+    where: { ...linkableAccrualWhere(await getAccessScope(session), organizationId, counterpartyId), id, paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID"] } },
+    select: { id: true },
+  }));
+}
+
 export async function createPaymentRequestAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.PAYMENT_REQUEST_CREATE);
   if (!(await organizationAllowed(session, String(formData.get("organizationId") ?? "")))) redirect(`/payment-requests/new?error=${encodeURIComponent(ORGANIZATION_NOT_ALLOWED)}`);
 
   const organizationId = String(formData.get("organizationId") ?? "");
   const counterpartyId = String(formData.get("counterpartyId") ?? "") || null;
+  const accrualDocumentId = String(formData.get("accrualDocumentId") ?? "") || null;
   const cashFlowArticleId = String(formData.get("cashFlowArticleId") ?? "") || null;
   const amountInput = parseFormAmount(formData.get("amount"));
   const amountRaw = "value" in amountInput ? amountInput.value : "";
@@ -85,6 +97,9 @@ export async function createPaymentRequestAction(formData: FormData) {
   if (accountOrg !== organizationId) {
     redirect(`/payment-requests/new?error=${encodeURIComponent("Счёт оплаты должен принадлежать организации заявки")}`);
   }
+  if (accrualDocumentId && !(await accrualLinkAllowed(session, accrualDocumentId, organizationId, counterpartyId))) {
+    redirect(`/payment-requests/new?error=${encodeURIComponent("Выберите доступное проведённое начисление к оплате по организации и контрагенту заявки")}`);
+  }
 
   // A request in a foreign currency is routed by its rouble equivalent at today's rate (route limits are in roubles).
   const currency = normalizeCurrency(formData.get("currency"));
@@ -99,6 +114,7 @@ export async function createPaymentRequestAction(formData: FormData) {
     data: {
       organizationId,
       counterpartyId,
+      accrualDocumentId,
       cashFlowArticleId,
       amount: amountRaw,
       currency,
@@ -124,6 +140,7 @@ export async function createPaymentRequestAction(formData: FormData) {
   await notifyDeciders(created.id, session.userId);
 
   revalidatePath("/payment-requests");
+  revalidatePath("/payment-calendar");
   // A possible duplicate: the author lands on the request, where the other one is shown.
   const duplicates = await findPossibleDuplicates([created]);
   redirect(duplicates.has(created.id) ? `/payment-requests/${created.id}#duplicates` : "/payment-requests");
@@ -379,6 +396,7 @@ export async function resubmitPaymentRequestAction(id: string, formData: FormDat
       where: { id, status: { in: reworkable } },
       data: {
         counterpartyId,
+        ...(counterpartyId !== request.counterpartyId ? { accrualDocumentId: null } : {}),
         cashFlowArticleId,
         amount: amountRaw,
         currency,
@@ -456,6 +474,36 @@ export async function markPaymentPartPaidAction(requestId: string, partId: strin
 export async function assignRequestAccountAction(id: string, formData: FormData) {
   const session = await requireSession();
   backToRequest(id, await assignPaymentAccount(session, "request", id, formData.get("payAccount")));
+}
+
+export async function assignRequestAccrualAction(id: string, formData: FormData) {
+  const session = await requireSession();
+  const scope = await getAccessScope(session);
+  const editableStatuses: PaymentRequestStatus[] = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "RETURNED", "REJECTED"];
+  const request = await prisma.paymentRequest.findFirst({
+    where: { id, status: { in: editableStatuses }, ...paymentRequestScopeWhere(scope) },
+    select: { organizationId: true, counterpartyId: true, accrualDocumentId: true, updatedAt: true },
+  });
+  if (!request || !canPlanRequests(session) || !hasPermission(session, PERMISSIONS.ACCRUALS_VIEW)) {
+    backToRequest(id, { ok: false, error: "Связь с начислением недоступна для изменения." });
+  }
+  const accrualDocumentId = String(formData.get("accrualDocumentId") ?? "") || null;
+  if (accrualDocumentId === request.accrualDocumentId) backToRequest(id, { ok: true, message: "Связь с начислением сохранена." });
+  if (accrualDocumentId && !(await accrualLinkAllowed(session, accrualDocumentId, request.organizationId, request.counterpartyId))) {
+    backToRequest(id, { ok: false, error: "Выберите доступное проведённое начисление к оплате по организации и контрагенту заявки." });
+  }
+  const saved = await prisma.$transaction(async (db) => {
+    const { count } = await db.paymentRequest.updateMany({ where: { id, updatedAt: request.updatedAt }, data: { accrualDocumentId } });
+    if (count) await db.auditLog.create({ data: {
+      userId: session.userId, entityType: "payment_request", entityId: id, action: "link_accrual",
+      beforeJson: { accrualDocumentId: request.accrualDocumentId }, afterJson: { accrualDocumentId },
+    } });
+    return count > 0;
+  });
+  if (!saved) backToRequest(id, { ok: false, error: "Заявку уже изменили — обновите страницу." });
+  revalidatePath("/payment-calendar");
+  revalidatePath(`/payment-requests/${id}`);
+  backToRequest(id, { ok: true, message: "Связь с начислением сохранена." });
 }
 
 function backToRequest(id: string, result: PlanResult): never {

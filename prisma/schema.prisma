@@ -723,6 +723,7 @@ model AccrualDocument {
   period       AccountingPeriod?  @relation(fields: [periodId], references: [id])
   lines        AccrualDocumentLine[]
   allocations  PaymentAllocation[]
+  paymentRequests PaymentRequest[]
   externalLink IntegrationExternalObject[]
   auditLogs    AuditLog[]
 
@@ -931,6 +932,7 @@ model PaymentRequest {
   organizationId    String
   counterpartyId    String?
   cashFlowArticleId String?
+  accrualDocumentId String?
   amount            Decimal               @db.Decimal(18, 2)
   /// Валюта суммы заявки (и частей графика); в рубли — по курсу ЦБ на сегодня (маршрут, календарь, дашборд).
   currency          String                @default("RUB") @db.VarChar(3)
@@ -952,6 +954,7 @@ model PaymentRequest {
 
   createdBy       User                       @relation("PaymentRequestCreatedBy", fields: [createdById], references: [id])
   cashFlowArticle CashFlowArticle?           @relation(fields: [cashFlowArticleId], references: [id])
+  accrualDocument AccrualDocument? @relation(fields: [accrualDocumentId], references: [id], onDelete: SetNull)
   organization    Organization               @relation(fields: [organizationId], references: [id])
   counterparty    Counterparty?              @relation(fields: [counterpartyId], references: [id])
   route           PaymentApprovalRoute?      @relation(fields: [routeId], references: [id])
@@ -970,6 +973,7 @@ model PaymentRequest {
   @@index([organizationId])
   @@index([counterpartyId])
   @@index([createdById])
+  @@index([accrualDocumentId])
   @@map("payment_requests")
 }
 

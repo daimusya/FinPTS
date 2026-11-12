@@ -23,6 +23,7 @@ import {
   removePaymentScheduleAction,
   markPaymentPartPaidAction,
   assignRequestAccountAction,
+  assignRequestAccrualAction,
 } from "../actions";
 import { accountKey, localDateKey, requestPlacement, showDueDate } from "@/lib/payment-calendar";
 import { scheduleSummary, suggestSplit } from "@/lib/payment-requests/parts";
@@ -42,6 +43,7 @@ import { approvalSeparationProblem } from "@/lib/payment-requests/separation";
 import { payeeChangedSince } from "@/lib/payment-requests/payee-change";
 import { findPossibleDuplicates } from "@/lib/payment-requests/find-duplicates";
 import { getAccessScope, paymentRequestScopeWhere } from "@/lib/access-scope";
+import { listLinkableAccruals } from "@/lib/payment-requests/accrual-link";
 
 const STATE_LABELS: Record<TimelineState, string> = {
   approved: "Согласовано",
@@ -101,6 +103,12 @@ export default async function PaymentRequestPage({
   const canPay = hasPermission(session, PERMISSIONS.CASH_MANAGE);
   const movable = requestPlacement(request.status, true).movable;
   const canReschedule = canPlanRequests(session) && movable;
+  const canViewAccruals = hasPermission(session, PERMISSIONS.ACCRUALS_VIEW);
+  const canLinkAccrual = canViewAccruals && canPlanRequests(session) && (movable || request.status === "RETURNED" || request.status === "REJECTED");
+  const accrualOptions = canViewAccruals && (canLinkAccrual || request.accrualDocumentId)
+    ? await listLinkableAccruals(await getAccessScope(session), request.organizationId, request.counterpartyId, request.accrualDocumentId)
+    : [];
+  const linkedAccrual = accrualOptions.find((doc) => doc.id === request.accrualDocumentId);
   const todayKey = localDateKey();
   const hasParts = request.parts.length > 0;
   const summary = scheduleSummary(request.parts);
@@ -340,6 +348,23 @@ export default async function PaymentRequestPage({
             ? ` · оплачено ${money(summary.paidAmount)} из ${money(request.amount)}, осталось ${money(summary.remainingAmount)}`
             : ""}
         </p>
+        {linkedAccrual ? (
+          <p className="text-muted">Начисление: <Link href={`/accruals/${linkedAccrual.id}`}>№ {linkedAccrual.number} от {showDueDate(linkedAccrual.date)}</Link></p>
+        ) : null}
+        {canLinkAccrual ? (
+          <form action={assignRequestAccrualAction.bind(null, request.id)} className="form-grid" style={{ alignItems: "flex-end", marginBottom: 10 }}>
+            <label className="field">
+              <span>Документ начисления (необязательно)</span>
+              <select name="accrualDocumentId" defaultValue={linkedAccrual?.id ?? ""}>
+                <option value="">Без начисления</option>
+                {accrualOptions.map((doc) => (
+                  <option key={doc.id} value={doc.id}>№ {doc.number} от {showDueDate(doc.date)} · {doc.counterparty.shortName || doc.counterparty.fullName}</option>
+                ))}
+              </select>
+            </label>
+            <SubmitButton className="btn btn-secondary btn-sm">Сохранить связь</SubmitButton>
+          </form>
+        ) : null}
 
         {hasParts ? (
           <div className="table-wrap" style={{ marginBottom: 10 }}>
