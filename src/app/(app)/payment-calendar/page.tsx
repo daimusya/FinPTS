@@ -330,9 +330,14 @@ export default async function PaymentCalendarPage({
       low,
     };
   });
-  const unassignedCounted = items.filter((i) => !i.accountKey && i.counted && (chosenOrg ? i.organizationId === chosenOrg : true));
-  const unassignedIn = sumMoney(unassignedCounted.filter((i) => i.direction === "INFLOW").map((i) => i.amountValue));
-  const unassignedOut = sumMoney(unassignedCounted.filter((i) => i.direction === "OUTFLOW").map((i) => i.amountValue));
+  const unassignedMovements = items
+    .filter((i) => !i.accountKey && i.counted && (!chosenOrg || i.organizationId === chosenOrg))
+    .map(toMovement);
+  const unassignedDays = buildMonthGrid({ month, todayKey, startingBalance: 0, movements: unassignedMovements, calendar })
+    .flat()
+    .filter((day) => day.inMonth);
+  const unassignedIn = sumMoney(unassignedDays.map((day) => day.inflow));
+  const unassignedOut = sumMoney(unassignedDays.map((day) => day.outflow));
 
   const accountsByOrganization: Record<string, AccountOption[]> = {};
   for (const [key, info] of accountInfo) {
