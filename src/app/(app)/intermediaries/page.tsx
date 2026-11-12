@@ -36,6 +36,7 @@ export default async function IntermediariesPage({ searchParams }: { searchParam
     loadCommissionDashboard(scope, ym),
     loadFixedCommissionReports(scope, ym),
   ]);
+  const hasExportableReports = fixedReports.length > 0 || current.rows.some((row) => row.inflows.some((op) => op.confirmed));
   const month = monthParam(ym);
   const returnTo = `/intermediaries?month=${month}`;
   const names = new Map(context.intermediaries.map((m) => [m.id, m.name]));
@@ -87,7 +88,7 @@ export default async function IntermediariesPage({ searchParams }: { searchParam
         </div>
       ) : null}
 
-      {context.intermediaries.length === 0 ? (
+      {context.intermediaries.length === 0 && fixedReports.length === 0 ? (
         <div className="card">
           <h2 className="section-title">Посредники ещё не заведены</h2>
           <p className="text-muted" style={{ marginBottom: 12 }}>
@@ -163,7 +164,7 @@ export default async function IntermediariesPage({ searchParams }: { searchParam
                 <Link href={`/intermediaries/report?month=${month}&id=all`} className="btn btn-primary btn-sm">
                   Печать всех отчётов
                 </Link>
-                {canExport ? (
+                {canExport && hasExportableReports ? (
                   <a href={`/api/intermediaries/export?month=${month}&id=all`} className="btn btn-secondary btn-sm">
                     Excel: все
                   </a>
