@@ -39,12 +39,29 @@ export function parseCommissionVersion(value: string): number | null {
 export function serializeCommissionReport(report: IntermediaryReport) {
   return {
     id: report.id, title: report.title, article: report.article, name: report.name,
-    lines: report.lines.map((line) => ({ date: line.date.toISOString(), text: line.text, amount: line.amount.toString() })),
+    lines: report.lines.map((line) => ({ ...line, date: line.date.toISOString(), amount: line.amount.toString() })),
     total: report.total.toString(),
     commission: report.commission?.toString() ?? null,
     commissionPct: report.commissionPct?.toString() ?? null,
     commissionLines: report.commissionLines.map((line) => ({ label: line.label, amount: line.amount?.toString() ?? null })),
     basis: report.basis,
+  };
+}
+
+type CurrentStoredLine = ReturnType<typeof serializeCommissionReport>["lines"][number];
+type LegacyStoredLine = Pick<CurrentStoredLine, "date" | "amount"> & { text: string };
+type StoredReport = Omit<ReturnType<typeof serializeCommissionReport>, "lines"> & { lines: Array<CurrentStoredLine | LegacyStoredLine> };
+
+function restoreReportLine(line: CurrentStoredLine | LegacyStoredLine): ReportLine {
+  const base = { date: new Date(line.date), amount: new Decimal(line.amount) };
+  if ("counterparty" in line) return { ...base, counterparty: line.counterparty, purpose: line.purpose };
+  const marker = "\nНазначение платежа: ";
+  const split = line.text.indexOf(marker);
+  const buyer = split < 0 ? line.text : line.text.slice(0, split);
+  return {
+    ...base,
+    counterparty: buyer.replace(/^Покупатель: /, ""),
+    purpose: split < 0 ? null : line.text.slice(split + marker.length),
   };
 }
 
@@ -62,10 +79,10 @@ export async function loadFixedCommissionReports(scope: AccessScope, ym: YearMon
   });
   const decimal = (value: string | null) => value === null ? null : new Decimal(value);
   return records.map(({ report, fixedAt, version, correctionReason }) => {
-    const stored = report as ReturnType<typeof serializeCommissionReport>;
+    const stored = report as StoredReport;
     return {
       ...stored, fixedAt, version, correctionReason,
-      lines: stored.lines.map((line) => ({ ...line, date: new Date(line.date), amount: new Decimal(line.amount) })),
+      lines: stored.lines.map(restoreReportLine),
       total: new Decimal(stored.total),
       commission: decimal(stored.commission),
       commissionPct: decimal(stored.commissionPct),

@@ -20,33 +20,34 @@ function reportSheet(report: IntermediaryReport): XLSX.WorkSheet {
     [null, report.title],
     [null, report.article],
     [],
-    [null, "Дата", "Содержание операции", "Поступления"],
+    [null, "Дата", "Контрагент", "Назначение платежа", "Поступления"],
     [],
-    ...report.lines.map((l) => [null, day(l.date), l.text.replace("\nНазначение платежа:", " — Назначение платежа:"), l.amount.toNumber()]),
-    [null, "Итого", null, report.total.toNumber()],
-    ...report.commissionLines.map((c) => [null, c.label, null, c.amount ? c.amount.toNumber() : null]),
+    ...report.lines.map((l) => [null, day(l.date), l.counterparty, l.purpose, l.amount.toNumber()]),
+    [null, "Итого", null, null, report.total.toNumber()],
+    ...report.commissionLines.map((c) => [null, c.label, null, null, c.amount ? c.amount.toNumber() : null]),
   ];
   const sheet = XLSX.utils.aoa_to_sheet(rows);
   const first = 7;
   const totalRow = first + report.lines.length;
   for (let r = first; r <= totalRow + report.commissionLines.length; r++) {
-    const cell = sheet[`D${r}`];
+    const cell = sheet[`E${r}`];
     if (cell && cell.t === "n") cell.z = NUMBER_FORMAT;
   }
-  if (report.lines.length) sheet[`D${totalRow}`].f = `SUM(D${first}:D${totalRow - 1})`;
+  if (report.lines.length) sheet[`E${totalRow}`].f = `SUM(E${first}:E${totalRow - 1})`;
   if (report.commission && report.commissionPct && report.commissionLines.length === 1) {
-    sheet[`D${totalRow + 1}`].f = `ROUND(D${totalRow}*${report.commissionPct.toString()}/100,2)`;
+    sheet[`E${totalRow + 1}`].f = `ROUND(E${totalRow}*${report.commissionPct.toString()}/100,2)`;
   }
   sheet["!merges"] = [
-    { s: { r: 1, c: 1 }, e: { r: 1, c: 3 } },
-    { s: { r: 2, c: 1 }, e: { r: 2, c: 3 } },
+    { s: { r: 1, c: 1 }, e: { r: 1, c: 4 } },
+    { s: { r: 2, c: 1 }, e: { r: 2, c: 4 } },
     { s: { r: 4, c: 1 }, e: { r: 5, c: 1 } },
     { s: { r: 4, c: 2 }, e: { r: 5, c: 2 } },
     { s: { r: 4, c: 3 }, e: { r: 5, c: 3 } },
-    { s: { r: totalRow - 1, c: 1 }, e: { r: totalRow - 1, c: 2 } },
-    ...report.commissionLines.map((_, i) => ({ s: { r: totalRow + i, c: 1 }, e: { r: totalRow + i, c: 2 } })),
+    { s: { r: 4, c: 4 }, e: { r: 5, c: 4 } },
+    { s: { r: totalRow - 1, c: 1 }, e: { r: totalRow - 1, c: 3 } },
+    ...report.commissionLines.map((_, i) => ({ s: { r: totalRow + i, c: 1 }, e: { r: totalRow + i, c: 3 } })),
   ];
-  sheet["!cols"] = [{ wch: 1 }, { wch: 11 }, { wch: 46 }, { wch: 18 }];
+  sheet["!cols"] = [{ wch: 1 }, { wch: 11 }, { wch: 30 }, { wch: 55 }, { wch: 18 }];
   return sheet;
 }
 

@@ -336,22 +336,24 @@ export function reportPayerName(raw: string | null): string {
 
 export interface ReportLine {
   date: Date;
-  text: string;
+  counterparty: string;
+  purpose: string | null;
   amount: Decimal;
 }
 
 export function reportLines(inflows: InflowRow[]): ReportLine[] {
   const lines = new Map<string, ReportLine>();
   for (const op of inflows) {
-    const buyer = `Покупатель: ${reportPayerName(op.payerName)}`;
+    const counterparty = reportPayerName(op.payerName);
     const purpose = op.purpose?.trim() || null;
-    const text = purpose ? `${buyer}\nНазначение платежа: ${purpose}` : buyer;
-    const key = JSON.stringify([op.date.toISOString().slice(0, 10), op.payerInn ?? buyer, purpose]);
+    const key = JSON.stringify([op.date.toISOString().slice(0, 10), op.payerInn ?? counterparty, purpose]);
     const line = lines.get(key);
     if (line) line.amount = line.amount.plus(op.amount);
-    else lines.set(key, { date: op.date, text, amount: op.amount });
+    else lines.set(key, { date: op.date, counterparty, purpose, amount: op.amount });
   }
-  return [...lines.values()].sort((a, b) => a.date.getTime() - b.date.getTime() || a.text.localeCompare(b.text, "ru"));
+  return [...lines.values()].sort((a, b) => a.date.getTime() - b.date.getTime()
+    || a.counterparty.localeCompare(b.counterparty, "ru")
+    || (a.purpose ?? "").localeCompare(b.purpose ?? "", "ru"));
 }
 
 const MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];

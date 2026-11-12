@@ -121,13 +121,15 @@ export default async function IntermediaryReportPage({ searchParams }: { searchP
           <table>
             <colgroup>
               <col style={{ width: "16%" }} />
-              <col style={{ width: "62%" }} />
-              <col style={{ width: "22%" }} />
+              <col style={{ width: "27%" }} />
+              <col style={{ width: "38%" }} />
+              <col style={{ width: "19%" }} />
             </colgroup>
             <thead>
               <tr>
                 <th>Дата</th>
-                <th>Содержание операции</th>
+                <th>Контрагент</th>
+                <th>Назначение платежа</th>
                 <th>Поступления</th>
               </tr>
             </thead>
@@ -135,17 +137,18 @@ export default async function IntermediaryReportPage({ searchParams }: { searchP
               {r.lines.map((line, i) => (
                 <tr key={i}>
                   <td style={{ textAlign: "center" }}>{day(line.date)}</td>
-                  <td style={{ whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{line.text}</td>
+                  <td style={{ overflowWrap: "anywhere" }}>{line.counterparty}</td>
+                  <td style={{ whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{line.purpose}</td>
                   <td className="num">{amount(line.amount)}</td>
                 </tr>
               ))}
               <tr className="print-report__total">
-                <td colSpan={2}>Итого</td>
+                <td colSpan={3}>Итого</td>
                 <td className="num">{amount(r.total)}</td>
               </tr>
               {r.commissionLines.map((line, i) => (
                 <tr key={`c${i}`} className="print-report__total">
-                  <td colSpan={2}>{line.label}</td>
+                  <td colSpan={3}>{line.label}</td>
                   <td className="num">{line.amount ? amount(line.amount) : "—"}</td>
                 </tr>
               ))}
