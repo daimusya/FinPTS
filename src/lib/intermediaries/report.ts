@@ -29,6 +29,18 @@ export interface IntermediaryReport {
   };
 }
 
+export const commissionReportColumns = ["Дата", "Контрагент", "Назначение платежа", "Поступления"] as const;
+
+export const formatCommissionFixedDate = (date: Date) =>
+  date.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", dateStyle: "short", timeStyle: "short" });
+
+export function commissionReportVersionNotes(report: IntermediaryReport): string[] {
+  if (!report.fixedAt) return [];
+  const notes = [`Зафиксировано ${formatCommissionFixedDate(report.fixedAt)} · версия ${report.version}`];
+  if (report.correctionReason) notes.push(`Причина корректировки: ${report.correctionReason}`);
+  return notes;
+}
+
 export const commissionMonthDate = (ym: YearMonth) => new Date(Date.UTC(ym.year, ym.month - 1, 1));
 
 export function parseCommissionVersion(value: string): number | null {

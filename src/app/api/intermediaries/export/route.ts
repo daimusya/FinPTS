@@ -1,54 +1,88 @@
 import { NextRequest } from "next/server";
-import * as XLSX from "xlsx";
+import { Workbook, type Row } from "exceljs";
 import { requireSession } from "@/lib/session";
 import { getAccessScope } from "@/lib/access-scope";
 import { canExportReport } from "@/lib/reports/export-access";
 import { parseMonthParam } from "@/lib/intermediaries/load";
-import { loadIntermediaryReports, parseCommissionVersion, type IntermediaryReport } from "@/lib/intermediaries/report";
+import { commissionReportColumns, commissionReportVersionNotes, loadIntermediaryReports, parseCommissionVersion, type IntermediaryReport } from "@/lib/intermediaries/report";
 
-const NUMBER_FORMAT = "#,##0 ;[Red](#,##0)";
-const day = (d: Date) => d.toISOString().slice(0, 10).split("-").reverse().join(".");
+const day = (date: Date) => date.toISOString().slice(0, 10).split("-").reverse().join(".");
+const gridBorder = { style: "thin", color: { argb: "FF000000" } } as const;
 
-/**
- * Лист в раскладке шаблона «ХАРЛАМОВА 0926.xlsx»: заголовок в B2, статья в
- * B3, шапка таблицы в строках 5–6, операции с 7-й строки, затем «Итого» и
- * комиссия формулой от итога (ставка менялась в месяце — строка на каждую ставку).
- */
-function reportSheet(report: IntermediaryReport): XLSX.WorkSheet {
-  const rows: Array<Array<string | number | null>> = [
-    [],
-    [null, report.title],
-    [null, report.article],
-    [],
-    [null, "Дата", "Контрагент", "Назначение платежа", "Поступления"],
-    [],
-    ...report.lines.map((l) => [null, day(l.date), l.counterparty, l.purpose, l.amount.toNumber()]),
-    [null, "Итого", null, null, report.total.toNumber()],
-    ...report.commissionLines.map((c) => [null, c.label, null, null, c.amount ? c.amount.toNumber() : null]),
-  ];
-  const sheet = XLSX.utils.aoa_to_sheet(rows);
-  const first = 7;
-  const totalRow = first + report.lines.length;
-  for (let r = first; r <= totalRow + report.commissionLines.length; r++) {
-    const cell = sheet[`E${r}`];
-    if (cell && cell.t === "n") cell.z = NUMBER_FORMAT;
+function wrappedLines(text: string, width: number) {
+  return text.split("\n").reduce((count, line) => count + Math.max(1, Math.ceil(line.length / width)), 0);
+}
+
+function formatTableRow(row: Row, shaded: boolean) {
+  row.height = 16;
+  for (let column = 1; column <= 4; column++) {
+    const cell = row.getCell(column);
+    cell.font = { name: "Arial", size: 9, bold: shaded, color: { argb: "FF000000" } };
+    cell.border = { top: gridBorder, bottom: gridBorder, left: gridBorder, right: gridBorder };
+    cell.alignment = { vertical: "top", horizontal: column === 1 ? "center" : column === 4 ? "right" : "left", wrapText: true };
+    if (shaded) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F2F2" } };
   }
-  if (report.lines.length) sheet[`E${totalRow}`].f = `SUM(E${first}:E${totalRow - 1})`;
-  if (report.commission && report.commissionPct && report.commissionLines.length === 1) {
-    sheet[`E${totalRow + 1}`].f = `ROUND(E${totalRow}*${report.commissionPct.toString()}/100,2)`;
+}
+
+function numberFormat(value: number | string) {
+  return typeof value === "number" && !Number.isInteger(value) ? "#,##0.0#" : "#,##0";
+}
+
+function addReportSheet(workbook: Workbook, name: string, report: IntermediaryReport) {
+  const sheet = workbook.addWorksheet(name, {
+    views: [{ showGridLines: false }],
+    pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+  });
+  const widths = [15, 26, 38, 18];
+  widths.forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
+
+  const addHeading = (text: string, size = 10, bold = false) => {
+    const row = sheet.addRow([text]);
+    sheet.mergeCells(row.number, 1, row.number, 4);
+    row.getCell(1).font = { name: "Arial", size, bold };
+    row.getCell(1).alignment = { wrapText: true, vertical: "top" };
+    row.height = Math.min(409, wrappedLines(text, 90) * (size + 5));
+  };
+
+  addHeading(report.title, 13, true);
+  addHeading(report.article);
+  for (const note of commissionReportVersionNotes(report)) addHeading(note);
+  sheet.addRow([]).height = 7;
+  const header = sheet.addRow([...commissionReportColumns]);
+  formatTableRow(header, true);
+  header.eachCell((cell) => { cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; });
+
+  const first = header.number + 1;
+  for (const line of report.lines) {
+    const amount = line.amount.toNumber();
+    const row = sheet.addRow([day(line.date), line.counterparty, line.purpose, amount]);
+    formatTableRow(row, false);
+    row.height = Math.min(409, 12 * Math.max(wrappedLines(line.counterparty, 24), wrappedLines(line.purpose ?? "", 35)) + 4);
+    row.getCell(4).numFmt = numberFormat(amount);
   }
-  sheet["!merges"] = [
-    { s: { r: 1, c: 1 }, e: { r: 1, c: 4 } },
-    { s: { r: 2, c: 1 }, e: { r: 2, c: 4 } },
-    { s: { r: 4, c: 1 }, e: { r: 5, c: 1 } },
-    { s: { r: 4, c: 2 }, e: { r: 5, c: 2 } },
-    { s: { r: 4, c: 3 }, e: { r: 5, c: 3 } },
-    { s: { r: 4, c: 4 }, e: { r: 5, c: 4 } },
-    { s: { r: totalRow - 1, c: 1 }, e: { r: totalRow - 1, c: 3 } },
-    ...report.commissionLines.map((_, i) => ({ s: { r: totalRow + i, c: 1 }, e: { r: totalRow + i, c: 3 } })),
-  ];
-  sheet["!cols"] = [{ wch: 1 }, { wch: 11 }, { wch: 30 }, { wch: 55 }, { wch: 18 }];
-  return sheet;
+  const addTotal = (label: string, value: number | string) => {
+    const row = sheet.addRow([label, null, null, value]);
+    sheet.mergeCells(row.number, 1, row.number, 3);
+    formatTableRow(row, true);
+    row.getCell(1).alignment = { horizontal: "left", vertical: "top", wrapText: true };
+    row.height = Math.min(409, wrappedLines(label, 76) * 12 + 4);
+    row.getCell(4).numFmt = numberFormat(value);
+    return row;
+  };
+  const total = addTotal("Итого", report.total.toNumber());
+  if (report.lines.length) {
+    total.getCell(4).value = { formula: `SUM(D${first}:D${total.number - 1})`, result: report.total.toNumber() };
+  }
+  for (const line of report.commissionLines) {
+    const row = addTotal(line.label, line.amount?.toNumber() ?? "—");
+    if (line.amount !== null && report.commissionPct !== null && report.commissionLines.length === 1) {
+      row.getCell(4).value = {
+        formula: `ROUND(D${total.number}*${report.commissionPct.toString()}/100,2)`,
+        result: line.amount.toNumber(),
+      };
+    }
+  }
+  sheet.pageSetup.printTitlesRow = `${header.number}:${header.number}`;
 }
 
 /** Имя листа Excel: до 31 символа, без []:*?/\ и неповторяющееся. */
@@ -74,10 +108,10 @@ export async function GET(request: NextRequest) {
   const reports = await loadIntermediaryReports(await getAccessScope(session), ym, id, version);
   if (reports.length === 0) return new Response("За этот месяц поступлений через посредников нет", { status: 404 });
 
-  const workbook = XLSX.utils.book_new();
+  const workbook = new Workbook();
   const used = new Set<string>();
-  for (const report of reports) XLSX.utils.book_append_sheet(workbook, reportSheet(report), sheetName(report.name, used));
-  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
+  for (const report of reports) addReportSheet(workbook, sheetName(report.name, used), report);
+  const buffer = await workbook.xlsx.writeBuffer();
 
   // Как у шаблона: «ХАРЛАМОВА 0926.xlsx» — фамилия и ММГГ.
   const period = `${String(ym.month).padStart(2, "0")}${String(ym.year).slice(2)}`;
