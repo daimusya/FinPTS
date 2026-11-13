@@ -214,7 +214,7 @@ export default async function PaymentCalendarPage({
     const account = accountInfo.get(accountKey(transaction.bankAccountId, transaction.cashAccountId) ?? "");
     return account ? [{ ...transaction, counterpartyId: transaction.counterpartyId!, organizationId: account.organizationId, currency: account.currency }] : [];
   });
-  const { matches } = matchStatement(statementOutflows, statementRequests);
+  const { matches } = matchStatement(statementOutflows, statementRequests, { requireUniqueRequest: true });
   const statementBySlot = new Map(matches.map(({ slotKey, outflow }) => [slotKey, outflow.id]));
 
   // Every planned payment: requests (or their parts) and unpaid documents.
