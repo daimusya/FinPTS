@@ -50,8 +50,8 @@ export function approvedInTime(request: CheckedRequest, outflow: StatementOutflo
   return moscowDayKey(request.approvedAt) <= dayKey(outflow.operationDate);
 }
 
-export function checkStatement<T extends StatementOutflow, R extends CheckedRequest>(outflows: T[], requests: R[]) {
-  const candidates: Array<{ outflow: T; request: R; slotKey: string; distance: number; approved: boolean }> = [];
+export function matchStatement<T extends StatementOutflow, R extends CheckedRequest>(outflows: T[], requests: R[]) {
+  const candidates: Array<{ outflow: T; request: R; slotKey: string; whole: boolean; distance: number; approved: boolean }> = [];
   for (const outflow of outflows) {
     for (const request of requests) {
       if (request.organizationId !== outflow.organizationId || request.counterpartyId !== outflow.counterpartyId) continue;
@@ -60,22 +60,30 @@ export function checkStatement<T extends StatementOutflow, R extends CheckedRequ
         if (money(slot.amount) !== money(outflow.amount)) continue;
         const distance = Math.abs(slot.dueDate.getTime() - outflow.operationDate.getTime());
         if (distance > STATEMENT_MATCH_DAYS * DAY_MS) continue;
-        candidates.push({ outflow, request, slotKey: `${request.id}:${slot.key}`, distance, approved: APPROVED_STATUSES.has(request.status) });
+        candidates.push({ outflow, request, slotKey: `${request.id}:${slot.key}`, whole: slot.key === "whole", distance, approved: APPROVED_STATUSES.has(request.status) });
       }
     }
   }
   // Approved requests first, then the nearest due date: an approved payment is the likelier explanation.
-  candidates.sort((a, b) => Number(b.approved) - Number(a.approved) || a.distance - b.distance);
+  candidates.sort((a, b) => Number(b.approved) - Number(a.approved) || a.distance - b.distance || Number(a.whole) - Number(b.whole));
   const usedOutflows = new Set<string>();
   const usedSlots = new Set<string>();
+  const matchedWhole = new Set<string>();
+  const matchedParts = new Set<string>();
   const matches: StatementMatch<T, R>[] = [];
   for (const c of candidates) {
     if (usedOutflows.has(c.outflow.id) || usedSlots.has(c.slotKey)) continue;
+    if (c.whole ? matchedParts.has(c.request.id) : matchedWhole.has(c.request.id)) continue;
     usedOutflows.add(c.outflow.id);
     usedSlots.add(c.slotKey);
+    (c.whole ? matchedWhole : matchedParts).add(c.request.id);
     matches.push({ outflow: c.outflow, request: c.request, slotKey: c.slotKey });
   }
+  return { matches, usedOutflows };
+}
 
+export function checkStatement<T extends StatementOutflow, R extends CheckedRequest>(outflows: T[], requests: R[]) {
+  const { matches, usedOutflows } = matchStatement(outflows, requests);
   const withoutRequest = outflows.filter((o) => !usedOutflows.has(o.id));
   const beforeApproval: StatementMatch<T, R>[] = [];
   const notMarked: StatementMatch<T, R>[] = [];

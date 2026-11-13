@@ -20,12 +20,13 @@ import {
 } from "@/lib/payment-calendar";
 import { formatMoney, sumMoney } from "@/lib/money";
 import { PAYMENT_REQUEST_STATUS_LABELS } from "@/lib/payment-requests/labels";
+import { matchStatement, STATEMENT_MATCH_DAYS } from "@/lib/payment-requests/statement-check";
 import { ACCRUAL_DOCUMENT_TYPE_LABELS } from "@/lib/accruals/labels";
 import { canPlanDocuments, canPlanRequests } from "@/lib/payment-plan/service";
 import { PaymentCalendarBoard, type AccountOption, type BoardDay, type BoardItem } from "@/components/payment-calendar-board";
 import { formatMoneyIn, normalizeCurrency } from "@/lib/currency";
 import { amountInRub, loadRateLookup } from "@/lib/currency-rates";
-import { isForeign, outstanding } from "@/lib/accruals/currency";
+import { allocationDocumentSide, isForeign, outstanding, toRubAtRate } from "@/lib/accruals/currency";
 import {
   accrualScopeWhere,
   bankTransactionScopeWhere,
@@ -115,7 +116,7 @@ export default async function PaymentCalendarPage({
     prisma.paymentRequest.findMany({
       where: { status: { notIn: [...HIDDEN_REQUEST_STATUSES] }, ...paymentRequestScopeWhere(access) },
       include: { organization: true, counterparty: true, cashFlowArticle: true, parts: { orderBy: [{ dueDate: "asc" }, { sortOrder: "asc" }] } },
-      orderBy: [{ dueDate: "asc" }, { amount: "desc" }],
+      orderBy: [{ dueDate: "asc" }, { amount: "desc" }, { id: "asc" }],
     }),
     prisma.productionCalendarDay.findMany({
       where: { isArchived: false, date: { gte: new Date(Date.UTC(year, monthNumber - 2, 20)), lte: new Date(Date.UTC(year, monthNumber, 10)) } },
@@ -176,6 +177,46 @@ export default async function PaymentCalendarPage({
   );
   const currentBalance = accountsInScope.reduce((sum, [key]) => sum.plus(balances.get(key) ?? 0), new Decimal(0));
 
+  const statementRequests = requests.filter((r) => r.counterpartyId && r.status !== "DRAFT").map((r) => ({
+    id: r.id,
+    organizationId: r.organizationId,
+    counterpartyId: r.counterpartyId!,
+    currency: r.currency,
+    status: r.status,
+    approvedAt: null,
+    slots: [
+      { key: "whole", amount: r.amount, dueDate: r.dueDate, paid: r.status === "PAID" },
+      ...r.parts.map((part) => ({ key: part.id, amount: part.amount, dueDate: part.dueDate, paid: r.status === "PAID" || !!part.paidAt })),
+    ],
+  }));
+  // Already paid requests also take part in the one-to-one reconciliation.
+  const matchWindow = STATEMENT_MATCH_DAYS * 86_400_000;
+  let firstDue = Infinity;
+  let lastDue = -Infinity;
+  for (const request of statementRequests) {
+    for (const slot of request.slots) {
+      firstDue = Math.min(firstDue, slot.dueDate.getTime());
+      lastDue = Math.max(lastDue, slot.dueDate.getTime());
+    }
+  }
+  const statementTransactions = statementRequests.length ? await prisma.bankTransaction.findMany({
+    where: {
+      ...transactionScope,
+      direction: "OUTFLOW",
+      isTransfer: false,
+      counterpartyId: { in: [...new Set(statementRequests.map((r) => r.counterpartyId))] },
+      operationDate: { gte: new Date(firstDue - matchWindow), lte: new Date(lastDue + matchWindow), lt: tomorrow },
+    },
+    select: { id: true, amount: true, counterpartyId: true, operationDate: true, bankAccountId: true, cashAccountId: true },
+    orderBy: [{ operationDate: "asc" }, { id: "asc" }],
+  }) : [];
+  const statementOutflows = statementTransactions.flatMap((transaction) => {
+    const account = accountInfo.get(accountKey(transaction.bankAccountId, transaction.cashAccountId) ?? "");
+    return account ? [{ ...transaction, counterpartyId: transaction.counterpartyId!, organizationId: account.organizationId, currency: account.currency }] : [];
+  });
+  const { matches } = matchStatement(statementOutflows, statementRequests);
+  const statementBySlot = new Map(matches.map(({ slotKey, outflow }) => [slotKey, outflow.id]));
+
   // Every planned payment: requests (or their parts) and unpaid documents.
   const items: Item[] = [];
   const documentsById = new Map(unpaidDocuments.map((doc) => [doc.id, doc]));
@@ -197,11 +238,24 @@ export default async function PaymentCalendarPage({
     // A request in a foreign currency: roubles at today's rate (the forecast is in roubles).
     const toRub = (value: { toString(): string }) =>
       r.currency === "RUB" ? new Decimal(value.toString()) : (amountInRub(value.toString(), r.currency, rates, todayDate) ?? new Decimal(value.toString()));
-    if (placement.counted && linked?.direction === "EXPENSE" && linked.organizationId === r.organizationId
+    const wholeStatementId = statementBySlot.get(`${r.id}:whole`);
+    if (linked?.direction === "EXPENSE" && linked.organizationId === r.organizationId
       && (!r.counterpartyId || linked.counterpartyId === r.counterpartyId)) {
-      const scheduled = r.parts.length
-        ? sumMoney(r.parts.filter((part) => !part.paidAt).map((part) => toRub(part.amount)))
-        : toRub(r.amount);
+      const slots = r.parts.length && !wholeStatementId
+        ? r.parts.map((part) => ({ amount: part.amount, paid: !!part.paidAt, statementId: statementBySlot.get(`${r.id}:${part.id}`) }))
+        : [{ amount: r.amount, paid: false, statementId: wholeStatementId }];
+      const scheduled = sumMoney(slots.map(({ amount, paid, statementId }) => {
+        if (!statementId) return placement.counted && !paid ? toRub(amount) : 0;
+        // A matched payment can also be allocated to the document. Its allocated amount already reduced the debt.
+        const allocations = linked.allocations.filter((allocation) => allocation.bankTransactionId === statementId);
+        const rate = isForeign(linked.currency) && linked.exchangeRate
+          ? rates.rateOn(linked.currency, todayDate) ?? linked.exchangeRate
+          : null;
+        const allocated = rate
+          ? toRubAtRate(sumMoney(allocations.map(allocationDocumentSide)), rate)
+          : sumMoney(allocations.map((allocation) => allocation.amount));
+        return Decimal.max(0, toRub(amount).minus(allocated));
+      }));
       coverageByDocument.set(linked.id, (coverageByDocument.get(linked.id) ?? new Decimal(0)).plus(scheduled));
     }
     const inCurrency = (value: { toString(): string }) => (r.currency === "RUB" ? "" : ` · ${formatMoneyIn(value.toString(), r.currency)}`);
@@ -216,10 +270,10 @@ export default async function PaymentCalendarPage({
         amount: short(amount),
         amountFull: formatMoney(amount),
         amountValue: amount,
-        subtitle: `Заявка · ${statusLabel}${inCurrency(r.amount)}`,
-        look,
-        counted: placement.counted,
-        movable: placement.movable && planRequests,
+        subtitle: `Заявка · ${wholeStatementId && r.status !== "PAID" ? "Оплачена по выписке" : statusLabel}${inCurrency(r.amount)}`,
+        look: wholeStatementId ? "done" : look,
+        counted: placement.counted && !wholeStatementId,
+        movable: placement.movable && planRequests && !wholeStatementId,
         accountName: null,
       });
       continue;
@@ -227,6 +281,7 @@ export default async function PaymentCalendarPage({
     r.parts.forEach((part, i) => {
       const amount = toRub(part.amount);
       const ownAccount = accountKey(part.payBankAccountId, part.payCashAccountId);
+      const paidByStatement = Boolean(wholeStatementId) || statementBySlot.has(`${r.id}:${part.id}`);
       items.push({
         ...base,
         // A part may be paid from its own account; otherwise the request's.
@@ -239,10 +294,10 @@ export default async function PaymentCalendarPage({
         amount: short(amount),
         amountFull: formatMoney(amount),
         amountValue: amount,
-        subtitle: `Часть ${i + 1} из ${r.parts.length} · ${part.paidAt ? "оплачена" : statusLabel}${inCurrency(part.amount)}`,
-        look: part.paidAt ? "done" : look,
-        counted: placement.counted && !part.paidAt,
-        movable: placement.movable && planRequests && !part.paidAt,
+        subtitle: `Часть ${i + 1} из ${r.parts.length} · ${part.paidAt ? "оплачена" : paidByStatement ? "оплачена по выписке" : statusLabel}${inCurrency(part.amount)}`,
+        look: part.paidAt || paidByStatement ? "done" : look,
+        counted: placement.counted && !part.paidAt && !paidByStatement,
+        movable: placement.movable && planRequests && !part.paidAt && !paidByStatement,
         accountName: null,
       });
     });

@@ -163,6 +163,7 @@ export async function importBankStatementAction(_prev: ImportState, formData: Fo
   });
 
   revalidatePath("/cash/transactions");
+  revalidatePath("/payment-calendar");
   revalidatePath("/intermediaries", "layout");
   revalidatePath("/master-data/intermediaries");
 
@@ -184,6 +185,7 @@ export async function importClientBankAction(_prev: ClientBankImportState, formD
   const results = await importClientBankFiles(session, files, organizationId);
   revalidatePath("/cash/transactions");
   revalidatePath("/cash/import");
+  revalidatePath("/payment-calendar");
   revalidatePath("/intermediaries", "layout");
   revalidatePath("/master-data/intermediaries");
   return { results };

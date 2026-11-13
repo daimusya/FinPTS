@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkStatement, requestApprovedAt, type CheckedRequest, type StatementOutflow } from "./statement-check";
+import { checkStatement, matchStatement, requestApprovedAt, type CheckedRequest, type StatementOutflow } from "./statement-check";
 
 const d = (s: string) => new Date(`${s}T00:00:00Z`);
 const out = (id: string, over: Partial<StatementOutflow> = {}): StatementOutflow => ({
@@ -74,6 +74,19 @@ describe("checkStatement", () => {
     const pending = req("q", { status: "PENDING_APPROVAL", approvedAt: null, slots: [{ key: "whole", amount: "5000", dueDate: d("2026-10-11"), paid: false }] });
     const result = ids(checkStatement([out("a", { amount: "5000", operationDate: d("2026-10-11") }), out("b", { amount: "5000", operationDate: d("2026-10-24") })], [parts, pending]));
     expect(result).toEqual({ without: [], before: [], notMarked: ["b>r"], ok: 1 });
+  });
+
+  it("reconciles a split request as a whole or in parts without consuming both", () => {
+    const request = req("r", { slots: [
+      { key: "whole", amount: "15000", dueDate: d("2026-10-20"), paid: false },
+      { key: "first", amount: "5000", dueDate: d("2026-10-22"), paid: false },
+      { key: "second", amount: "10000", dueDate: d("2026-10-23"), paid: false },
+    ] });
+    const full = out("full");
+    const first = out("first", { amount: "5000", operationDate: d("2026-10-24") });
+    const second = out("second", { amount: "10000", operationDate: d("2026-10-24") });
+    expect(matchStatement([full, first, second], [request]).matches.map((match) => match.slotKey)).toEqual(["r:whole"]);
+    expect(matchStatement([first], [request]).matches.map((match) => match.slotKey)).toEqual(["r:first"]);
   });
 });
 
