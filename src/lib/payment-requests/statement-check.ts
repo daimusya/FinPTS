@@ -50,8 +50,12 @@ export function approvedInTime(request: CheckedRequest, outflow: StatementOutflo
   return moscowDayKey(request.approvedAt) <= dayKey(outflow.operationDate);
 }
 
-export function matchStatement<T extends StatementOutflow, R extends CheckedRequest>(outflows: T[], requests: R[]) {
+export function matchStatement<T extends StatementOutflow, R extends CheckedRequest>(
+  outflows: T[], requests: R[], { requireUniqueRequest = false } = {},
+) {
   const candidates: Array<{ outflow: T; request: R; slotKey: string; whole: boolean; distance: number; approved: boolean }> = [];
+  const firstRequest = new Map<string, string>();
+  const ambiguousOutflows = new Set<string>();
   for (const outflow of outflows) {
     for (const request of requests) {
       if (request.organizationId !== outflow.organizationId || request.counterpartyId !== outflow.counterpartyId) continue;
@@ -60,6 +64,11 @@ export function matchStatement<T extends StatementOutflow, R extends CheckedRequ
         if (money(slot.amount) !== money(outflow.amount)) continue;
         const distance = Math.abs(slot.dueDate.getTime() - outflow.operationDate.getTime());
         if (distance > STATEMENT_MATCH_DAYS * DAY_MS) continue;
+        if (requireUniqueRequest) {
+          const first = firstRequest.get(outflow.id);
+          if (!first) firstRequest.set(outflow.id, request.id);
+          else if (first !== request.id) ambiguousOutflows.add(outflow.id);
+        }
         candidates.push({ outflow, request, slotKey: `${request.id}:${slot.key}`, whole: slot.key === "whole", distance, approved: APPROVED_STATUSES.has(request.status) });
       }
     }
@@ -72,7 +81,7 @@ export function matchStatement<T extends StatementOutflow, R extends CheckedRequ
   const matchedParts = new Set<string>();
   const matches: StatementMatch<T, R>[] = [];
   for (const c of candidates) {
-    if (usedOutflows.has(c.outflow.id) || usedSlots.has(c.slotKey)) continue;
+    if (ambiguousOutflows.has(c.outflow.id) || usedOutflows.has(c.outflow.id) || usedSlots.has(c.slotKey)) continue;
     if (c.whole ? matchedParts.has(c.request.id) : matchedWhole.has(c.request.id)) continue;
     usedOutflows.add(c.outflow.id);
     usedSlots.add(c.slotKey);

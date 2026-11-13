@@ -6,6 +6,7 @@ import { classifyTransaction, type ClassificationRuleInput } from "./classificat
 import { ensureCounterpartyByInn, isAutoCreateEnabled } from "@/lib/integrations/inn-service";
 import { validateInn } from "@/lib/integrations/inn";
 import { isUniqueViolation } from "@/lib/dictionaries/errors";
+import { settleSchedulesFromStatement } from "@/lib/payment-requests/settle-from-statement";
 
 /** Операция выписки, готовая к записи: из файла или из API банка. */
 export interface StatementOperation {
@@ -107,10 +108,20 @@ export async function importStatementOperations(params: {
   const closedMonths = new Set<string>();
   // Already imported operations and known counterparties — one query each for the whole statement, not per row.
   const alreadyImported = new Set<string>();
+  const importedOutflows = new Map<string, string>();
+  const collectOutflow = (row: { id: string; direction: string; counterpartyId: string | null; batchId: string | null }) => {
+    if (row.direction === "OUTFLOW" && row.counterpartyId && row.batchId) importedOutflows.set(row.id, row.counterpartyId);
+  };
   const allFingerprints = fingerprints.map((f) => f.fingerprint);
   for (let start = 0; start < allFingerprints.length; start += 1000) {
-    const found = await prisma.bankTransaction.findMany({ where: { fingerprint: { in: allFingerprints.slice(start, start + 1000) } }, select: { fingerprint: true } });
-    for (const row of found) alreadyImported.add(row.fingerprint);
+    const found = await prisma.bankTransaction.findMany({
+      where: { fingerprint: { in: allFingerprints.slice(start, start + 1000) } },
+      select: { id: true, fingerprint: true, direction: true, counterpartyId: true, batchId: true },
+    });
+    for (const row of found) {
+      alreadyImported.add(row.fingerprint);
+      collectOutflow(row);
+    }
   }
   const statementInns = [...new Set(operations.map((op) => op.counterpartyInn).filter((inn): inn is string => Boolean(inn)))];
   if (statementInns.length > 0) {
@@ -181,8 +192,11 @@ export async function importStatementOperations(params: {
     if (!created) {
       duplicates += 1;
       if (classification) autoClassified -= 1;
+      const existing = await prisma.bankTransaction.findUnique({ where: { fingerprint }, select: { id: true, direction: true, counterpartyId: true, batchId: true } });
+      if (existing) collectOutflow(existing);
       continue;
     }
+    collectOutflow(created);
     alreadyImported.add(fingerprint);
     imported += 1;
   }
@@ -191,5 +205,6 @@ export async function importStatementOperations(params: {
     where: { id: batch.id },
     data: { importedRows: imported, duplicateRows: duplicates, errorRows: params.errorRows ?? 0 },
   });
+  await settleSchedulesFromStatement(bankAccountId, importedOutflows, params.importedById);
   return { batchId: batch.id, imported, duplicates, autoClassified, repeatedImported, counterpartiesCreated, closedPeriodRows, closedMonths: [...closedMonths].sort() };
 }

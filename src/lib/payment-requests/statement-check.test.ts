@@ -29,6 +29,14 @@ const ids = (r: ReturnType<typeof checkStatement>) => ({
 });
 
 describe("checkStatement", () => {
+  it("leaves a statement debit unassigned when several requests could be closed by it", () => {
+    const approved = req("approved", { status: "APPROVED" });
+    const alreadyPaid = req("paid");
+    const debit = out("debit");
+    expect(matchStatement([debit], [approved], { requireUniqueRequest: true }).matches).toHaveLength(1);
+    expect(matchStatement([debit], [approved, alreadyPaid], { requireUniqueRequest: true }).matches).toEqual([]);
+  });
+
   it("a paid, approved request explains its outflow", () => {
     expect(ids(checkStatement([out("t")], [req("r")]))).toEqual({ without: [], before: [], notMarked: [], ok: 1 });
   });
