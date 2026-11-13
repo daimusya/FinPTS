@@ -12,6 +12,7 @@ import {
   parseRescheduleDate,
   requestPlacement,
   showDueDate,
+  summarizeMonthGrid,
   type CalendarMovement,
 } from "./payment-calendar";
 import Decimal from "decimal.js";
@@ -133,6 +134,32 @@ describe("buildMonthGrid", () => {
     expect(day("2026-11-04")).toMatchObject({ isWorking: false, holidayName: "День народного единства" });
     expect(day("2026-11-04").balance!.toNumber()).toBe(500);
     expect(day("2026-11-07").isWorking).toBe(false);
+  });
+
+  it("totals only the selected month while carrying earlier movements into its opening balance", () => {
+    const input = {
+      todayKey: "2026-10-15",
+      startingBalance: 1000,
+      movements: [
+        out("2026-10-10", 100), // Overdue, counted on October 15.
+        inc("2026-10-20", 350),
+        out("2026-10-30", 200), // Visible in the November grid's first week.
+        inc("2026-11-05", 500),
+        out("2026-11-20", 250),
+        inc("2026-12-01", 900),
+        out("2026-12-02", 700),
+      ],
+      calendar: new Map(),
+    };
+
+    const october = summarizeMonthGrid(buildMonthGrid({ ...input, month: "2026-10" }));
+    expect([october.inflow.toNumber(), october.outflow.toNumber()]).toEqual([350, 300]);
+
+    const novemberGrid = buildMonthGrid({ ...input, month: "2026-11" });
+    const firstNovemberDay = novemberGrid.flat().find((day) => day.inMonth);
+    const november = summarizeMonthGrid(novemberGrid);
+    expect(firstNovemberDay?.balance?.toNumber()).toBe(1050);
+    expect([november.inflow.toNumber(), november.outflow.toNumber(), november.monthEnd?.toNumber()]).toEqual([500, 250, 1300]);
   });
 });
 

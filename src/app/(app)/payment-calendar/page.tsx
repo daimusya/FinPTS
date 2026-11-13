@@ -13,6 +13,7 @@ import {
   localDateKey,
   parseAccountKey,
   requestPlacement,
+  summarizeMonthGrid,
   type CalendarDay,
   type CalendarMovement,
   type ForecastScope,
@@ -336,27 +337,21 @@ export default async function PaymentCalendarPage({
   const accountRows = tableAccounts.map(([key, info]) => {
     const own = items.filter((i) => i.accountKey === key && i.counted).map(toMovement);
     const grid = buildMonthGrid({ month, todayKey, startingBalance: balances.get(key) ?? 0, movements: own, calendar });
-    const days = grid.flat().filter((d) => d.inMonth && d.balance);
-    const low = lowestPoint(grid);
     return {
       key,
       info,
       native: nativeBalances.get(key) ?? new Decimal(0),
       balance: balances.get(key) ?? new Decimal(0),
-      inflow: sumMoney(own.filter((m) => m.direction === "INFLOW").map((m) => m.amount)),
-      outflow: sumMoney(own.filter((m) => m.direction === "OUTFLOW").map((m) => m.amount)),
-      monthEnd: days.at(-1)?.balance ?? null,
-      low,
+      ...summarizeMonthGrid(grid),
+      low: lowestPoint(grid),
     };
   });
   const unassignedMovements = items
     .filter((i) => !i.accountKey && i.counted && (!chosenOrg || i.organizationId === chosenOrg))
     .map(toMovement);
-  const unassignedDays = buildMonthGrid({ month, todayKey, startingBalance: 0, movements: unassignedMovements, calendar })
-    .flat()
-    .filter((day) => day.inMonth);
-  const unassignedIn = sumMoney(unassignedDays.map((day) => day.inflow));
-  const unassignedOut = sumMoney(unassignedDays.map((day) => day.outflow));
+  const { inflow: unassignedIn, outflow: unassignedOut } = summarizeMonthGrid(
+    buildMonthGrid({ month, todayKey, startingBalance: 0, movements: unassignedMovements, calendar }),
+  );
 
   const accountsByOrganization: Record<string, AccountOption[]> = {};
   for (const [key, info] of accountInfo) {

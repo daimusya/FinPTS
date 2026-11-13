@@ -1,4 +1,4 @@
-import { toDecimal } from "./money";
+import { sumMoney, toDecimal } from "./money";
 import Decimal from "decimal.js";
 import { yearProblem } from "@/lib/form-values";
 
@@ -270,6 +270,15 @@ export function buildMonthGrid(input: {
     });
   }
   return weeks;
+}
+
+export function summarizeMonthGrid(grid: CalendarDay[][]) {
+  const days = grid.flat().filter((day) => day.inMonth);
+  return {
+    inflow: sumMoney(days.map((day) => day.inflow)),
+    outflow: sumMoney(days.map((day) => day.outflow)),
+    monthEnd: days.at(-1)?.balance ?? null,
+  };
 }
 
 /** Соседние месяцы для навигации: «2026-10» → { prev: «2026-09», next: «2026-11» }. */
