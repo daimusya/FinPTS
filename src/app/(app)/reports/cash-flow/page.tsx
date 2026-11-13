@@ -74,7 +74,7 @@ export default async function CashFlowReportPage({
   }${filters.counterpartyId ? `&counterpartyId=${filters.counterpartyId}` : ""}`;
 
   return (
-    <div className="page">
+    <div className="page cash-flow-appearance">
       <div className="page-header">
         <div>
           <h1>ДДС — Отчёт о движении денежных средств</h1>

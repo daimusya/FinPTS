@@ -1,0 +1,103 @@
+.shell {
+  --color-orange: color-mix(in srgb, var(--finance-accent) 62%, #171a10);
+  --color-orange-dark: color-mix(in srgb, var(--finance-accent) 45%, #171a10);
+  --color-orange-soft: color-mix(in srgb, var(--finance-accent) 14%, white);
+  background: var(--finance-background);
+}
+
+.settings {
+  position: relative;
+  color: #252931;
+}
+
+.settings summary {
+  cursor: pointer;
+}
+
+.controls {
+  position: absolute;
+  z-index: 1;
+  inset: calc(100% + 8px) auto auto 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  width: min(320px, calc(100vw - 64px));
+  padding: 12px;
+  border: 1px solid #dce0e6;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controls button[aria-pressed="true"] {
+  background: var(--color-orange-soft);
+  border-color: var(--color-orange);
+}
+
+.shell :global(.topbar) {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.shell :global(.topbar-user) {
+  flex-wrap: wrap;
+}
+
+.shell :global(.page-header),
+.shell :global(.filter-bar) {
+  background: #fff;
+  border: 1px solid #dce0e6;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.shell :global(.stat-grid) {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 215px), 1fr));
+}
+
+.shell :global(.stat-card .stat-value) {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.shell :global(.stat-card:first-child) {
+  border-top: 3px solid var(--finance-accent);
+}
+
+.shell :global(.table-wrap) {
+  background: #fff;
+}
+
+.shell :global(.cash-flow-appearance .table-wrap) :is(th, td):not(:first-child) {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.shell :global(.sidebar) {
+  background: #e8ebef;
+  color: #252931;
+}
+
+.shell :global(.sidebar-link),
+.shell :global(.sidebar-group-title),
+.shell :global(.sidebar-footer) {
+  color: #252931;
+}
+
+.shell :global(.sidebar-link:hover) {
+  background: #fff;
+}
+
+.shell :global(.sidebar-link.active) {
+  background: var(--color-orange-soft);
+  color: #252931;
+  box-shadow: inset 3px 0 var(--finance-accent);
+}

@@ -1,3 +1,4 @@
+import { FinanceAppearance, FinanceColorSettings } from "@/components/finance-appearance";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import Link from "next/link";
@@ -24,11 +25,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const [unread, foreignCurrency] = await Promise.all([unreadNotificationCount(session.userId), isForeignCurrencyEnabled()]);
 
   return (
-    <div className="app-shell">
+    <FinanceAppearance>
       <Sidebar foreignCurrency={foreignCurrency} showPaymentRequests={canViewPaymentRequests(session)} />
       <div className="main">
         <header className="topbar">
-          <div />
+          <FinanceColorSettings />
           <div className="topbar-user">
             <Link href="/notifications" className="topbar-bell" aria-label={unread ? `Уведомления: непрочитанных ${unread}` : "Уведомления"}>
               Уведомления
@@ -49,6 +50,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </header>
         {children}
       </div>
-    </div>
+    </FinanceAppearance>
   );
 }
