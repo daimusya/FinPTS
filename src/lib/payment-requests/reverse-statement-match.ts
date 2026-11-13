@@ -4,6 +4,7 @@ type StatementPart = {
   id: string;
   paymentRequestId: string;
   paidAt: Date | null;
+  statementTransactionId: string | null;
   paymentRequest: { status: PaymentRequestStatus };
 };
 
@@ -11,24 +12,18 @@ type StatementPart = {
 export async function reverseStatementMatch(
   db: Prisma.TransactionClient,
   part: StatementPart,
-  bankTransactionId: string,
+  debit: { id: string; operationDate: Date },
   userId: string,
   action: "unmatch_statement_part" | "unmatch_deleted_statement_part",
 ) {
+  const bankTransactionId = debit.id;
+  const hasLink = part.statementTransactionId === bankTransactionId;
+  if (part.statementTransactionId && !hasLink) return false;
   const status = part.paymentRequest.status;
-  // Statement settlements record the exact debit for each part. A later
-  // independent payment of the whole request must be preserved.
-  const paidEvent = part.paidAt ? await db.auditLog.findFirst({
-    where: { entityType: "payment_request", entityId: part.paymentRequestId, action: { in: ["mark_paid_from_statement", "mark_paid"] } },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { action: true, afterJson: true },
-  }) : null;
-  const details = paidEvent?.afterJson;
-  const payments = details && typeof details === "object" && !Array.isArray(details) ? details.payments : null;
-  const paidByThisDebit = paidEvent?.action === "mark_paid_from_statement" && Array.isArray(payments) &&
-    payments.some((payment) => payment && typeof payment === "object" && !Array.isArray(payment) &&
-      payment.partId === part.id && payment.bankTransactionId === bankTransactionId);
-  const reopen = status === "PAID" && (!part.paidAt || paidByThisDebit);
+  const paidByThisDebit = part.paidAt !== null &&
+    await wasMarkedPaidByDebit(db, part, debit);
+  if (!hasLink && !paidByThisDebit) return false;
+  const reopen = status === "PAID" && (paidByThisDebit || !part.paidAt);
 
   await db.paymentRequestPart.update({ where: { id: part.id }, data: {
     statementTransactionId: null,
@@ -40,4 +35,38 @@ export async function reverseStatementMatch(
     beforeJson: { partId: part.id, bankTransactionId, status },
     afterJson: { partId: part.id, bankTransactionId: null, status: reopen ? "APPROVED" : status },
   } });
+  return true;
+}
+
+async function wasMarkedPaidByDebit(
+  db: Prisma.TransactionClient,
+  part: StatementPart,
+  debit: { id: string; operationDate: Date },
+) {
+  const events = await db.auditLog.findMany({
+    where: {
+      entityType: "payment_request", entityId: part.paymentRequestId,
+      action: { in: ["mark_paid_from_statement", "mark_paid", "mark_part_paid", "mark_part_paid_final"] },
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { action: true, afterJson: true },
+  });
+  for (const { action, afterJson } of events) {
+    if (action === "mark_paid") return false;
+    if (!afterJson || typeof afterJson !== "object" || Array.isArray(afterJson)) continue;
+    if (action !== "mark_paid_from_statement") {
+      if (afterJson.partId === part.id) return false;
+      continue;
+    }
+    const payments = afterJson.payments;
+    if (!Array.isArray(payments)) continue;
+    for (const payment of payments) {
+      if (!payment || typeof payment !== "object" || Array.isArray(payment) || payment.partId !== part.id || payment.markedPaid === false) continue;
+      // Older audit entries list all matches, including parts that were already
+      // paid. Only marks made from a statement use the bank operation's date.
+      return payment.bankTransactionId === debit.id &&
+        (payment.markedPaid === true || part.paidAt?.getTime() === debit.operationDate.getTime());
+    }
+  }
+  return false;
 }

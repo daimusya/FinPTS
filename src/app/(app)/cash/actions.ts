@@ -455,27 +455,31 @@ export async function deleteBankTransactionAction(id: string, formData: FormData
  */
 async function removeTransactions(legs: Array<{ id: string; batchId: string | null }>, userId: string) {
   const ids = legs.map((leg) => leg.id);
-  const where = { statementTransactionId: { in: ids } };
   const retry = Symbol("statement match changed while acquiring locks");
   let removed: boolean | typeof retry;
   do {
     removed = await prisma.$transaction(async (db) => {
-      const targets = await db.paymentRequestPart.findMany({ where, select: { paymentRequestId: true } });
+      const targets = await statementPartsForDeletion(db, ids);
       const requestIds = new Set(targets.map((part) => part.paymentRequestId));
       // Match and unmatch lock requests before bank operations. Keep that order.
       if (requestIds.size > 0) await db.$queryRaw`
         SELECT id FROM payment_requests WHERE id IN (${Prisma.join([...requestIds])}) ORDER BY id FOR NO KEY UPDATE
       `;
-      const lockedLegs = await db.$queryRaw<Array<{ id: string; batchId: string | null }>>`
-        SELECT id, "batchId" FROM bank_transactions WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE
+      const lockedLegs = await db.$queryRaw<Array<{ id: string; batchId: string | null; operationDate: Date }>>`
+        SELECT id, "batchId", "operationDate" FROM bank_transactions WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE
       `;
-      const parts = await db.paymentRequestPart.findMany({
-        where, include: { paymentRequest: { select: { status: true } } },
-      });
-      if (parts.some((part) => !requestIds.has(part.paymentRequestId))) return retry;
+      const matches = await statementPartsForDeletion(db, ids);
+      if (matches.some((match) => !requestIds.has(match.paymentRequestId))) return retry;
 
-      for (const part of parts) {
-        await reverseStatementMatch(db, part, part.statementTransactionId!, userId, "unmatch_deleted_statement_part");
+      const debitsById = new Map(lockedLegs.map((leg) => [leg.id, leg]));
+      let reversed = false;
+      for (const { partId, debitId } of matches) {
+        const debit = debitsById.get(debitId);
+        if (!debit) continue;
+        const part = await db.paymentRequestPart.findUnique({
+          where: { id: partId }, include: { paymentRequest: { select: { status: true } } },
+        });
+        if (part && await reverseStatementMatch(db, part, debit, userId, "unmatch_deleted_statement_part")) reversed = true;
       }
       const lockedIds = lockedLegs.map((leg) => leg.id);
       await db.paymentAllocation.deleteMany({ where: { bankTransactionId: { in: lockedIds } } });
@@ -483,7 +487,7 @@ async function removeTransactions(legs: Array<{ id: string; batchId: string | nu
       for (const [batchId, count] of deletedByBatch(lockedLegs)) {
         await db.bankImportBatch.update({ where: { id: batchId }, data: { importedRows: { decrement: count }, deletedRows: { increment: count } } });
       }
-      return parts.length > 0;
+      return reversed;
     });
   } while (removed === retry);
 
@@ -493,6 +497,25 @@ async function removeTransactions(legs: Array<{ id: string; batchId: string | nu
     revalidatePath("/payment-requests/[id]", "page");
   }
   revalidatePath("/payment-calendar");
+}
+
+/** Прямые ручные связи и кандидаты из истории автоматической оплаты. */
+async function statementPartsForDeletion(db: Prisma.TransactionClient, debitIds: string[]) {
+  return db.$queryRaw<Array<{ paymentRequestId: string; partId: string; debitId: string }>>`
+    SELECT "paymentRequestId", id AS "partId", "statementTransactionId" AS "debitId"
+    FROM payment_request_parts
+    WHERE "statementTransactionId" IN (${Prisma.join(debitIds)})
+    UNION
+    SELECT log."entityId", payment->>'partId', payment->>'bankTransactionId'
+    FROM audit_log AS log
+    CROSS JOIN LATERAL jsonb_array_elements(
+      CASE WHEN jsonb_typeof(log."afterJson"->'payments') = 'array' THEN log."afterJson"->'payments' ELSE '[]'::jsonb END
+    ) AS payment
+    JOIN payment_request_parts AS part ON part.id = payment->>'partId' AND part."paymentRequestId" = log."entityId"
+    WHERE log."entityType" = 'payment_request' AND log.action = 'mark_paid_from_statement'
+      AND part."paidAt" IS NOT NULL
+      AND payment->>'bankTransactionId' IN (${Prisma.join(debitIds)})
+  `;
 }
 
 const MAX_BULK_DELETE = 500;

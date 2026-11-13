@@ -64,11 +64,18 @@ export async function settleSchedulesFromStatement(
       ],
     })), { requireUniqueRequest: true });
     const bySlot = new Map(matches.map(({ slotKey, outflow }) => [slotKey, outflow]));
+    // Lock statement rows in the same order as deletion, and skip matches
+    // whose debit disappeared before the automatic payment was recorded.
+    const debitIds = matches.filter(({ request }) => eligible.has(request.id)).map(({ outflow }) => outflow.id);
+    const liveDebits = debitIds.length > 0 ? await db.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM bank_transactions WHERE id IN (${Prisma.join(debitIds)}) ORDER BY id FOR KEY SHARE
+    ` : [];
+    const liveDebitIds = new Set(liveDebits.map(({ id }) => id));
     for (const request of requests) {
       if (!eligible.has(request.id) || request.status !== "APPROVED" || request.parts.length === 0) continue;
       const payments = request.parts.flatMap((part) => {
         const outflow = bySlot.get(`${request.id}:${part.id}`);
-        return outflow ? [{ part, outflow }] : [];
+        return outflow && liveDebitIds.has(outflow.id) ? [{ part, outflow }] : [];
       });
       if (payments.length !== request.parts.length || !payments.some(({ outflow }) => importedOutflows.has(outflow.id))) continue;
 
@@ -84,7 +91,9 @@ export async function settleSchedulesFromStatement(
         entityId: request.id,
         action: "mark_paid_from_statement",
         beforeJson: { status: "APPROVED" },
-        afterJson: { status: "PAID", payments: payments.map(({ part, outflow }) => ({ partId: part.id, bankTransactionId: outflow.id })) },
+        afterJson: { status: "PAID", payments: payments.map(({ part, outflow }) => ({
+          partId: part.id, bankTransactionId: outflow.id, markedPaid: !part.paidAt,
+        })) },
       } });
     }
   });

@@ -97,12 +97,12 @@ export async function unmatchStatementPartAction(formData: FormData) {
     await db.$queryRaw`SELECT id FROM bank_transactions WHERE id = ${transactionId} FOR NO KEY UPDATE`;
     const [part, tx] = await Promise.all([
       db.paymentRequestPart.findFirst({ where: { id: partId, ...partScope }, include: { paymentRequest: { select: { status: true } } } }),
-      db.bankTransaction.findFirst({ where: { ...bankTransactionScopeWhere(scope), id: transactionId }, select: { id: true } }),
+      db.bankTransaction.findFirst({ where: { ...bankTransactionScopeWhere(scope), id: transactionId }, select: { id: true, operationDate: true } }),
     ]);
     if (!part || !tx || part.statementTransactionId !== tx.id) return null;
 
     await db.bankTransaction.update({ where: { id: tx.id }, data: { requiresManualRequestMatch: true } });
-    await reverseStatementMatch(db, part, tx.id, session.userId, "unmatch_statement_part");
+    await reverseStatementMatch(db, part, tx, session.userId, "unmatch_statement_part");
     return { requestId };
   });
 
