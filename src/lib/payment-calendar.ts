@@ -181,6 +181,8 @@ export interface CalendarDay {
   holidayName: string | null;
   inflow: Decimal;
   outflow: Decimal;
+  /** Остаток перед прогнозными движениями дня. */
+  openingBalance: Decimal | null;
   /** Прогнозный остаток на конец дня; для прошедших дней — null (прогноз строится от сегодня). */
   balance: Decimal | null;
   /** Остаток в худший момент дня, если он ниже остатка на конец дня (платёж раньше поступления). */
@@ -240,6 +242,7 @@ export function buildMonthGrid(input: {
     const date = keyOf(ms);
     const entry = perDay.get(date) ?? { inflow: new Decimal(0), outflow: new Decimal(0), list: [] };
     const isPast = date < input.todayKey;
+    const openingBalance = isPast ? null : running;
     let lowWithinDay: Decimal | null = null;
     let lowTime: string | null = null;
     if (!isPast) {
@@ -264,6 +267,7 @@ export function buildMonthGrid(input: {
       holidayName: override?.kind === "holiday" ? override.name : null,
       inflow: entry.inflow,
       outflow: entry.outflow,
+      openingBalance,
       balance: isPast ? null : running,
       lowWithinDay,
       lowTime,
@@ -275,6 +279,7 @@ export function buildMonthGrid(input: {
 export function summarizeMonthGrid(grid: CalendarDay[][]) {
   const days = grid.flat().filter((day) => day.inMonth);
   return {
+    monthOpening: days[0]?.openingBalance ?? null,
     inflow: sumMoney(days.map((day) => day.inflow)),
     outflow: sumMoney(days.map((day) => day.outflow)),
     monthEnd: days.at(-1)?.balance ?? null,

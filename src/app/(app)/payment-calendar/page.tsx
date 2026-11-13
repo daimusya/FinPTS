@@ -90,19 +90,24 @@ export default async function PaymentCalendarPage({
   const includePending = params.pending !== "0";
   const { prev, next } = adjacentMonths(month);
   const [year, monthNumber] = month.split("-").map(Number);
+  const monthStart = new Date(`${month}-01T00:00:00Z`);
+  const monthHasStarted = month <= todayKey.slice(0, 7);
 
   // Only the organizations, accounts, documents and requests this user may see.
   const access = await getAccessScope(session);
   const orgScope = organizationIdScopeWhere(access);
-  const [organizations, bankAccounts, cashAccounts, flows, unpaidDocuments, requests, calendarDays, rates] = await Promise.all([
+  const transactionScope = bankTransactionScopeWhere(access);
+  const accountFlowsBefore = (date: Date) => prisma.bankTransaction.groupBy({
+    by: ["bankAccountId", "cashAccountId", "direction"],
+    where: { ...transactionScope, operationDate: { lt: date } },
+    _sum: { amount: true },
+  });
+  const [organizations, bankAccounts, cashAccounts, flows, openingFlows, unpaidDocuments, requests, calendarDays, rates] = await Promise.all([
     prisma.organization.findMany({ where: { isArchived: false, ...organizationScopeWhere(access) }, orderBy: { name: "asc" } }),
     prisma.bankAccount.findMany({ where: orgScope, include: { organization: true }, orderBy: { bankName: "asc" } }),
     prisma.cashAccount.findMany({ where: orgScope, include: { organization: true }, orderBy: { name: "asc" } }),
-    prisma.bankTransaction.groupBy({
-      by: ["bankAccountId", "cashAccountId", "direction"],
-      where: { ...bankTransactionScopeWhere(access), operationDate: { lt: tomorrow } },
-      _sum: { amount: true },
-    }),
+    accountFlowsBefore(tomorrow),
+    monthHasStarted ? accountFlowsBefore(monthStart) : [],
     prisma.accrualDocument.findMany({
       where: { status: "POSTED", paymentStatus: { in: ["UNPAID", "PARTIALLY_PAID"] }, ...accrualScopeWhere(access) },
       include: { lines: true, allocations: { where: { cancelledAt: null } }, counterparty: true, organization: true },
@@ -139,13 +144,18 @@ export default async function PaymentCalendarPage({
     });
   }
   // Balance of each account in its own currency, and in rubles at today's rate (the forecast is in rubles).
-  const nativeBalances = new Map<string, Decimal>();
-  for (const f of flows) {
-    const key = accountKey(f.bankAccountId, f.cashAccountId);
-    if (!key) continue;
-    const amount = new Decimal(f._sum.amount?.toString() ?? 0);
-    nativeBalances.set(key, (nativeBalances.get(key) ?? new Decimal(0)).plus(f.direction === "INFLOW" ? amount : amount.negated()));
-  }
+  const sumByAccount = (groups: typeof flows) => {
+    const totals = new Map<string, Decimal>();
+    for (const group of groups) {
+      const key = accountKey(group.bankAccountId, group.cashAccountId);
+      if (!key) continue;
+      const amount = new Decimal(group._sum.amount?.toString() ?? 0);
+      totals.set(key, (totals.get(key) ?? new Decimal(0)).plus(group.direction === "INFLOW" ? amount : amount.negated()));
+    }
+    return totals;
+  };
+  const nativeBalances = sumByAccount(flows);
+  const actualOpeningBalances = sumByAccount(openingFlows);
   const balances = new Map<string, Decimal>();
   for (const [key, native] of nativeBalances) balances.set(key, rates.toRub(native, accountInfo.get(key)?.currency ?? "RUB", todayDate));
 
@@ -337,12 +347,16 @@ export default async function PaymentCalendarPage({
   const accountRows = tableAccounts.map(([key, info]) => {
     const own = items.filter((i) => i.accountKey === key && i.counted).map(toMovement);
     const grid = buildMonthGrid({ month, todayKey, startingBalance: balances.get(key) ?? 0, movements: own, calendar });
+    const summary = summarizeMonthGrid(grid);
     return {
       key,
       info,
       native: nativeBalances.get(key) ?? new Decimal(0),
       balance: balances.get(key) ?? new Decimal(0),
-      ...summarizeMonthGrid(grid),
+      ...summary,
+      monthOpening: monthHasStarted
+        ? rates.toRub(actualOpeningBalances.get(key) ?? new Decimal(0), info.currency, todayDate)
+        : summary.monthOpening,
       low: lowestPoint(grid),
     };
   });
@@ -515,8 +529,8 @@ export default async function PaymentCalendarPage({
         </h2>
         <p className="text-muted" style={{ fontSize: 12, marginBottom: 10 }}>
           У каждого счёта — только платежи, для которых он назначен счётом оплаты. Платежи без счёта — отдельной строкой: назначьте
-          им счёт в календаре, на странице заявки или документа. Прогноз — в рублях: остаток валютного счёта пересчитан по курсу ЦБ
-          на сегодня, суммы заявок и документов — рублёвые.
+          им счёт в календаре, на странице заявки или документа. Входящий остаток — на начало месяца до движений первого дня.
+          Для начавшихся месяцев он рассчитан по фактическим операциям, для будущих — по прогнозу. Валютные остатки пересчитаны по курсу ЦБ на сегодня.
         </p>
         <div className="table-wrap">
           <table>
@@ -524,6 +538,7 @@ export default async function PaymentCalendarPage({
               <tr>
                 <th>Счёт или касса</th>
                 <th>Остаток сейчас</th>
+                <th>Входящий остаток</th>
                 <th>Поступления</th>
                 <th>Платежи</th>
                 <th>На конец месяца</th>
@@ -552,6 +567,7 @@ export default async function PaymentCalendarPage({
                       </>
                     )}
                   </td>
+                  <td className="mono">{row.monthOpening ? formatMoney(row.monthOpening) : "—"}</td>
                   <td className="mono">{row.inflow.greaterThan(0) ? formatMoney(row.inflow) : "—"}</td>
                   <td className="mono">{row.outflow.greaterThan(0) ? formatMoney(row.outflow) : "—"}</td>
                   <td className="mono">{row.monthEnd ? formatMoney(row.monthEnd) : "—"}</td>
@@ -565,6 +581,7 @@ export default async function PaymentCalendarPage({
                   <span className="text-muted">Счёт оплаты не назначен</span>
                 </td>
                 <td className="mono">—</td>
+                <td className="mono">—</td>
                 <td className="mono">{unassignedIn.greaterThan(0) ? formatMoney(unassignedIn) : "—"}</td>
                 <td className="mono">{unassignedOut.greaterThan(0) ? formatMoney(unassignedOut) : "—"}</td>
                 <td className="mono">—</td>
@@ -572,7 +589,7 @@ export default async function PaymentCalendarPage({
               </tr>
               {accountRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="empty-state">
+                  <td colSpan={7} className="empty-state">
                     Счетов и касс нет — заведите их в справочниках «Банковские счета» и «Кассы».
                   </td>
                 </tr>

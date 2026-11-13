@@ -144,7 +144,7 @@ describe("buildMonthGrid", () => {
         out("2026-10-10", 100), // Overdue, counted on October 15.
         inc("2026-10-20", 350),
         out("2026-10-30", 200), // Visible in the November grid's first week.
-        inc("2026-11-05", 500),
+        inc("2026-11-01", 500),
         out("2026-11-20", 250),
         inc("2026-12-01", 900),
         out("2026-12-02", 700),
@@ -156,9 +156,9 @@ describe("buildMonthGrid", () => {
     expect([october.inflow.toNumber(), october.outflow.toNumber()]).toEqual([350, 300]);
 
     const novemberGrid = buildMonthGrid({ ...input, month: "2026-11" });
-    const firstNovemberDay = novemberGrid.flat().find((day) => day.inMonth);
     const november = summarizeMonthGrid(novemberGrid);
-    expect(firstNovemberDay?.balance?.toNumber()).toBe(1050);
+    expect(november.monthOpening?.toNumber()).toBe(1050);
+    expect(novemberGrid.flat().find((day) => day.inMonth)?.balance?.toNumber()).toBe(1550);
     expect([november.inflow.toNumber(), november.outflow.toNumber(), november.monthEnd?.toNumber()]).toEqual([500, 250, 1300]);
   });
 });
