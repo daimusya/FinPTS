@@ -82,18 +82,19 @@
 }
 
 .shell :global(.sidebar) {
-  background: #e8ebef;
-  color: #252931;
+  background: var(--finance-sidebar);
+  color: var(--finance-sidebar-text);
 }
 
 .shell :global(.sidebar-link),
 .shell :global(.sidebar-group-title),
 .shell :global(.sidebar-footer) {
-  color: #252931;
+  color: var(--finance-sidebar-text);
 }
 
 .shell :global(.sidebar-link:hover) {
   background: #fff;
+  color: #252931;
 }
 
 .shell :global(.sidebar-link.active) {
