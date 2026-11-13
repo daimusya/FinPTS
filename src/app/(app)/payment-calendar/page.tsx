@@ -207,7 +207,7 @@ export default async function PaymentCalendarPage({
       counterpartyId: { in: [...new Set(statementRequests.map((r) => r.counterpartyId))] },
       operationDate: { gte: new Date(firstDue - matchWindow), lte: new Date(lastDue + matchWindow), lt: tomorrow },
     },
-    select: { id: true, amount: true, counterpartyId: true, operationDate: true, bankAccountId: true, cashAccountId: true, matchedRequestPart: { select: { id: true } } },
+    select: { id: true, amount: true, counterpartyId: true, operationDate: true, bankAccountId: true, cashAccountId: true, requiresManualRequestMatch: true, matchedRequestPart: { select: { id: true } } },
     orderBy: [{ operationDate: "asc" }, { id: "asc" }],
   }) : [];
   const statementOutflows = statementTransactions.flatMap((transaction) => {

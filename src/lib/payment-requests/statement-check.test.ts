@@ -47,6 +47,15 @@ describe("checkStatement", () => {
     expect(matchStatement([manual], [second]).matches).toEqual([]);
   });
 
+  it("returns an unlinked debit to manual review even if only one request fits", () => {
+    const request = req("r", { status: "APPROVED" });
+    const debit = out("unlinked", { requiresManualRequestMatch: true });
+    const result = checkStatement([debit], [request], { requireUniqueRequest: true });
+    expect([...result.ambiguousOutflows]).toEqual([debit.id]);
+    expect(result.withoutRequest).toEqual([]);
+    expect(matchStatement([debit], [request], { requireUniqueRequest: true }).matches).toEqual([]);
+  });
+
   it("a paid, approved request explains its outflow", () => {
     expect(ids(checkStatement([out("t")], [req("r")]))).toEqual({ without: [], before: [], notMarked: [], ok: 1 });
   });

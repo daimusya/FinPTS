@@ -10,7 +10,8 @@ import { localDateKey } from "@/lib/payment-calendar";
 import { PAYMENT_REQUEST_STATUS_LABELS } from "@/lib/payment-requests/labels";
 import { STATEMENT_MATCH_DAYS, canMatchStatementSlot, checkStatement, requestApprovedAt } from "@/lib/payment-requests/statement-check";
 import { SubmitButton } from "@/components/submit-button";
-import { matchStatementPartAction } from "./actions";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { matchStatementPartAction, unmatchStatementPartAction } from "./actions";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const dateText = (d: Date) => d.toLocaleDateString("ru-RU", { timeZone: "UTC" });
@@ -248,7 +249,21 @@ export default async function StatementCheckPage({
               {matchedManually.map((outflow) => (
                 <tr key={outflow.id}>
                   {operationCells(outflow)}
-                  <td><Link href={`/payment-requests/${outflow.matchedRequestPart!.paymentRequestId}`}>Открыть заявку</Link></td>
+                  <td>
+                    <Link href={`/payment-requests/${outflow.matchedRequestPart!.paymentRequestId}`}>Открыть заявку</Link>
+                    {canMatch ? (
+                      <form action={unmatchStatementPartAction}>
+                        <input type="hidden" name="transactionId" value={outflow.id} />
+                        <input type="hidden" name="partId" value={outflow.matchedRequestPart!.id} />
+                        <input type="hidden" name="from" value={isoDay(from)} />
+                        <input type="hidden" name="to" value={isoDay(to)} />
+                        <input type="hidden" name="org" value={orgId ?? ""} />
+                        <ConfirmSubmitButton className="btn btn-ghost btn-sm" message="Отменить связь с частью заявки? Банковское списание останется в выписке.">
+                          Отменить сопоставление
+                        </ConfirmSubmitButton>
+                      </form>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </tbody>

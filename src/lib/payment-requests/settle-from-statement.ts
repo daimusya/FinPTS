@@ -50,7 +50,7 @@ export async function settleSchedulesFromStatement(
         bankAccount: { organizationId }, batchId: { not: null }, direction: "OUTFLOW", isTransfer: false,
         counterpartyId: { in: counterparties }, operationDate: { gte: new Date(earliest - MATCH_WINDOW), lte: new Date(latest + MATCH_WINDOW), lt: tomorrow },
       },
-      select: { id: true, amount: true, counterpartyId: true, operationDate: true, bankAccount: { select: { currency: true } }, matchedRequestPart: { select: { id: true } } },
+      select: { id: true, amount: true, counterpartyId: true, operationDate: true, bankAccount: { select: { currency: true } }, requiresManualRequestMatch: true, matchedRequestPart: { select: { id: true } } },
       orderBy: [{ operationDate: "asc" }, { id: "asc" }],
     });
     const { matches } = matchStatement(outflows.map((outflow) => ({

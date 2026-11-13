@@ -23,6 +23,7 @@ export type StatementOutflow = {
   currency: string;
   operationDate: Date;
   matchedPartId?: string;
+  requiresManualRequestMatch?: boolean;
 };
 
 export type CheckedRequest = {
@@ -64,6 +65,10 @@ export function matchStatement<T extends StatementOutflow, R extends CheckedRequ
   const firstRequest = new Map<string, string>();
   const ambiguousOutflows = new Set<string>();
   for (const outflow of outflows) {
+    if (outflow.requiresManualRequestMatch && !outflow.matchedPartId) {
+      ambiguousOutflows.add(outflow.id);
+      continue;
+    }
     for (const request of requests) {
       if (request.organizationId !== outflow.organizationId || request.counterpartyId !== outflow.counterpartyId) continue;
       if (request.currency !== outflow.currency) continue;

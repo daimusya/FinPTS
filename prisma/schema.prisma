@@ -843,6 +843,8 @@ model BankTransaction {
   productService  ProductService?   @relation(fields: [productServiceId], references: [id])
   allocations     PaymentAllocation[]
   matchedRequestPart PaymentRequestPart?
+  /// После отмены ручной связи списание повторно распределяется только вручную.
+  requiresManualRequestMatch Boolean @default(false)
 
   @@index([operationDate])
   @@index([matchStatus])
