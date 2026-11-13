@@ -10,6 +10,7 @@ import { isUniqueViolation } from "@/lib/dictionaries/errors";
 import { localDateKey } from "@/lib/payment-calendar";
 import { canMatchStatementSlot } from "@/lib/payment-requests/statement-check";
 import { settleSchedulesFromStatement } from "@/lib/payment-requests/settle-from-statement";
+import { reverseStatementMatch } from "@/lib/payment-requests/reverse-statement-match";
 import { PERMISSIONS } from "@/lib/permissions";
 import { requirePermission } from "@/lib/session";
 
@@ -100,32 +101,8 @@ export async function unmatchStatementPartAction(formData: FormData) {
     ]);
     if (!part || !tx || part.statementTransactionId !== tx.id) return null;
 
-    const status = part.paymentRequest.status;
-    // Old statement settlements record the specific bank debit in the audit log.
-    // A later explicit payment must not be undone together with the link.
-    const paidEvent = part.paidAt ? await db.auditLog.findFirst({
-      where: { entityType: "payment_request", entityId: requestId, action: { in: ["mark_paid_from_statement", "mark_paid"] } },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { action: true, afterJson: true },
-    }) : null;
-    const details = paidEvent?.afterJson;
-    const payments = details && typeof details === "object" && !Array.isArray(details) ? details.payments : null;
-    const paidByThisDebit = paidEvent?.action === "mark_paid_from_statement" && Array.isArray(payments) &&
-      payments.some((payment) => payment && typeof payment === "object" && !Array.isArray(payment) &&
-        payment.partId === partId && payment.bankTransactionId === tx.id);
-    const reopen = status === "PAID" && (!part.paidAt || paidByThisDebit);
-
     await db.bankTransaction.update({ where: { id: tx.id }, data: { requiresManualRequestMatch: true } });
-    await db.paymentRequestPart.update({ where: { id: part.id }, data: {
-      statementTransactionId: null,
-      ...(paidByThisDebit ? { paidAt: null, paidById: null } : {}),
-    } });
-    if (reopen) await db.paymentRequest.update({ where: { id: requestId }, data: { status: "APPROVED" } });
-    await db.auditLog.create({ data: {
-      userId: session.userId, entityType: "payment_request", entityId: requestId, action: "unmatch_statement_part",
-      beforeJson: { partId, bankTransactionId: tx.id, status },
-      afterJson: { partId, bankTransactionId: null, status: reopen ? "APPROVED" : status },
-    } });
+    await reverseStatementMatch(db, part, tx.id, session.userId, "unmatch_statement_part");
     return { requestId };
   });
 

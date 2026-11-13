@@ -87,6 +87,7 @@ export const ACTION_LABELS: Record<string, string> = {
   mark_paid_from_statement: "оплачено по выписке",
   match_statement_part: "списание сопоставлено с частью заявки",
   unmatch_statement_part: "ручное сопоставление списания отменено",
+  unmatch_deleted_statement_part: "сопоставление снято при удалении списания",
   mark_part_paid: "оплачена часть",
   mark_part_paid_final: "оплачена последняя часть",
   notification_channels: "каналы уведомлений",

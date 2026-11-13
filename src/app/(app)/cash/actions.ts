@@ -20,7 +20,7 @@ import {
   type TransactionEditInput,
 } from "@/lib/cash/transaction-edit";
 import { analyticsProblem, bankTransactionScopeWhere, getAccessScope } from "@/lib/access-scope";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { allocationTransactionSide, planAllocation, type AllocationAmounts } from "@/lib/accruals/currency";
 import { normalizeCurrency } from "@/lib/currency";
 import { loadRateLookup } from "@/lib/currency-rates";
@@ -29,6 +29,7 @@ import { createAllocationLocked } from "@/lib/cash/allocate-locked";
 import { ORGANIZATION_NOT_ALLOWED, accountAllowed } from "@/lib/access-guard";
 import crypto from "node:crypto";
 import { parseFormAmount, parseFormDate } from "@/lib/form-values";
+import { reverseStatementMatch } from "@/lib/payment-requests/reverse-statement-match";
 
 export async function createBankTransactionAction(formData: FormData) {
   const session = await requirePermission(PERMISSIONS.CASH_MANAGE);
@@ -425,7 +426,7 @@ export async function deleteBankTransactionAction(id: string, formData: FormData
     await assertPeriodOpenForDate(leg.operationDate).catch((e) => back((e as Error).message));
   }
 
-  await removeTransactions(legs);
+  await removeTransactions(legs, session.userId);
   for (const leg of legs) {
     await logAudit({
       userId: session.userId,
@@ -452,15 +453,46 @@ export async function deleteBankTransactionAction(id: string, formData: FormData
  * операции и счётчики загрузок выписки («загружено» уменьшается, «удалено»
  * растёт).
  */
-async function removeTransactions(legs: Array<{ id: string; batchId: string | null }>) {
+async function removeTransactions(legs: Array<{ id: string; batchId: string | null }>, userId: string) {
   const ids = legs.map((leg) => leg.id);
-  await prisma.$transaction([
-    prisma.paymentAllocation.deleteMany({ where: { bankTransactionId: { in: ids } } }),
-    prisma.bankTransaction.deleteMany({ where: { id: { in: ids } } }),
-    ...[...deletedByBatch(legs)].map(([batchId, count]) =>
-      prisma.bankImportBatch.update({ where: { id: batchId }, data: { importedRows: { decrement: count }, deletedRows: { increment: count } } }),
-    ),
-  ]);
+  const where = { statementTransactionId: { in: ids } };
+  const retry = Symbol("statement match changed while acquiring locks");
+  let removed: boolean | typeof retry;
+  do {
+    removed = await prisma.$transaction(async (db) => {
+      const targets = await db.paymentRequestPart.findMany({ where, select: { paymentRequestId: true } });
+      const requestIds = new Set(targets.map((part) => part.paymentRequestId));
+      // Match and unmatch lock requests before bank operations. Keep that order.
+      if (requestIds.size > 0) await db.$queryRaw`
+        SELECT id FROM payment_requests WHERE id IN (${Prisma.join([...requestIds])}) ORDER BY id FOR NO KEY UPDATE
+      `;
+      const lockedLegs = await db.$queryRaw<Array<{ id: string; batchId: string | null }>>`
+        SELECT id, "batchId" FROM bank_transactions WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE
+      `;
+      const parts = await db.paymentRequestPart.findMany({
+        where, include: { paymentRequest: { select: { status: true } } },
+      });
+      if (parts.some((part) => !requestIds.has(part.paymentRequestId))) return retry;
+
+      for (const part of parts) {
+        await reverseStatementMatch(db, part, part.statementTransactionId!, userId, "unmatch_deleted_statement_part");
+      }
+      const lockedIds = lockedLegs.map((leg) => leg.id);
+      await db.paymentAllocation.deleteMany({ where: { bankTransactionId: { in: lockedIds } } });
+      await db.bankTransaction.deleteMany({ where: { id: { in: lockedIds } } });
+      for (const [batchId, count] of deletedByBatch(lockedLegs)) {
+        await db.bankImportBatch.update({ where: { id: batchId }, data: { importedRows: { decrement: count }, deletedRows: { increment: count } } });
+      }
+      return parts.length > 0;
+    });
+  } while (removed === retry);
+
+  if (removed) {
+    revalidatePath("/payment-requests/statement-check");
+    revalidatePath("/payment-requests");
+    revalidatePath("/payment-requests/[id]", "page");
+  }
+  revalidatePath("/payment-calendar");
 }
 
 const MAX_BULK_DELETE = 500;
@@ -504,7 +536,7 @@ export async function deleteBankTransactionsAction(formData: FormData) {
     })),
   );
   const toDelete = all.filter((t) => plan.deleteLegs.some((l) => l.id === t.id));
-  if (toDelete.length > 0) await removeTransactions(toDelete);
+  if (toDelete.length > 0) await removeTransactions(toDelete, session.userId);
   for (const leg of toDelete) {
     await logAudit({
       userId: session.userId,
