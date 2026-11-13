@@ -64,7 +64,7 @@ function revalidatePlan(paths: string[]) {
 async function syncRequestDueDate(db: Db, requestId: string) {
   const parts = await db.paymentRequestPart.findMany({ where: { paymentRequestId: requestId } });
   if (parts.length === 0) return;
-  const unpaid = parts.filter((p) => !p.paidAt).sort(byDue);
+  const unpaid = parts.filter((p) => !p.paidAt && !p.statementTransactionId).sort(byDue);
   const next = unpaid[0] ?? [...parts].sort(byDue).at(-1)!;
   await db.paymentRequest.update({ where: { id: requestId }, data: { dueDate: next.dueDate, dueTime: next.dueTime } });
 }
@@ -156,7 +156,7 @@ export async function reschedulePart(
   const part = await prisma.paymentRequestPart.findUnique({ where: { id: partId }, include: { paymentRequest: { select: { currency: true } } } });
   if (!part) return fail("Часть оплаты не найдена");
   if (!(await isVisible(session, "request", part.paymentRequestId))) return fail(NOT_VISIBLE);
-  if (part.paidAt) return fail("Эта часть уже оплачена");
+  if (part.paidAt || part.statementTransactionId) return fail("Эта часть уже оплачена");
   const parsed = parseNewDue(dateRaw, timeRaw, part.dueTime);
   if ("error" in parsed) return fail(parsed.error);
   const loaded = await loadMovableRequest(part.paymentRequestId);
@@ -166,7 +166,7 @@ export async function reschedulePart(
 
   const done = await prisma.$transaction(async (db) => {
     const moved = await db.paymentRequestPart.updateMany({
-      where: { id: partId, dueDate: part.dueDate, dueTime: part.dueTime, paidAt: null },
+      where: { id: partId, dueDate: part.dueDate, dueTime: part.dueTime, paidAt: null, statementTransactionId: null },
       data: { dueDate: parsed.date, dueTime: parsed.time },
     });
     if (moved.count === 0) return false;
@@ -283,7 +283,7 @@ export async function assignPaymentAccount(session: SessionPayload, kind: PlanIt
   } else {
     if (!canPlanRequests(session)) return fail("Назначать счёт оплаты могут согласующие заявки и те, кто ведёт банк и кассу");
     const part = kind === "part" ? await prisma.paymentRequestPart.findUnique({ where: { id } }) : null;
-    if (kind === "part" && (!part || part.paidAt)) return fail(part ? "Эта часть уже оплачена" : "Часть оплаты не найдена");
+    if (kind === "part" && (!part || part.paidAt || part.statementTransactionId)) return fail(part ? "Эта часть уже оплачена" : "Часть оплаты не найдена");
     requestId = kind === "part" ? part!.paymentRequestId : id;
     if (!requestId || !(await isVisible(session, "request", requestId))) return fail(NOT_VISIBLE);
     const request = requestId ? await prisma.paymentRequest.findUnique({ where: { id: requestId } }) : null;
@@ -361,8 +361,9 @@ export async function savePaymentSchedule(session: SessionPayload, requestId: st
   const loaded = await loadMovableRequest(requestId);
   if ("error" in loaded) return fail(loaded.error!);
   const { request } = loaded;
-  const paid = request.parts.filter((p) => p.paidAt);
-  const unpaid = request.parts.filter((p) => !p.paidAt);
+  const isSettled = (part: (typeof request.parts)[number]) => Boolean(part.paidAt || part.statementTransactionId);
+  const paid = request.parts.filter(isSettled);
+  const unpaid = request.parts.filter((p) => !isSettled(p));
   const checked = validateSchedule({ requestAmount: request.amount, paidAmounts: paid.map((p) => p.amount), rows, todayKey: localDateKey() });
   if ("error" in checked) return fail(checked.error);
   const unpaidIds = new Set(unpaid.map((p) => p.id));
@@ -372,11 +373,11 @@ export async function savePaymentSchedule(session: SessionPayload, requestId: st
     // A part paid, the request cancelled or the schedule edited by someone else meanwhile — nothing is overwritten.
     const locked = await lockRequest(db, requestId);
     if (!requestPlacement(locked.status, true).movable) return `Заявка в статусе «${PAYMENT_REQUEST_STATUS_LABELS[locked.status]}» — план оплаты уже не меняется`;
-    if (!sameIds(locked.parts.filter((p) => p.paidAt), paid) || !sameIds(locked.parts.filter((p) => !p.paidAt), unpaid)) {
+    if (!sameIds(locked.parts.filter(isSettled), paid) || !sameIds(locked.parts.filter((p) => !isSettled(p)), unpaid)) {
       return "График изменился — обновите страницу и повторите";
     }
     const keep = new Set(checked.rows.filter((r) => r.id).map((r) => r.id!));
-    await db.paymentRequestPart.deleteMany({ where: { paymentRequestId: requestId, paidAt: null, id: { notIn: [...keep] } } });
+    await db.paymentRequestPart.deleteMany({ where: { paymentRequestId: requestId, paidAt: null, statementTransactionId: null, id: { notIn: [...keep] } } });
     const startOrder = paid.length;
     for (const [i, row] of checked.rows.entries()) {
       if (row.id) {
@@ -430,13 +431,13 @@ export async function removePaymentSchedule(session: SessionPayload, requestId: 
   if ("error" in loaded) return fail(loaded.error!);
   const { request } = loaded;
   if (request.parts.length === 0) return { ok: true, message: "Графика не было" };
-  if (request.parts.some((p) => p.paidAt)) return fail("Часть уже оплачена — объединить график нельзя, можно только изменить неоплаченные части");
+  if (request.parts.some((p) => p.paidAt || p.statementTransactionId)) return fail("Часть уже оплачена — объединить график нельзя, можно только изменить неоплаченные части");
   const first = [...request.parts].sort(byDue)[0];
   const refused = await prisma.$transaction(async (db) => {
     // A part paid meanwhile must not be deleted with the schedule.
     const locked = await lockRequest(db, requestId);
     if (!requestPlacement(locked.status, true).movable) return `Заявка в статусе «${PAYMENT_REQUEST_STATUS_LABELS[locked.status]}» — план оплаты уже не меняется`;
-    if (locked.parts.some((p) => p.paidAt)) return "Часть уже оплачена — объединить график нельзя, можно только изменить неоплаченные части";
+    if (locked.parts.some((p) => p.paidAt || p.statementTransactionId)) return "Часть уже оплачена — объединить график нельзя, можно только изменить неоплаченные части";
     if (!sameIds(locked.parts, request.parts)) return "График изменился — обновите страницу и повторите";
     await db.paymentRequestPart.deleteMany({ where: { paymentRequestId: requestId } });
     await db.paymentRequest.update({ where: { id: requestId }, data: { dueDate: first.dueDate, dueTime: first.dueTime } });
@@ -471,7 +472,7 @@ export async function markPartPaid(session: SessionPayload, partId: string): Pro
     // Cancelled (or paid in full) meanwhile — the part is not marked and the request does not turn «paid».
     const locked = await lockRequest(db, part.paymentRequestId);
     if (locked.status !== PaymentRequestStatus.APPROVED) return "not_approved" as const;
-    const marked = await db.paymentRequestPart.updateMany({ where: { id: partId, paidAt: null }, data: { paidAt: new Date(), paidById: session.userId } });
+    const marked = await db.paymentRequestPart.updateMany({ where: { id: partId, paidAt: null, statementTransactionId: null }, data: { paidAt: new Date(), paidById: session.userId } });
     if (marked.count === 0) return null;
     const parts = await db.paymentRequestPart.findMany({ where: { paymentRequestId: part.paymentRequestId } });
     const summary = scheduleSummary(parts);

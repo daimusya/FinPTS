@@ -32,7 +32,7 @@ export async function settleSchedulesFromStatement(
     // Other approved and paid requests still compete for the same bank operations.
     const requests = await db.paymentRequest.findMany({
       where: { organizationId, counterpartyId: { in: counterparties }, status: { in: ["APPROVED", "PAID"] } },
-      select: { id: true, organizationId: true, counterpartyId: true, currency: true, status: true, amount: true, dueDate: true, parts: { select: { id: true, dueDate: true, amount: true, paidAt: true } } },
+      select: { id: true, organizationId: true, counterpartyId: true, currency: true, status: true, amount: true, dueDate: true, parts: { select: { id: true, dueDate: true, amount: true, paidAt: true, statementTransactionId: true } } },
       orderBy: { id: "asc" },
     });
     let earliest = Infinity;
@@ -50,17 +50,17 @@ export async function settleSchedulesFromStatement(
         bankAccount: { organizationId }, batchId: { not: null }, direction: "OUTFLOW", isTransfer: false,
         counterpartyId: { in: counterparties }, operationDate: { gte: new Date(earliest - MATCH_WINDOW), lte: new Date(latest + MATCH_WINDOW), lt: tomorrow },
       },
-      select: { id: true, amount: true, counterpartyId: true, operationDate: true, bankAccount: { select: { currency: true } } },
+      select: { id: true, amount: true, counterpartyId: true, operationDate: true, bankAccount: { select: { currency: true } }, matchedRequestPart: { select: { id: true } } },
       orderBy: [{ operationDate: "asc" }, { id: "asc" }],
     });
     const { matches } = matchStatement(outflows.map((outflow) => ({
-      ...outflow, organizationId, counterpartyId: outflow.counterpartyId!, currency: normalizeCurrency(outflow.bankAccount?.currency),
+      ...outflow, organizationId, counterpartyId: outflow.counterpartyId!, currency: normalizeCurrency(outflow.bankAccount?.currency), matchedPartId: outflow.matchedRequestPart?.id,
     })), requests.map((request) => ({
       ...request,
       approvedAt: null,
       slots: [
         { key: "whole", amount: request.amount, dueDate: request.dueDate, paid: request.status === "PAID" },
-        ...request.parts.map((part) => ({ key: part.id, amount: part.amount, dueDate: part.dueDate, paid: !!part.paidAt })),
+        ...request.parts.map((part) => ({ key: part.id, amount: part.amount, dueDate: part.dueDate, paid: !!part.paidAt, statementTransactionId: part.statementTransactionId })),
       ],
     })), { requireUniqueRequest: true });
     const bySlot = new Map(matches.map(({ slotKey, outflow }) => [slotKey, outflow]));

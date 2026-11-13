@@ -842,6 +842,7 @@ model BankTransaction {
   project         Project?          @relation(fields: [projectId], references: [id])
   productService  ProductService?   @relation(fields: [productServiceId], references: [id])
   allocations     PaymentAllocation[]
+  matchedRequestPart PaymentRequestPart?
 
   @@index([operationDate])
   @@index([matchStatus])
@@ -1035,6 +1036,8 @@ model PaymentRequestPart {
   amount           Decimal   @db.Decimal(18, 2)
   paidAt           DateTime?
   paidById         String?
+  statementTransactionId String? @unique
+  statementTransaction BankTransaction? @relation(fields: [statementTransactionId], references: [id], onDelete: SetNull)
   createdAt        DateTime  @default(now())
 
   paymentRequest PaymentRequest             @relation(fields: [paymentRequestId], references: [id], onDelete: Cascade)

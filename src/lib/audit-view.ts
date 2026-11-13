@@ -85,6 +85,7 @@ export const ACTION_LABELS: Record<string, string> = {
   logout: "выход",
   mark_paid: "оплачено",
   mark_paid_from_statement: "оплачено по выписке",
+  match_statement_part: "списание сопоставлено с частью заявки",
   mark_part_paid: "оплачена часть",
   mark_part_paid_final: "оплачена последняя часть",
   notification_channels: "каналы уведомлений",

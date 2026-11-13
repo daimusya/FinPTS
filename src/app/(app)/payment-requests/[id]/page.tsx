@@ -113,7 +113,7 @@ export default async function PaymentRequestPage({
   const todayKey = localDateKey();
   const hasParts = request.parts.length > 0;
   const summary = scheduleSummary(request.parts);
-  const unpaidParts = request.parts.filter((part) => !part.paidAt);
+  const unpaidParts = request.parts.filter((part) => !part.paidAt && !part.statementTransactionId);
   const partNumber = new Map(request.parts.map((part, i) => [part.id, i + 1]));
   const [orgBankAccounts, orgCashAccounts] = canReschedule
     ? await Promise.all([
@@ -393,7 +393,7 @@ export default async function PaymentRequestPage({
                             : `касса «${part.payCashAccount!.name}»`}
                         </div>
                       ) : null}
-                      {!part.paidAt && part.dueDate.toISOString().slice(0, 10) < todayKey ? (
+                      {!part.paidAt && !part.statementTransactionId && part.dueDate.toISOString().slice(0, 10) < todayKey ? (
                         <span className="badge badge-danger" style={{ marginLeft: 6 }}>
                           просрочена
                         </span>
@@ -401,7 +401,9 @@ export default async function PaymentRequestPage({
                     </td>
                     <td className="mono">{money(part.amount)}</td>
                     <td>
-                      {part.paidAt ? (
+                      {part.statementTransactionId ? (
+                        <Link href={`/cash/transactions/${part.statementTransactionId}`}>Оплачена по выписке</Link>
+                      ) : part.paidAt ? (
                         <span>
                           <span className="badge badge-active">Оплачена</span>{" "}
                           <span className="text-muted" style={{ fontSize: 12 }}>
@@ -413,7 +415,7 @@ export default async function PaymentRequestPage({
                       )}
                     </td>
                     <td>
-                      {!part.paidAt && canPay && request.status === "APPROVED" ? (
+                      {!part.paidAt && !part.statementTransactionId && canPay && request.status === "APPROVED" ? (
                         <form action={markPaymentPartPaidAction.bind(null, request.id, part.id)}>
                           <SubmitButton className="btn btn-secondary btn-sm">
                             Оплачено

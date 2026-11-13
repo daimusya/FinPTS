@@ -186,7 +186,7 @@ export default async function PaymentCalendarPage({
     approvedAt: null,
     slots: [
       { key: "whole", amount: r.amount, dueDate: r.dueDate, paid: r.status === "PAID" },
-      ...r.parts.map((part) => ({ key: part.id, amount: part.amount, dueDate: part.dueDate, paid: r.status === "PAID" || !!part.paidAt })),
+      ...r.parts.map((part) => ({ key: part.id, amount: part.amount, dueDate: part.dueDate, paid: r.status === "PAID" || !!part.paidAt, statementTransactionId: part.statementTransactionId })),
     ],
   }));
   // Already paid requests also take part in the one-to-one reconciliation.
@@ -207,12 +207,12 @@ export default async function PaymentCalendarPage({
       counterpartyId: { in: [...new Set(statementRequests.map((r) => r.counterpartyId))] },
       operationDate: { gte: new Date(firstDue - matchWindow), lte: new Date(lastDue + matchWindow), lt: tomorrow },
     },
-    select: { id: true, amount: true, counterpartyId: true, operationDate: true, bankAccountId: true, cashAccountId: true },
+    select: { id: true, amount: true, counterpartyId: true, operationDate: true, bankAccountId: true, cashAccountId: true, matchedRequestPart: { select: { id: true } } },
     orderBy: [{ operationDate: "asc" }, { id: "asc" }],
   }) : [];
   const statementOutflows = statementTransactions.flatMap((transaction) => {
     const account = accountInfo.get(accountKey(transaction.bankAccountId, transaction.cashAccountId) ?? "");
-    return account ? [{ ...transaction, counterpartyId: transaction.counterpartyId!, organizationId: account.organizationId, currency: account.currency }] : [];
+    return account ? [{ ...transaction, counterpartyId: transaction.counterpartyId!, organizationId: account.organizationId, currency: account.currency, matchedPartId: transaction.matchedRequestPart?.id }] : [];
   });
   const { matches } = matchStatement(statementOutflows, statementRequests, { requireUniqueRequest: true });
   const statementBySlot = new Map(matches.map(({ slotKey, outflow }) => [slotKey, outflow.id]));

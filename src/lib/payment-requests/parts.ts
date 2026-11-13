@@ -91,12 +91,13 @@ export interface PartState {
   dueDate: Date;
   amount: MoneyInput;
   paidAt: Date | null;
+  statementTransactionId?: string | null;
 }
 
 /** Сводка по графику: ближайший неоплаченный срок, оплачено/осталось, всё ли оплачено. */
 export function scheduleSummary(parts: PartState[]) {
-  const unpaid = parts.filter((p) => !p.paidAt).sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
-  const paid = parts.filter((p) => p.paidAt);
+  const unpaid = parts.filter((p) => !p.paidAt && !p.statementTransactionId).sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+  const paid = parts.filter((p) => p.paidAt || p.statementTransactionId);
   const sum = (list: PartState[]) => list.reduce<Decimal>((s, p) => s.plus(toDecimal(p.amount)), new Decimal(0));
   return {
     total: parts.length,

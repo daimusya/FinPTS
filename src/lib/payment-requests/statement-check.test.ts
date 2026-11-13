@@ -37,6 +37,16 @@ describe("checkStatement", () => {
     expect(matchStatement([debit], [approved, alreadyPaid], { requireUniqueRequest: true }).matches).toEqual([]);
   });
 
+  it("reserves a manually matched debit and part for each other", () => {
+    const first = req("first", { slots: [{ key: "p1", amount: "15000", dueDate: d("2026-10-21"), paid: false, statementTransactionId: "manual" }] });
+    const second = req("second", { slots: [{ key: "p2", amount: "15000", dueDate: d("2026-10-21"), paid: false }] });
+    const manual = out("manual", { matchedPartId: "p1" });
+    const other = out("other");
+    expect(matchStatement([manual, other], [second, first], { requireUniqueRequest: true }).matches
+      .map(({ outflow, slotKey }) => [outflow.id, slotKey])).toEqual([["manual", "first:p1"], ["other", "second:p2"]]);
+    expect(matchStatement([manual], [second]).matches).toEqual([]);
+  });
+
   it("a paid, approved request explains its outflow", () => {
     expect(ids(checkStatement([out("t")], [req("r")]))).toEqual({ without: [], before: [], notMarked: [], ok: 1 });
   });

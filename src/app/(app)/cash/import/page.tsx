@@ -42,6 +42,7 @@ export default async function CashImportPage() {
             произвольного формата — с ручным сопоставлением колонок. Повторно загруженные строки автоматически пропускаются.
           </p>
         </div>
+        <Link href="/payment-requests/statement-check" className="btn btn-secondary">Сверка выписки с заявками</Link>
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>

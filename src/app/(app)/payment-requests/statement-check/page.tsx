@@ -5,10 +5,12 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { bankTransactionScopeWhere, getAccessScope, organizationScopeWhere, paymentRequestScopeWhere } from "@/lib/access-scope";
 import { singleParams } from "@/lib/query-params";
 import { parseDateParam } from "@/lib/date-param";
-import { formatMoneyIn } from "@/lib/currency";
+import { formatMoneyIn, normalizeCurrency } from "@/lib/currency";
+import { localDateKey } from "@/lib/payment-calendar";
 import { PAYMENT_REQUEST_STATUS_LABELS } from "@/lib/payment-requests/labels";
-import { STATEMENT_MATCH_DAYS, checkStatement, requestApprovedAt } from "@/lib/payment-requests/statement-check";
+import { STATEMENT_MATCH_DAYS, canMatchStatementSlot, checkStatement, requestApprovedAt } from "@/lib/payment-requests/statement-check";
 import { SubmitButton } from "@/components/submit-button";
+import { matchStatementPartAction } from "./actions";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const dateText = (d: Date) => d.toLocaleDateString("ru-RU", { timeZone: "UTC" });
@@ -20,7 +22,7 @@ const dateText = (d: Date) => d.toLocaleDateString("ru-RU", { timeZone: "UTC" })
 export default async function StatementCheckPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; org?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; org?: string; error?: string; notice?: string }>;
 }) {
   const session = await getSession();
   if (!session) return null;
@@ -32,7 +34,9 @@ export default async function StatementCheckPage({
     );
   }
   const params = singleParams(await searchParams);
-  const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
+  const todayKey = localDateKey();
+  const today = new Date(`${todayKey}T00:00:00.000Z`);
+  const canMatch = hasPermission(session, PERMISSIONS.CASH_MANAGE);
   const to = parseDateParam(params.to) ?? today;
   const from = parseDateParam(params.from) ?? new Date(to.getTime() - 30 * DAY_MS);
   const scope = await getAccessScope(session);
@@ -52,6 +56,7 @@ export default async function StatementCheckPage({
       cashAccount: { select: { organizationId: true, currency: true, name: true } },
       counterparty: { select: { shortName: true, fullName: true } },
       cashFlowArticle: { select: { name: true } },
+      matchedRequestPart: { select: { id: true, paymentRequestId: true } },
     },
     orderBy: { operationDate: "asc" },
   });
@@ -63,7 +68,8 @@ export default async function StatementCheckPage({
       ...t,
       counterpartyId: t.counterpartyId!,
       organizationId: (t.bankAccount ?? t.cashAccount)!.organizationId,
-      currency: (t.bankAccount ?? t.cashAccount)!.currency,
+      currency: normalizeCurrency((t.bankAccount ?? t.cashAccount)!.currency),
+      matchedPartId: t.matchedRequestPart?.id,
     }));
 
   const window = STATEMENT_MATCH_DAYS * DAY_MS;
@@ -83,7 +89,7 @@ export default async function StatementCheckPage({
           ],
         },
         include: {
-          parts: { select: { id: true, amount: true, dueDate: true, paidAt: true } },
+          parts: { select: { id: true, amount: true, dueDate: true, paidAt: true, sortOrder: true, statementTransactionId: true } },
           approvals: { where: { decision: "approved" }, select: { decision: true, round: true, decidedAt: true } },
           createdBy: { select: { fullName: true } },
         },
@@ -94,10 +100,12 @@ export default async function StatementCheckPage({
     approvedAt: requestApprovedAt(r.status, r.round, r.approvals),
     slots: [
       { key: "whole", amount: r.amount, dueDate: r.dueDate, paid: r.status === "PAID" },
-      ...r.parts.map((p) => ({ key: p.id, amount: p.amount, dueDate: p.dueDate, paid: r.status === "PAID" || p.paidAt !== null })),
+      ...r.parts.map((p) => ({ key: p.id, amount: p.amount, dueDate: p.dueDate, paid: r.status === "PAID" || p.paidAt !== null || p.statementTransactionId !== null, statementTransactionId: p.statementTransactionId })),
     ],
   }));
-  const result = checkStatement(outflows, requests);
+  const result = checkStatement(outflows, requests, { requireUniqueRequest: true });
+  const ambiguous = outflows.filter((outflow) => result.ambiguousOutflows.has(outflow.id));
+  const matchedManually = outflows.filter((outflow) => outflow.matchedRequestPart && requests.some((request) => request.id === outflow.matchedRequestPart!.paymentRequestId));
 
   const payee = (t: (typeof outflows)[number]) => t.counterparty?.shortName || t.counterparty?.fullName || "—";
   const account = (t: (typeof outflows)[number]) =>
@@ -179,11 +187,74 @@ export default async function StatementCheckPage({
         <SubmitButton className="btn btn-secondary">Показать</SubmitButton>
       </form>
 
+      {params.error ? <p className="form-error">{params.error}</p> : null}
+      {params.notice ? <p className="form-success">{params.notice}</p> : null}
+
       <p className="text-muted" style={{ marginBottom: 16 }}>
         Списаний за период: {transactions.length}. В порядке (по согласованной и отмеченной заявке): {result.inOrder}.
         {withoutPayee > 0 ? ` Без получателя в выписке: ${withoutPayee} — комиссии и т. п., не сверяются.` : ""} Переводы между своими
         счетами не учитываются.
       </p>
+
+      {ambiguous.length > 0 ? (
+        <div className="table-wrap" style={{ marginBottom: 24 }}>
+          <h2>Спорные списания · {ambiguous.length}</h2>
+          <table>
+            {head("Часть заявки")}
+            <tbody>
+              {ambiguous.map((outflow) => {
+                const options = requests.flatMap((request) => request.status === "APPROVED"
+                  ? request.parts.filter((part) => !part.paidAt && !part.statementTransactionId && canMatchStatementSlot(outflow, request, part))
+                    .map((part) => ({ request, part }))
+                  : []);
+                return (
+                  <tr key={outflow.id}>
+                    {operationCells(outflow)}
+                    <td>
+                      {canMatch && outflow.bankAccount && outflow.batchId && isoDay(outflow.operationDate) <= todayKey && options.length > 0 ? (
+                        <form action={matchStatementPartAction}>
+                          <input type="hidden" name="transactionId" value={outflow.id} />
+                          <input type="hidden" name="from" value={isoDay(from)} />
+                          <input type="hidden" name="to" value={isoDay(to)} />
+                          <input type="hidden" name="org" value={orgId ?? ""} />
+                          <select name="partId" aria-label="Часть заявки" defaultValue="" required>
+                            <option value="">Выберите часть заявки</option>
+                            {options.map(({ request, part }) => (
+                              <option key={part.id} value={part.id}>
+                                Заявка {formatMoneyIn(request.amount, request.currency)} от {dateText(request.createdAt)} · часть {part.sortOrder} · {dateText(part.dueDate)} · {request.createdBy.fullName} · {request.id.slice(-6)}
+                              </option>
+                            ))}
+                          </select>{" "}
+                          <SubmitButton className="btn btn-secondary btn-sm">Сопоставить</SubmitButton>
+                        </form>
+                      ) : "Требуется сверка"}
+                      {options.map(({ request, part }) => (
+                        <div key={part.id}><Link href={`/payment-requests/${request.id}`}>Заявка {request.id.slice(-6)} · часть {part.sortOrder}</Link></div>
+                      ))}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {matchedManually.length > 0 ? (
+        <div className="table-wrap" style={{ marginBottom: 24 }}>
+          <h2>Сопоставлено вручную · {matchedManually.length}</h2>
+          <table>
+            {head("Заявка")}
+            <tbody>
+              {matchedManually.map((outflow) => (
+                <tr key={outflow.id}>
+                  {operationCells(outflow)}
+                  <td><Link href={`/payment-requests/${outflow.matchedRequestPart!.paymentRequestId}`}>Открыть заявку</Link></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
 
       <h2>Без заявки · {result.withoutRequest.length}</h2>
       <p className="text-muted">Денег ушло, а заявки на этого получателя и эту сумму нет — проверьте, кто и на каком основании платил.</p>
@@ -230,7 +301,7 @@ export default async function StatementCheckPage({
 
       <h2>Оплачено, но не отмечено в заявке · {result.notMarked.length}</h2>
       <p className="text-muted">
-        По выписке заявка оплачена, а в системе всё ещё ждёт оплаты: отметьте её оплаченной, иначе она остаётся в платёжном календаре.
+        Списание найдено в выписке. Проверьте отметку об оплате в карточке заявки.
       </p>
       <div className="table-wrap">
         <table>
